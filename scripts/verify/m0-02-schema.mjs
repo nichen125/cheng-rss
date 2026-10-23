@@ -50,12 +50,13 @@ const tables = db.prepare(
 const migrations = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all();
 const integrity = db.prepare('PRAGMA integrity_check').get();
 
-// FTS5 可用性：插一条再查
+// FTS5 可用性：插一条再查（entry_fts_map 是 TEXT id → INTEGER rowid 的映射）
 let ftsOk = false, ftsErr = null;
 try {
-  db.prepare("INSERT INTO entries_fts (rowid, title, summary) VALUES (1, '芯片 产能', 'summary')").run();
+  const r = db.prepare("INSERT INTO entries_fts (title) VALUES (?)").run('芯片 产能');
   const hit = db.prepare("SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?").all('"芯片"');
   ftsOk = hit.length === 1;
+  db.prepare('DELETE FROM entries_fts WHERE rowid = ?').run(Number(r.lastInsertRowid));
 } catch (e) {
   ftsErr = e.message;
 }

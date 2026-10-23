@@ -313,12 +313,22 @@ CREATE TABLE chat_messages (
 );
 
 -- ── 全文检索（中文按 bigram 预切分，PLAN §7.3）───────────────
--- content='' 表示内容由程序维护，不做 external content 同步，
--- 避免 FTS 重建时需要回表。rowid 与 entries.rowid 无关，
--- 由写入方维护映射（见 0.7）。
+-- content='' 表示内容由程序维护（不做 external content 同步）。
+-- contentless_delete=1 是必须的：contentless 表默认不允许 DELETE，
+-- 而索引更新（改标题、删条目）只能 delete + insert，
+-- 没有这个选项会抛 "cannot DELETE from contentless fts5 table"。
+-- 需要 SQLite >= 3.43（Node 24 自带 3.50）。
 CREATE VIRTUAL TABLE entries_fts USING fts5(
   title,
-  summary,
   content='',
+  contentless_delete=1,
   tokenize='unicode61'
 );
+
+-- entry_id ↔ fts rowid 映射。
+-- 需要它是因为 entries.id 是 TEXT 主键，而 FTS5 只能按 INTEGER rowid 操作。
+CREATE TABLE entry_fts_map (
+  entry_id  TEXT PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
+  fts_rowid INTEGER NOT NULL UNIQUE
+);
+CREATE INDEX idx_fts_map_rowid ON entry_fts_map (fts_rowid);

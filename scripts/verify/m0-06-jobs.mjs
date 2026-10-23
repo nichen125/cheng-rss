@@ -207,6 +207,9 @@ if (basics) {
 // ── ⑤ 跨进程并发认领（必须真并发才测得出）──────────────────
 // 单进程同步调用下 BEGIN 与 BEGIN IMMEDIATE 行为一致，
 // 只有两个真实进程同时抢才能暴露"先读后写"的竞态。
+//
+// 注意：两个子进程不一定都能抢到 —— 先启动的可能一次拿完。
+// 因此断言的核心是"交集为 0"，而不是"两边都有"。
 const claimResults = await Promise.all([
   runProbe('claim-only', { AI_RSS_TAG: 'w-A' }),
   runProbe('claim-only', { AI_RSS_TAG: 'w-B' }),
@@ -215,9 +218,11 @@ const aIds = claimResults[0]?.ids ?? [];
 const bIds = claimResults[1]?.ids ?? [];
 const overlap = aIds.filter((id) => bIds.includes(id));
 
+check('两进程并发认领：至少一方抢到任务', () => {
+  return ok(aIds.length + bIds.length > 0, `A=${aIds.length} B=${bIds.length}`);
+});
 check('两进程并发认领无交集（BEGIN IMMEDIATE 原子性）', () => {
-  return ok(aIds.length > 0 && bIds.length > 0 && overlap.length === 0,
-    `A=${aIds.length} B=${bIds.length} 交集=${overlap.length}`);
+  return ok(overlap.length === 0, `A=${aIds.length} B=${bIds.length} 交集=${overlap.length}`);
 });
 check('两进程认领总数不超过队列（无重复派发）', () => {
   return ok(new Set([...aIds, ...bIds]).size === aIds.length + bIds.length,

@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    // Node 24 的 --experimental-strip-types 只能擦除类型，不转换语法。
+    // 开这个选项让 tsc 提前拦住 enum / namespace / 参数属性等
+    // 无法擦除的写法（PLAN §21 风险表）。
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+
+    // 允许 .ts 后缀导入（Node 的 strip-types 要求显式扩展名）
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/client"]
+}

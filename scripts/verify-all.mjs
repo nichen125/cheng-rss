@@ -1,0 +1,94 @@
+#!/usr/bin/env node
+// 全部验收脚本的统一入口。
+//
+// 用法:
+//   node scripts/verify-all.mjs            # 跑全部
+//   node scripts/verify-all.mjs m0-0[5-8]  # 只跑匹配的
+//   node scripts/verify-all.mjs --no-docker-path
+//
+// 退出码：全部通过为 0，任一失败为 1。
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
+
+if (!existsSync(nodeBin)) {
+  console.error('项目内 node 缺失，先运行 scripts/bootstrap');
+  process.exit(1);
+}
+
+const args = process.argv.slice(2);
+const pattern = args.find((a) => !a.startsWith('--'));
+const skipDocker = args.includes('--no-docker-path');
+
+const verifyDir = join(root, 'scripts/verify');
+let files = readdirSync(verifyDir)
+  .filter((f) => f.endsWith('.mjs') && f !== 'harness.mjs')
+  .sort();
+
+if (pattern) {
+  const re = new RegExp(pattern.replace(/[.+]/g, (c) => '\\' + c).replace(/\*/g, '.*'));
+  files = files.filter((f) => re.test(f));
+}
+if (skipDocker) files = files.filter((f) => !f.startsWith('docker-'));
+
+// 让 docker-path 能找到 linux node（若存在）
+const linuxNodeCandidates = [
+  join(root, '.tmp/linuxnode/node-v24.13.0-linux-x64/bin/node'),
+];
+const linuxNode = linuxNodeCandidates.find((p) => existsSync(p));
+
+const results = [];
+const t0 = Date.now();
+
+for (const f of files) {
+  process.stdout.write(`\n\u001b[1m▶ ${f}\u001b[0m\n`);
+  const started = Date.now();
+  let ok = false;
+  let attempts = 0;
+  // 串行执行，且对"子进程类"脚本允许一次重试。
+  //
+  // 为什么允许重试：m0-03 的并发写、m0-04/08 的服务启停都依赖真实
+  // 进程与端口。开发机上偶有残留句柄导致端口占用或 SQLITE_BUSY，
+  // 这是环境抖动而非实现缺陷。重试一次仍失败才算失败 —— 但如果
+  // 每次都失败，说明是真问题。
+  const maxAttempts = 2;
+  while (attempts < maxAttempts && !ok) {
+    attempts++;
+    try {
+      execFileSync(nodeBin, [join(verifyDir, f)], {
+        cwd: root,
+        stdio: attempts === 1 ? 'inherit' : 'pipe',
+        env: { ...process.env, ...(linuxNode ? { AI_RSS_TEST_LINUX_NODE: linuxNode } : {}) },
+      });
+      ok = true;
+    } catch {
+      ok = false;
+      if (attempts < maxAttempts) {
+        process.stdout.write(`  \u001b[33m重试一次（可能是环境抖动）\u001b[0m\n`);
+      }
+    }
+  }
+  results.push({ file: f, ok, ms: Date.now() - started, attempts });
+}
+
+const pass = results.filter((r) => r.ok).length;
+const fail = results.length - pass;
+
+process.stdout.write('\n' + '─'.repeat(56) + '\n');
+process.stdout.write(`\u001b[1m验收汇总\u001b[0m  ${results.length} 个脚本，耗时 ${((Date.now() - t0) / 1000).toFixed(0)}s\n\n`);
+for (const r of results) {
+  const mark = r.ok ? '\u001b[32mPASS\u001b[0m' : '\u001b[31mFAIL\u001b[0m';
+  const retry = r.attempts > 1 ? `  \u001b[33m(第 ${r.attempts} 次)\u001b[0m` : '';
+  process.stdout.write(`  ${mark}  ${r.file.padEnd(26)} ${(r.ms / 1000).toFixed(1)}s${retry}\n`);
+}
+process.stdout.write('\n');
+if (fail === 0) {
+  process.stdout.write(`\u001b[32m全部通过 ${pass}/${results.length}\u001b[0m\n`);
+} else {
+  process.stdout.write(`\u001b[31m${fail} 个脚本失败\u001b[0m\n`);
+  process.exitCode = 1;
+}

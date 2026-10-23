@@ -25,6 +25,18 @@ const nodeBin = process.execPath;
 const platform = process.platform;
 const arch = process.arch;
 
+// 允许用 --target 指定，但只能等于本机平台。
+// SEA 的注入底本必须是目标平台的 node 可执行体，跨平台构建需要一份
+// 目标平台的 node —— 这个脚本做不到，也不假装能做到。
+// CI 里造 Windows 产物时，由 workflow 先把 node.exe 下载到 vendor/，
+// 再用环境变量 AI_RSS_SEA_BASE 指过来。
+const wantTarget = (() => {
+  const i = process.argv.indexOf('--target');
+  return i >= 0 ? process.argv[i + 1] : null;
+})();
+
+const baseBin = process.env.AI_RSS_SEA_BASE || nodeBin;
+
 function fail(msg) {
   console.error(`\u001b[31m✗\u001b[0m ${msg}`);
   process.exit(1);
@@ -34,12 +46,28 @@ function fail(msg) {
 if (platform === 'darwin' && arch === 'x64') {
   fail('SEA 官方未测试 macOS x64。请用源码模式运行，或改用 arm64 机器构建。');
 }
-if (process.platform === 'linux' && existsSync('/etc/alpine-release')) {
+if (platform === 'linux' && existsSync('/etc/alpine-release')) {
   fail('Alpine (musl) 不受 SEA 支持。请用 Docker 的 debian 基础镜像构建。');
 }
 
-const targetName = `${platform}-${arch}`;
-const outName = platform === 'win32'
+if (wantTarget) {
+  const hostTarget = `${platform}-${arch}`;
+  // 目标与宿主不一致时，必须有外部提供的目标平台 node
+  if (wantTarget !== hostTarget && !process.env.AI_RSS_SEA_BASE) {
+    fail(
+      `不能从 ${hostTarget} 造 ${wantTarget} 的二进制。\n` +
+      `SEA 的注入底本必须是目标平台的 node 可执行体。\n` +
+      `要么在目标平台机器上构建，要么用 AI_RSS_SEA_BASE 指定对应的 node。`,
+    );
+  }
+  if (!existsSync(baseBin)) {
+    fail(`AI_RSS_SEA_BASE 指向的文件不存在: ${baseBin}`);
+  }
+}
+
+const targetName = wantTarget ?? `${platform}-${arch}`;
+// 产物名按目标平台决定，不是按宿主
+const outName = targetName.startsWith('win')
   ? `ai-rss-${targetName}.exe`
   : `ai-rss-${targetName}`;
 const outPath = join(dist, outName);
@@ -90,9 +118,22 @@ if (blobSize < 10_000) {
 
 // ── 5. 注入 ─────────────────────────────────────────────────
 console.log(`生成二进制 ${outName}`);
-rmSync(outPath, { force: true });
-copyFileSync(nodeBin, outPath);
-if (platform !== 'win32') chmodSync(outPath, 0o755);
+try {
+  rmSync(outPath, { force: true });
+} catch (e) {
+  if (e.code === 'EPERM' || e.code === 'EBUSY') {
+    fail(
+      `${outName} 正被占用，无法覆盖。\n` +
+      `你可能有正在运行的 ai-rss 进程（Windows 上尤其常见）。\n` +
+      `先停掉它：taskkill /F /IM ${outName}   （或关闭正在跑的服务）`,
+    );
+  }
+  throw e;
+}
+// 注入底本是目标平台的 node（默认就是本机的）
+copyFileSync(baseBin, outPath);
+// 只有非 Windows 目标才需要可执行位
+if (!targetName.startsWith('win')) chmodSync(outPath, 0o755);
 
 const postject = join(root, 'node_modules', '.bin', platform === 'win32' ? 'postject.cmd' : 'postject');
 const FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
@@ -117,12 +158,22 @@ if (!existsSync(outPath)) fail('二进制未生成');
 const size = statSync(outPath).size;
 console.log(`\n\u001b[32m✓\u001b[0m ${outName}  ${(size / 1024 / 1024).toFixed(0)} MB`);
 
-// ── 6. 冒烟：直接问版本 ─────────────────────────────────────
-try {
-  const out = execFileSync(outPath, ['version'], { encoding: 'utf8', timeout: 20000 });
-  console.log(out.trim().split('\n').map((l) => `  ${l}`).join('\n'));
-} catch (e) {
-  fail(`二进制无法运行:\n${e.stderr ?? e.message}`);
+// ── 6. 冒烟：只有目标平台 == 宿主平台才能直接运行 ───────────
+// 跨平台产出的二进制在本机跑不了（ELF 在 Windows 上会 ENOENT），
+// 这不是失败，而是需要到目标平台验证。
+const hostTarget = `${platform}-${arch}`;
+if (targetName !== hostTarget) {
+  console.log(
+    `\u001b[33m!\u001b[0m 跳过冒烟测试：产物是 ${targetName}，当前宿主是 ${hostTarget}。\n` +
+    `  请到 ${targetName} 机器上运行：./${outName} version`,
+  );
+} else {
+  try {
+    const out = execFileSync(outPath, ['version'], { encoding: 'utf8', timeout: 20000 });
+    console.log(out.trim().split('\n').map((l) => `  ${l}`).join('\n'));
+  } catch (e) {
+    fail(`二进制无法运行:\n${e.stderr ?? e.message}`);
+  }
 }
 
 rmSync(seaConfig, { force: true });

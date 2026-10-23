@@ -25,10 +25,13 @@ ENV TMPDIR=/app/.tmp TMP=/app/.tmp TEMP=/app/.tmp
 RUN mkdir -p /app/.tmp
 
 # 前端 → 服务端 bundle → zip → SEA
+# 前端 → 服务端 bundle → zip → SEA
+# 显式指定 --target linux-x64：镜像里必须是 linux 产物，
+# 不依赖构建机架构（buildx 可用 --platform linux/amd64 固定）。
 RUN node scripts/build-client.mjs \
  && node scripts/build-server.mjs --sea \
  && node scripts/pack-client-zip.mjs \
- && node scripts/build-sea.mjs
+ && node scripts/build-sea.mjs --target linux-x64
 
 # ── 运行 ────────────────────────────────────────────────────
 FROM debian:bookworm-slim

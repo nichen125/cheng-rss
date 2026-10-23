@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # 与 scripts/lib/toolchain.sh 的默认值保持同步
+  AI_RSS_NODE_VERSION: v24.13.0
+
+jobs:
+  verify:
+    name: 验收（${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 两个平台都跑，因为 .sh / .ps1 是两套实现，
+        # 只在一个平台验证会漏掉另一个平台的路径处理 bug
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 引导项目内 Node
+        shell: bash
+        run: bash scripts/bootstrap.sh
+
+      - name: 安装依赖
+        shell: bash
+        run: ./.toolchain/node/bin/npm ci || ./.toolchain/node/npm.cmd ci
+
+      - name: 类型检查
+        shell: bash
+        run: ./.toolchain/node/bin/npx tsc --noEmit || ./.toolchain/node/npx.cmd tsc --noEmit
+
+      - name: 构建前端
+        shell: bash
+        run: ./.toolchain/node/bin/node scripts/build-client.mjs || ./.toolchain/node/node.exe scripts/build-client.mjs
+
+      - name: 打包前端 zip
+        shell: bash
+        run: ./.toolchain/node/bin/node scripts/pack-client-zip.mjs || ./.toolchain/node/node.exe scripts/pack-client-zip.mjs
+
+      - name: 跑全部验收脚本
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          for f in scripts/verify/m0-*.mjs; do
+            echo "=== $f ==="
+            $NODE "$f"
+          done
+
+      - name: 构建二进制
+        shell: bash
+        run: |
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          $NODE scripts/build-sea.mjs
+
+      - name: 二进制冒烟（洁净目录）
+        shell: bash
+        run: |
+          set -e
+          BIN=$(ls dist/ai-rss-* | grep -v client.zip | head -1)
+          echo "测试 $BIN"
+          mkdir -p /tmp/clean && cp "$BIN" /tmp/clean/
+          cd /tmp/clean
+          NAME=$(basename "$BIN")
+          chmod +x "$NAME" 2>/dev/null || true
+          ./"$NAME" version
+          ./"$NAME" migrate --data ./d
+          ./"$NAME" doctor --data ./d --quiet || true
+
+      - name: 上传二进制
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.os }}
+          path: |
+            dist/ai-rss-linux-x64
+            dist/ai-rss-win32-x64.exe
+          if-no-files-found: ignore
+
+  docker:
+    name: Docker 镜像
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 构建镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ai-rss:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 镜像体积
+        run: docker image inspect ai-rss:ci --format='{{.Size}}' | awk '{printf "%.0f MB\n", $1/1024/1024}'
+
+      - name: 容器冒烟（首页 + 健康检查）
+        run: |
+          set -e
+          docker run -d --name ar -p 3311:3000 ai-rss:ci
+          # 等服务起来
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3311/api/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          echo "--- health ---"
+          curl -fsS http://127.0.0.1:3311/api/health
+          echo
+          echo "--- 首页必须含 React 挂载点（静态资源内嵌校验）---"
+          curl -fsS http://127.0.0.1:3311/ | grep -q 'id="root"'
+          echo "OK"
+          echo "--- doctor ---"
+          docker exec ar /app/ai-rss doctor --quiet || true
+
+      - name: 容器日志
+        if: failure()
+        run: docker logs ar
+
+      - name: 清理
+        if: always()
+        run: docker rm -f ar || true

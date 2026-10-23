@@ -129,20 +129,63 @@ GET  /api/auth/checkUserExist
 
 ### 验收机制
 
-每一步都有对应的验收脚本，只做断言不做修复：
+每一步都有对应的验收脚本，只做断言不做修复。**一键跑全部**：
 
 ```bash
-node scripts/verify/m0-01-toolchain.mjs    # 11 项
-node scripts/verify/m0-02-schema.mjs       # 13 项
-node scripts/verify/m0-03-db.mjs           # 13 项
-node scripts/verify/m0-04-server.mjs       # 18 项
-node scripts/verify/m0-05-auth.mjs         # 25 项
-node scripts/verify/m0-06-jobs.mjs         # 14 项
-node scripts/verify/m0-07-search.mjs       # 22 项
-node scripts/verify/m0-08-deploy.mjs       # 17 项
+node scripts/verify-all.mjs
 ```
 
+输出汇总：
+
+```
+验收汇总  9 个脚本，耗时 21s
+  PASS  docker-path.mjs            4.3s
+  PASS  m0-01-toolchain.mjs        1.3s
+  PASS  m0-02-schema.mjs           0.3s
+  ...
+全部通过 9/9
+```
+
+单独跑某一步：
+
+```bash
+node scripts/verify/m0-02-schema.mjs
+node scripts/verify/m0-07-search.mjs     # 含 10 万条性能红线
+```
+
+| 脚本 | 断言数 | 验什么 |
+|---|---|---|
+| `m0-01-toolchain` | 11 | 项目内 Node、npm 缓存位置、gitignore 真生效 |
+| `m0-02-schema` | 13 | 19 张表、迁移幂等、FTS 可用、关键列 |
+| `m0-03-db` | 13 | PRAGMA、1 万条写入、并发写、gzip 往返 |
+| `m0-04-server` | 20 | 子命令、health、401/404 契约、鉴权优先级 |
+| `m0-05-auth` | 25 | cookie 属性、`loginUserInfo` 返回 200+null、改密失效 |
+| `m0-06-jobs` | 14 | 认领原子性（跨进程）、幂等、退避、死信、僵死恢复 |
+| `m0-07-search` | 22 | bigram 切分、索引更新、10 万条四条性能红线 |
+| `m0-08-deploy` | 17 | 二进制内嵌资源、三路互换、插件端点 |
+| `docker-path` | 14 | Dockerfile 结构 + 真产出 linux ELF |
+
 **写新断言前先跑一次确认它会红** —— 永远绿的断言没有价值。
+
+### 跨平台构建
+
+SEA 的注入底本必须是目标平台的 node 可执行体。所以：
+
+```bash
+# 在 Windows 上造 Windows 产物（默认）
+node scripts/build-sea.mjs
+
+# 在 Windows 上造 Linux 产物：需要一份 linux 的 node
+AI_RSS_SEA_BASE=./vendor/node-linux-x64 \
+  node scripts/build-sea.mjs --target linux-x64
+
+# 不提供底本时会明确拒绝，而不是产出一个跑不起来的文件
+node scripts/build-sea.mjs --target linux-x64
+# ✗ 不能从 win32-x64 造 linux-x64 的二进制。
+```
+
+Docker 构建天然满足这一点（容器里跑的就是 linux node），所以 `Dockerfile` 里
+直接写 `--target linux-x64`。
 
 ---
 
@@ -165,9 +208,23 @@ node scripts/verify/m0-08-deploy.mjs       # 17 项
 
 - **SEA 不支持 Alpine（musl）**：Docker 用 `debian:bookworm-slim`
 - **不发布 macOS 二进制**：SEA 官方只测 arm64
-- **Docker 镜像未在本机验证**：当前开发环境没有 docker，Dockerfile 已提供但
-  需在有 docker 的机器上跑一遍
+- **Docker 镜像未在真机上构建过**：开发机没装 docker。Dockerfile 的每条指令已
+  本地逐条验证（`scripts/verify/docker-path.mjs`），并且**真的产出了能内嵌资源的
+  linux-x64 ELF**，但 `docker build` 本身没跑过。首次在有 docker 的机器上构建时
+  请留意：若失败，最可能的原因是 `package-lock.json` 与容器内 npm 版本差异。
 - M0 只做了读取链路，**订阅抓取与 AI 分析在 M1/M2**
+
+### Docker 验证到哪一步了
+
+| 环节 | 状态 |
+|---|---|
+| Dockerfile 语法与结构（多阶段、非 alpine、非 root、缓存挂载） | ✅ 脚本断言 |
+| 构建阶段的四条命令能跑通 | ✅ 本地实跑 |
+| 产出 linux-x64 ELF 且内嵌迁移 SQL | ✅ 实跑（`AI_RSS_SEA_BASE` 指 linux node） |
+| `docker build` 真的构建出镜像 | ❌ 未验证（无 docker） |
+| 容器内首页 200 + `/api/health` | ❌ 未验证（CI 里有这两步） |
+
+`.github/workflows/ci.yml` 的 `docker` job 会在有 docker 的 runner 上补上最后两项。
 
 ---
 

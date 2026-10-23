@@ -2186,16 +2186,34 @@ Docker 镜像 ~80MB、`data/` 预留 20GB、源码目录 ~400MB —— 三者互
 
 ### 22.8 步骤 0.8 三路构建
 
+**已完成**（`a042045` + 后续补强）：
+
 ```
-[ ] Vite 前端骨架 → scripts/pack-client-zip.mjs
-[ ] scripts/build-sea.mjs      # esbuild bundle + postject/--build-sea，linux-x64 / windows-x64
-[ ] sea-config.json 用 assets（不是 vfsArchive，见 §3.4）
-[ ] 运行时 getAsset() + fflate 解压 → 静态服务
-[ ] Dockerfile 多阶段（--platform linux/amd64，debian:bookworm-slim runtime）
-[ ] /api/page/save + /api/page/pageOperateResult（兼容层 A 起点的两个）
-[ ] scripts/verify/m0-08-deploy.mjs
-[ ] ai-rss doctor 输出完整自检（备份体积、正文占比、绝对路径）
+[✓] Vite 前端骨架 → scripts/pack-client-zip.mjs
+[✓] scripts/build-sea.mjs      # esbuild bundle + postject，支持 --target
+[✓] sea-config.json 用 assets（不是 vfsArchive，见 §3.4）
+[✓] 运行时 getAsset() + fflate 解压 → 静态服务
+[✓] Dockerfile 多阶段（debian:bookworm-slim runtime，非 root）
+[✓] scripts/verify/m0-08-deploy.mjs
+[✓] scripts/verify/docker-path.mjs     # Dockerfile 逐条本地验证
+[✓] ai-rss doctor 输出完整自检
+[ ] /api/page/save + /api/page/pageOperateResult（兼容层 A 起点，留给 M7）
 ```
+
+**实施中确认的两个事实**（写回文档，避免以后重新踩）：
+
+1. **SEA 的 main 必须打成 CJS**。用 ESM bundle 会直接报
+   `Cannot use import statement outside a module` —— SEA 用
+   `embedderRunCjs` 执行入口。CJS 下没有 `import.meta`，
+   需要 banner 注入 shim 或改用 `__dirname`。
+2. **跨平台产出必须有目标平台的 node 作为注入底本**。
+   `build-sea.mjs` 默认用 `process.execPath`，从 Windows 造 linux 产物
+   时会产出一个跑不起来的文件。已加 `--target` + `AI_RSS_SEA_BASE`：
+   缺底本时**明确拒绝**而不是静默产出错误产物。
+
+Docker 的验证边界：Dockerfile 结构、四条构建命令、linux ELF 产出
+（含内嵌 SQL）都已本地实测；`docker build` 与容器内冒烟未在本机跑过
+（无 docker），由 CI 的 `docker` job 补齐。
 
 ### 22.9 M0 总判据
 
@@ -2205,6 +2223,17 @@ Docker 镜像 ~80MB、`data/` 预留 20GB、源码目录 ~400MB —— 三者互
 2. **官方原版 Huntly 插件能连上并保存一个网页** —— 通过即说明 cookie session、端点形状、字段映射三个最容易错的地方同时对了。
 3. 10 万条假数据下，时间线 / 检索 / 未读数三条性能红线达标（§5.6）。
 4. **项目目录之外零写入** —— 在没装过 Node 的干净机器上，`git clone` + `bootstrap` + `build` 全程可用，`$HOME` 无新增（§4.5）。
+
+**当前达成情况**：
+
+| 判据 | 状态 | 证据 |
+|---|---|---|
+| ① 三路互换 | 源码 ↔ 二进制已验证；Docker 未验证 | `m0-08-deploy` 的「同一 data/ 可被源码模式接管」 |
+| ② 插件连接 | 后端契约已验证；**真实插件未亲测** | `m0-05-auth` 25 条契约断言 |
+| ③ 性能红线 | 已达标 | `m0-07-search` 四条红线 |
+| ④ 零写入 | 已验证 | `m0-01-toolchain` + `m0-08-deploy` |
+
+②的「真实插件保存网页」需要人工操作一次 Chrome + 官方插件，脚本无法替代。
 
 ### 22.10 M0 必须一起定的六件事（后补会返工）
 

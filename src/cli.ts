@@ -8,6 +8,9 @@ import {
   type RuntimeConfig,
 } from './server/config.ts';
 import { log, setLogLevel } from './server/logger.ts';
+import { JobRunner } from './server/jobs/runner.ts';
+import { buildHandlers } from './server/jobs/handlers.ts';
+import { ensureOwnerUser, countUsers, purgeExpiredSessions } from './server/auth/session.ts';
 
 const VERSION = readVersion();
 
@@ -279,16 +282,37 @@ async function cmdServe(args: Args): Promise<void> {
   writeDefaultConfigIfAbsent(cfg);
 
   const h = openDb({ dataDir: cfg.dataDir });
-
-  // 顺序很重要：先 migrate 再 assertSchemaCompatible。
-  // 反过来的话，全新库还没有 schema_migrations 表，断言会直接抛
-  // "no such table"，表现为服务起不来 —— 而这恰好是首次启动的常态。
   migrate(h.db);
-
   const compat = assertSchemaCompatible(h.db);
   if (!compat.ok) {
     h.close();
     throw new Error(compat.reason);
+  }
+
+  // 首次启动不自动建账号 —— 留给 /api/v1/auth/setup 由用户设定密码。
+  //
+  // 为什么不做"自动生成随机密码并打印"：那样用户必须从终端日志里
+  // 抄一串随机串才能进 UI，体验很差，且一旦日志被清掉就进不去了。
+  // 只提示一句"还没有账号，请先初始化"更直接。
+  const userCount = countUsers(h.db);
+  if (userCount === 0) {
+    log.warn('数据库中还没有任何用户');
+    process.stdout.write(
+      `\n\u001b[33m首次启动：还没有管理员账号\u001b[0m\n` +
+      `  在浏览器打开 http://${cfg.host}:${cfg.port} 完成初始化，\n` +
+      `  或调用 POST /api/v1/auth/setup 传入 { email, password }。\n\n`,
+    );
+  }
+  const purged = purgeExpiredSessions(h.db);
+  if (purged > 0) log.debug(`清理了 ${purged} 个过期会话`);
+
+  // job runner：默认与服务同进程（单进程部署最简单）。
+  // WORKER_INLINE=false 时改由独立的 `ai-rss worker` 进程跑。
+  const inlineWorker = process.env.WORKER_INLINE !== 'false';
+  let runner: JobRunner | null = null;
+  if (inlineWorker) {
+    runner = new JobRunner({ db: h.db, handlers: buildHandlers({ dataDir: cfg.dataDir, log: log.info }) });
+    runner.start();
   }
 
   const app = createApp({
@@ -303,6 +327,7 @@ async function cmdServe(args: Args): Promise<void> {
     log.info(`ai-rss ${VERSION} 已启动`, {
       url: `http://${cfg.host}:${info.port}`,
       data: cfg.dataDir,
+      worker: inlineWorker ? 'inline' : 'external',
     });
     // 给 verify 脚本一个可机读的就绪信号
     if (process.env.AI_RSS_PRINT_READY) {
@@ -310,8 +335,9 @@ async function cmdServe(args: Args): Promise<void> {
     }
   });
 
-  const shutdown = (sig: string) => {
+  const shutdown = async (sig: string) => {
     log.info(`收到 ${sig}，正在关闭`);
+    if (runner) await runner.stop();
     server.close(() => {
       h.close();
       process.exit(0);
@@ -319,12 +345,32 @@ async function cmdServe(args: Args): Promise<void> {
     // 兜底：5 秒内没关完就强退
     setTimeout(() => process.exit(1), 5000).unref();
   };
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 }
 
-async function cmdWorker(_args: Args): Promise<void> {
-  throw new Error('worker 子命令在 0.6 落地');
+async function cmdWorker(args: Args): Promise<void> {
+  const cfg = loadConfig({ dataDir: args.data });
+  setLogLevel(cfg.logLevel);
+  ensureDataDirs(cfg.dataDir);
+
+  const h = openDb({ dataDir: cfg.dataDir });
+  migrate(h.db);
+
+  const runner = new JobRunner({
+    db: h.db,
+    handlers: buildHandlers({ dataDir: cfg.dataDir, log: log.info }),
+  });
+  runner.start();
+  log.info('独立 worker 已启动');
+
+  const shutdown = async () => {
+    await runner.stop();
+    h.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => { void shutdown(); });
+  process.on('SIGTERM', () => { void shutdown(); });
 }
 
 async function cmdMcp(_args: Args): Promise<void> {

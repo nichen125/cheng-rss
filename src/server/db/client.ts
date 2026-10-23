@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { existsSync } from 'node:fs';
 import { drizzle } from 'drizzle-orm/node-sqlite';
 
 // 数据库访问层。
@@ -44,6 +45,16 @@ export interface DbHandle {
  */
 export function openDb(opts: OpenOptions): DbHandle {
   const path = `${opts.dataDir}/app.db`;
+
+  // 数据目录必须已存在。自动创建会让调用方（migrate/serve）与
+  // 只读命令（doctor）的行为不一致，因此在这里显式报错并给出指引。
+  // 正常路径由 ensureDataDirs() 负责创建。
+  if (!existsSync(opts.dataDir)) {
+    throw new Error(
+      `数据目录不存在: ${opts.dataDir}\n` +
+      `可先运行: ai-rss migrate --data ${opts.dataDir}`,
+    );
+  }
 
   const db = opts.readonly
     ? new DatabaseSync(path, { readOnly: true })

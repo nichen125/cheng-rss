@@ -8,7 +8,7 @@
 //
 // 退出码：全部通过为 0，任一失败为 1。
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,11 +35,37 @@ if (pattern) {
 }
 if (skipDocker) files = files.filter((f) => !f.startsWith('docker-'));
 
-// 让 docker-path 能找到 linux node（若存在）
-const linuxNodeCandidates = [
-  join(root, '.tmp/linuxnode/node-v24.13.0-linux-x64/bin/node'),
-];
-const linuxNode = linuxNodeCandidates.find((p) => existsSync(p));
+// 让 docker-path 能找到 linux node。
+//
+// 默认**不自动下载**：这份 node 约 25MB，实测本机网络要十几分钟，
+// 离线环境更会卡死。自动下载会让"跑一次验收"变得不可用。
+//
+// 策略：
+//   · 已有 .tmp/linuxnode 或 AI_RSS_TEST_LINUX_NODE → 跑产物验证
+//   · 没有 → docker-path 报 FAIL（"未执行"不等于"通过"），
+//     除非加 --allow-skip-docker-artifact 明确接受
+//   · 想完整验证：node scripts/fetch-linux-node.mjs 一次，之后走缓存
+const LINUX_NODE = join(root, '.tmp/linuxnode/node-v24.13.0-linux-x64/bin/node');
+const linuxNode = process.env.AI_RSS_TEST_LINUX_NODE
+  || (existsSync(LINUX_NODE) ? LINUX_NODE : null);
+
+const allowSkipArtifact = args.includes('--allow-skip-docker-artifact');
+if (!linuxNode && !skipDocker) {
+  if (allowSkipArtifact) {
+    // 用户明确接受跳过：把产物验证从列表里去掉，避免无意义的 FAIL
+    files = files.filter((f) => !f.startsWith('docker-'));
+    process.stdout.write(
+      '\u001b[33m!\u001b[0m 按 --allow-skip-docker-artifact 跳过 Docker 产物验证。\n' +
+      '  注意：这不等于构建路径已验证。要完整验证：node scripts/fetch-linux-node.mjs\n',
+    );
+  } else {
+    process.stdout.write(
+      '\u001b[33m!\u001b[0m 未找到 linux node，Docker 产物验证将报未执行（这是有意的）。\n' +
+      '  完整验证：node scripts/fetch-linux-node.mjs   （约 25MB，只需一次）\n' +
+      '  临时接受跳过：加 --allow-skip-docker-artifact\n',
+    );
+  }
+}
 
 const results = [];
 const t0 = Date.now();

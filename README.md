@@ -163,9 +163,28 @@ node scripts/verify/m0-07-search.mjs     # 含 10 万条性能红线
 | `m0-06-jobs` | 14 | 认领原子性（跨进程）、幂等、退避、死信、僵死恢复 |
 | `m0-07-search` | 22 | bigram 切分、索引更新、10 万条四条性能红线 |
 | `m0-08-deploy` | 17 | 二进制内嵌资源、三路互换、插件端点 |
-| `docker-path` | 14 | Dockerfile 结构 + 真产出 linux ELF |
+| `docker-path` | 12 | Dockerfile 结构 + 真产出 linux ELF |
 
 **写新断言前先跑一次确认它会红** —— 永远绿的断言没有价值。
+
+#### 关于 `docker-path` 的产物验证
+
+它需要一份 **linux 版 node** 作为 SEA 的注入底本（约 25MB），用来验证
+Dockerfile 里 `build-sea` 那一步真能产出能跑的 ELF。首次运行：
+
+```bash
+node scripts/fetch-linux-node.mjs      # 一次，之后走 .tmp/linuxnode 缓存
+node scripts/verify-all.mjs            # 这时 docker-path 是 12/12
+```
+
+**没有这份 node 时，`docker-path` 会报 FAIL 而不是假装通过** ——
+"没验证"和"验证通过"是两件事。离线环境可显式接受跳过：
+
+```bash
+node scripts/verify-all.mjs --allow-skip-docker-artifact
+```
+
+此时会明确提示"这不等于构建路径已验证"。
 
 ### 跨平台构建
 

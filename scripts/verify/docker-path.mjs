@@ -87,7 +87,13 @@ try {
 
   // 真正验证：用 linux node 当注入底本，在本机产出 linux ELF
   // 这正是 Dockerfile 里 build-sea 那一步做的事。
-  const linuxNode = process.env.AI_RSS_TEST_LINUX_NODE;
+  //
+  // 查找顺序：环境变量 → .tmp/linuxnode 缓存。
+  // 自己找一遍是有必要的：用户常直接跑单个脚本调试，
+  // 只靠 verify-all 传环境变量会让人误以为产物验证坏了。
+  const cachePath = join(root, '.tmp/linuxnode/node-v24.13.0-linux-x64/bin/node');
+  const linuxNode = process.env.AI_RSS_TEST_LINUX_NODE
+    || (existsSync(cachePath) ? cachePath : null);
   if (linuxNode && existsSync(linuxNode)) {
     const out = execFileSync(nodeBin, [join(root, 'scripts/build-sea.mjs'), '--target', 'linux-x64'], {
       cwd: root,
@@ -119,7 +125,20 @@ try {
     });
     void out;
   } else {
-    process.stdout.write('  \u001b[33mSKIP\u001b[0m  ELF 产出验证（未提供 AI_RSS_TEST_LINUX_NODE）\n');
+    // 不静默跳过：最核心的三条没验，必须让汇总能看出来。
+    // 只打一行 SKIP 却让汇总显示 "11/11 PASS" 是误导 ——
+    // 读者会以为 Docker 路径已被完整验证。
+    process.stdout.write(
+      '  \u001b[33mSKIP\u001b[0m  ELF 产出验证（未提供 AI_RSS_TEST_LINUX_NODE）\n' +
+      '        → 产物验证未执行，以下断言未计入\n' +
+      '          启用方式: AI_RSS_TEST_LINUX_NODE=/path/to/linux-node node scripts/verify/docker-path.mjs\n' +
+      '          （scripts/verify-all.mjs 会自动在 .tmp/linuxnode 下查找）\n',
+    );
+    check('ELF 产物验证已执行（不允许静默跳过）', () => {
+      return ok(false,
+        '核心验证被跳过：无法确认 Dockerfile 的 build-sea 那一步真能产出 linux ELF。' +
+        '当前只验证了 Dockerfile 结构，不等于构建路径可用。');
+    });
   }
 } finally {
   rmSync(tmp, { recursive: true, force: true });

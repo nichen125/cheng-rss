@@ -1,0 +1,60 @@
+# ── 环境：全部本地化，不进版本库 ────────────────────────────
+.toolchain/          # 项目内 Node 运行时（~104MB）
+.cache/              # npm / docker 缓存（~200MB）
+.npm-global/         # 万一用到 npm -g
+.tmp/                # 构建临时目录（TMPDIR 指向这里）
+
+# ── 依赖与构建产物 ──────────────────────────────────────────
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ── 运行数据：唯一需要备份的东西，但绝不进 git ──────────────
+data/
+!data/.gitkeep
+
+# ── 日志与本地调试 ──────────────────────────────────────────
+*.log
+logs/
+coverage/
+.nyc_output/
+
+# ── 数据库（含迁移产物 db 文件，但保留 .sql）─────────────────
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+!migrations/*.sql
+
+# ── 产物二进制 ──────────────────────────────────────────────
+*.sbit
+*.exe
+ai-rss-linux-x64
+ai-rss-windows-x64.exe
+ai-rss-darwin-*
+
+# ── 编辑器与系统 ────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ── 环境变量：可能有 API key ────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── 备份与导出产物 ──────────────────────────────────────────
+backups/
+export-*.tar.zst
+export-*.tar.gz
+
+# ── 测试夹具中的临时文件（HAR 本身要提交）───────────────────
+tests/fixtures/**/*.tmp
+tests/fixtures/**/scratch/**

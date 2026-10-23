@@ -1,0 +1,2368 @@
+# AI RSS 阅读分析器 —— 需求与实现方案
+
+> 一个自托管的在线 RSS 处理工具：阅读体验对齐 Huntly，并在此之上提供自动化的 AI 整理分析（分类分级、每日简报、跨篇聚合）。
+>
+> 支持二进制 / 源码 / Docker 三种部署，单个数据目录即可备份迁移。
+>
+> 版本 **v1.0**｜状态：需求已定稿，实现未开始｜22 章 / 38 个实施步骤
+
+---
+
+## 文档效力声明
+
+**这份文档是本项目的需求来源与验收标准。**
+
+它的效力**只作用于"做什么"，不作用于"每个细节怎么做"**。本文档是需求表，不可能穷举实现细节；凡是文档没有写到的地方，实现者可以自行决定并落地，只要不与已写明的需求冲突（判定方法见下）。
+
+两条边界先划清：
+
+| 文档管 | 文档不管 |
+|---|---|
+| 交付什么功能、不做什么 | 变量名、函数拆分、文件内部的模块划分 |
+| 表结构、检索方案、备份策略、API 形状 | 日志措辞、错误文案、注释风格 |
+| 性能红线、部署矩阵、验收判据 | 用了哪个小工具、代码里的具体算法写法 |
+| 界面要什么、不要什么 | 组件的内部实现、CSS 类名组织 |
+
+### 需求层 / 规格层 / 实现层
+
+三层权力不同，改之前先判断自己在哪一层：
+
+| 层 | 范围 | 谁能决定 | 改动后果 |
+|---|---|---|---|
+| **需求层** | §1.1 功能表、§1.2 约束与排除项 | **只有需求方**（A.1.1） | 升 v2.0，重估工期 |
+| **规格层** | §5~§17 写明的机制：表结构、检索、备份、AI 流水线、插件兼容、UI 原则、里程碑判据 | 实现者可调整，但**必须先改文档**再改代码 | v1.x，同步验收脚本 |
+| **实现层** | 文档未提及的一切 | **实现者自由决定** | 不需记录，不需确认 |
+
+**判断自己该不该自己决定的三个问题**（按顺序问，任何一个答"是"就得往上一层走）：
+
+1. **会改变用户看到的东西吗？** —— UI 布局、交互流程、返回给用户的文案 → 是则属规格层（可能是需求层）。
+2. **改起来贵吗？** —— 涉及历史数据格式、已发布 API 形状、数据库结构 → 是则属规格层，必须先写进文档，否则将来返工没人知道为什么这么设计。
+3. **和文档写明的某一条冲突吗？** —— 冲突则一律不许自行决定，先改文档。
+
+三个都答"否"，就直接做。典型例子：内部函数的拆分方式、某个 service 里的缓存策略、日志级别、错误码的命名、CSS 类怎么组织。这些写进文档只是噪音。
+
+**这套分层的目的是"该记的别丢"，不是"什么都要记"。** 过度记录会让实现变慢，且让文档变得没人愿意读 —— 一份 5000 行、一半是"我把函数从 A 拆成了 B"的文档，比一份简短的文档更不可靠。记的分界是：**将来有人会因为不知道这个而做错事**。
+
+### 缺口填补规则
+
+文档沉默处，允许实现者自行落地。但缺口填补要**留痕**：
+
+- **可逆成本低**（只影响本次实现）→ 不记录，直接做。
+- **可逆成本高但用户不可见**（如内部表索引怎么加、缓存失效策略）→ 记进**附录 B 实现决策记录**，一句话说明选了什么、为什么。
+- **会影响用户 / 影响未来兼容** → 不进附录，直接走规格层或需求层。
+
+附录 B 是给将来的人看的，不是审批流程。**它的作用是让"当时为什么这么选"不丢**，避免半年后有人推翻一个其实有理由的决定。
+
+
+### 三条验收判定规则
+
+一条需求算「完成」，必须同时满足：
+
+1. **规格达成** —— 本文档对应章节写的机制确实实现了（不是简化版、不是后续再补）。
+2. **脚本通过** —— §19 中对应的 `verify` 脚本从红转绿，且没有让其他项变红。
+3. **文档同步** —— 若实现过程中发现设计需调整，文档已同步更新。
+
+三条缺一条即视为未完成。
+
+第 3 条要理解对：它要求的是**规格层与文档一致**，不是"每个实现细节都要有文档依据"。具体到：
+
+| 情况 | 要不要同步文档 |
+|---|---|
+| 改了表结构、检索方式、API 形状、备份策略 | **要** —— 这些是规格，文档落后就不能当验收标准了 |
+| 发现文档写的方案不可行、换了做法 | **要** —— 且先改文档再改代码 |
+| 内部函数怎么拆、日志怎么写、用了哪个工具 | **不要** —— 属实现层，写进文档只是噪音 |
+
+换句话说：**文档必须能准确描述"系统长什么样"，但不必（也无法）描述"代码怎么写"**。前者是验收依据，后者是过程。
+
+### 「不做」也是需求
+
+§1.2 明确列出的排除项（X/Twitter 抓取、桌面端 Tauri、ARM 预编译产物、Java 生态）**同样是需求的一部分**。它们的作用是封住范围：没有这份排除清单，项目会在实现过程中被"顺便也做一个"逐步撑大。
+
+**但这不等于"文档没写的都不能做"**。排除项是**功能级别**的禁止（不提供 X 抓取），不是实现级别的限制（不由它决定能不能用某个库、能不能多写一个内部函数）。两者别混。
+
+---
+
+## 一、需求与约束
+
+### 1.1 功能需求
+
+| # | 需求 | 规格落点 | 实施步骤 | 验收脚本 |
+|---|---|---|---|---|
+| 1 | RSS 订阅、OPML 导入导出、全文提取 | §6、§7 | 1.1 / 1.2 / 1.3 | `m1-01` `m1-02` `m1-03` |
+| 2 | **RSSHub 订阅搜索**（关键词 / URL → 可订阅地址） | §10 | 1.6 | `m1-06` |
+| 3 | **自动 AI 整理**：分类分级 | §8 | 2.1 / 2.2 / 2.3 | `m2-01` `m2-02` `m2-03` |
+| 4 | **每日简报**（跨源聚合 + 多源冲突识别） | §9 | 3.1 / 3.2 / 3.3 / 3.4 | `m3-01`~`m3-04` |
+| 5 | **高亮**（划词标注，回流 AI） | §11 | M4 | `m4-*` |
+| 6 | **阅读历史**（Recently Read） | §7.4 | 1.5 | `m1-05` |
+| 7 | 检索与 RAG 问答 | §7 | 0.7 / M5 | `m0-07` `m5-*` |
+| 8 | **MCP 服务器** | §12 | M5 | `m5-*` |
+| 9 | **自动存档 / 备份 / 迁移** | §13 | M6 | `m6-*` |
+| 10 | **兼容 Huntly 浏览器插件** | §14 | 0.5 / 0.8 / M7 | `m0-05` `m0-08` `m7-*` |
+| 11 | **现代简洁 UI** | §15 | 1.5 / M8 | `m1-05` `m8-*` |
+| 12 | **GitHub Actions 打包 + Docker 镜像** | §16 | 0.8 | `m0-08` |
+
+### 1.2 技术约束
+
+| 约束 | 说明 | 验证方式 |
+|---|---|---|
+| 部署目标 | 本地（Windows）、Linux 服务器、x86 NAS | 0.8 三路互换启动 |
+| 部署方式 | 二进制、源码、Docker 三路并存 | 0.8 同一 `data/` 可互换 |
+| 架构 | **仅需 x64，不要求 ARM** | 发布矩阵只出两个产物（§3.2） |
+| 用户模型 | 单人使用，但预留多人（所有表带 `user_id`） | 0.5 `require-user.ts` 单点开关 |
+| 语言 | **不用 Java** | 全栈 TypeScript，无 JVM 依赖 |
+| 模型 | 走 API（OpenAI 兼容），之后会替换 | 2.1 换模型只改 baseURL + model |
+| 环境隔离 | 工具链、缓存、依赖、数据全在项目目录内 | 0.1 / 0.8 `$HOME` 零写入 |
+| **不做** | X/Twitter 抓取、桌面端（Tauri）、ARM 预编译、Java | 范围排除项，见下 |
+
+### 1.3 本表的修改权限
+
+**§1.1 与 §1.2 只有需求方（项目所有者）能加行。** 实现者可以提出建议，但不能自行写入表格 —— 一旦实现者能给自己派需求，这份文档作为验收标准的效力立刻消失。
+
+具体流程见 **A.1.1**，摘要：
+
+```
+实现中发现"应该还要有个 X"
+  → 写一份【需求提议】（做什么 / 归哪节 / 哪步实现 / 哪个脚本验收 / 影响几天）
+  → 需求方回「加」或「不加」
+  → 只有回了「加」，才动 §1.1 表格，同时升版本号到 v2.0
+```
+
+三种常见的越界，都不允许：
+
+- 「参考 Huntly 有这个，所以我们也得有」—— Huntly 是参考，不是需求。
+- 「这个功能很小，顺手就做了」—— **新增功能**无论大小都要确认（注意区分：新增功能 ≠ 实现细节，后者见 A.2.1 可自行决定）。
+- 「先做，做完再补进文档」—— 需求层不允许；规格层也不允许（那正是文档失效的开始）。
+
+**这条规则只约束需求层，不约束实现层。** 文档没写的内部实现细节、技术选型微调、代码组织方式，实现者自主决定即可，不必找需求方拍板 —— 否则这份文档会从"验收标准"变成"审批流程"，反而拖慢进度。
+
+
+---
+
+## 二、总体架构
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  浏览器 (React 19 / shadcn / Tailwind)                        │
+└────────────────────────┬─────────────────────────────────────┘
+                         │ REST + SSE
+┌────────────────────────▼─────────────────────────────────────┐
+│  单个 Node 进程（Hono + 内联 job runner）                     │
+│  ┌────────────┐ ┌──────────┐ ┌──────────┐ ┌───────────────┐  │
+│  │ 静态资源    │ │ REST API │ │ SSE 流式 │ │ Job Runner    │  │
+│  └────────────┘ └──────────┘ └──────────┘ └───────┬───────┘  │
+└───────────────────────────────────────────────────┼──────────┘
+                                                    │ 轮询认领
+                          ┌─────────────────────────▼─────────┐
+                          │  SQLite (data/app.db, WAL)         │
+                          │  · 业务表 + jobs 表                │
+                          │  · 向量以 BLOB 存 (Float32Array)   │
+                          └────────────────────────────────────┘
+                                                    │
+                          ┌─────────────────────────▼─────────┐
+                          │  OpenAI 兼容 API（可随时替换）      │
+                          └────────────────────────────────────┘
+```
+
+**设计原则**：一个可执行文件 + 一个 SQLite 文件。
+
+- 不引入外部数据库、消息队列、搜索引擎、独立向量库 —— 每少一个组件，NAS 上就少一个装不上的理由。
+- 所有状态集中在 `data/`，拷贝该目录即完成备份与迁移。
+- 单进程运行；需要隔离负载时可拆出 worker 进程（同一二进制）。
+
+---
+
+## 三、技术选型
+
+| 层 | 选择 | 说明 |
+|---|---|---|
+| 运行时 | **Node.js 24 LTS** | 内置 `node:sqlite`；SEA 单二进制；有 LTS 承诺 |
+| 语言 | TypeScript（`erasableSyntaxOnly`） | 只能用可擦除语法，不能用 `enum` / `namespace` |
+| 后端 | **Hono** + `@hono/node-server` | 纯 `Request → Response`，易打包 |
+| 前端 | **React 19 + Vite + Tailwind + shadcn/ui** | 构建为静态产物，内嵌二进制 |
+| 前端数据 | TanStack Query | 配合 REST，无需 RSC |
+| 数据库 | **`node:sqlite`** + WAL | 运行时内置，无需原生插件 |
+| ORM / 迁移 | **Drizzle `1.0.0-rc.x` + `drizzle-orm/node-sqlite`** | 迁移为纯 SQL，可内嵌（**`0.45.x` 无此驱动**，见 §3.4） |
+| 校验 | zod | API 入参与 AI 结构化输出共用 |
+| 抓取解析 | 全局 `fetch` + `@mozilla/readability` + `linkedom` | 无浏览器依赖 |
+| 打包 | **esbuild → SEA** | 单文件二进制；资源用 `fflate` 内存解压（§3.3） |
+| AI | OpenAI 兼容协议单一适配层 | 换模型只改 `baseURL` + `model` |
+| MCP | `@modelcontextprotocol/sdk` | — |
+| 认证 | 自建 session（cookie + SQLite） | 预留多人的单点开关 |
+| 测试 | `node --test`（内置） | 二进制 E2E 门禁 |
+
+**不引入**：Next.js、better-sqlite3、PostgreSQL、Redis、Elasticsearch / Meilisearch、Qdrant、Prisma、Playwright、Bun。
+
+### 3.1 关键选型依据
+
+**为什么不用 Next.js**：它依赖 RSC 运行时与 webpack chunk 布局，本质不是「一个入口文件的程序」，无法打成自包含单文件。改用 Hono + Vite SPA 后，整个应用可由一个 `src/index.ts` 入口产出。
+
+**为什么不用 `better-sqlite3`**：它是原生插件（`.node`）。SEA 无法直接 `require` 原生模块，必须「写入临时文件 + `process.dlopen()`」迂回。`node:sqlite` 是运行时内置绑定，不存在这个问题。
+
+**为什么选 OpenAI 兼容协议而非多 provider SDK**：DeepSeek、通义、Moonshot、智谱、OpenAI、Ollama、LM Studio、one-api 网关都支持 `/v1/chat/completions`。换模型 = 改两个字符串，符合「之后会替换」的诉求。
+
+### 3.2 SEA 的平台限制（影响发布矩阵）
+
+Node SEA 的官方测试覆盖范围有限，两条硬限制：
+
+| 限制 | 影响 |
+|---|---|
+| 不支持 Alpine（musl） | 不发布 `linux-x64-musl`；Docker 用 `debian:bookworm-slim` |
+| macOS 只测 arm64，x64 明确跳过 | 不发布 `darwin-*` |
+
+**发布矩阵（正是 SEA 稳定支持的两个平台）**：
+
+| 目标 | 产物 | 适用 |
+|---|---|---|
+| Linux x64 (glibc) | `ai-rss-linux-x64` | 云服务器、x86 NAS、Docker |
+| Windows x64 | `ai-rss-windows-x64.exe` | 桌面本机 |
+
+> 限制只存在于「是否提供预编译二进制」这一层，不影响「能否运行」。其他平台（M 系 Mac、ARM 设备、Alpine）用源码模式（`./scripts/dev.sh`）完全正常。
+
+### 3.3 `node:sqlite` 的稳定性缓冲
+
+`node:sqlite` 目前是 release candidate（稳定性 1.2），API 仍可能小幅调整。对策：
+
+1. **抽出 `Db` 适配接口**（约 40 行），所有数据库访问经它中转。将来换 `better-sqlite3` 只改一个文件。
+2. 把 Node 版本锁在 `24.x` 的 patch 范围内（`engines` + `.nvmrc`）。
+
+### 3.4 两个必须锁版本的坑（实测）
+
+**Drizzle 必须用 `1.0.0-rc.x`。** `drizzle-orm@0.45.4`（当前 `latest` 标签）**没有 `node-sqlite` 驱动** —— 它的 sqlite 驱动只有 `better-sqlite3` / `bun-sqlite` / `libsql` / `expo` / `op-sqlite`。`drizzle-orm/node-sqlite` 只存在于 `1.0.0-rc.5` 之后的版本。写进 `package.json` 时用精确版本，不要 `^0.45`：
+
+```jsonc
+"drizzle-orm": "1.0.0-rc.5",
+"drizzle-kit": "1.0.0-rc.5"
+```
+
+`drizzle(db)` 传实例时必须用 `drizzle({ client: db })` 形式，否则会新建一个 `:memory:` 连接 —— `drizzle(db)` 的位置参数只接受路径字符串，传实例会被静默忽略。
+
+**Node 24 的 SEA 没有虚拟文件系统。** `vfsArchive` / `useVfs` 是 Node 26 才有的能力，在 24.x 上写进 `sea-config.json` 会被**静默忽略**（blob 只有几百字节，`getAssetKeys()` 返回空数组）。静态资源只有一条可行路径：
+
+```js
+// 构建期：sea-config.json 用 assets 字段
+{ "assets": { "client.zip": "dist/client.zip" } }
+
+// 运行期：getAsset() 取出 zip → fflate 在内存里解压一次 → 提供静态服务
+import { getAsset } from "node:sea";
+import { unzipSync } from "fflate";
+const files = unzipSync(new Uint8Array(getAsset("client.zip")));   // 实测 1ms
+```
+
+代价是前端产物体积**全部驻留内存**（实测 73KB zip / 224KB 解压后，可忽略）。不要试图 `fs.readFile('/index.html')` —— 24.x 上不存在 SEA 的 VFS 路径，只会 `ENOENT`。
+
+---
+
+## 四、部署设计
+
+三种方式共用**同一份代码与同一个数据目录**，区别只在「怎么拿到可执行体」。
+
+```
+                    ┌─────────────────────────┐
+                    │  同一份 TypeScript 源码   │
+                    └───────────┬─────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        ▼                       ▼                       ▼
+┌───────────────┐      ┌───────────────┐      ┌───────────────┐
+│ A. 二进制部署  │      │ B. 源码部署    │      │ C. Docker     │
+│ 下载即运行     │      │ 项目内 Node    │      │ docker pull   │
+│ 无依赖         │      │ bootstrap.sh  │      │ docker run    │
+└───────┬───────┘      └───────┬───────┘      └───────┬───────┘
+        └───────────────────────┴───────────────────────┘
+                                │
+                    ┌───────────▼───────────┐
+                    │  ./data/app.db        │
+                    │  ./data/files/        │
+                    │  ./data/config.json   │
+                    │  ./data/backups/      │
+                    └───────────────────────┘
+```
+
+### 4.1 二进制部署（NAS / 服务器首选）
+
+```bash
+./ai-rss-linux-x64 serve --data ./data --port 3000
+```
+
+**五个必须做到的工程点**（缺一条「二进制部署」就是名义上的）：
+
+1. **前端静态资源内嵌**。Vite 产物打成 zip → `sea-config.json` 的 `"assets"` → 运行时 `getAsset()` + `fflate` 内存解压（§3.4）。**不能**假设发布时旁边有 `public/` 目录，也**不能**用 `vfsArchive`（Node 24 不支持）。
+2. **迁移 SQL 内嵌**。esbuild `--loader:.sql=text` 把迁移文件打成字符串，运行时按 `schema_migrations` 表逐条执行。
+3. **提示词模板内嵌**（`packages/prompts/*.md`，同样用 text loader）。
+4. **数据目录显式外置**：`--data`，默认 `./data`。二进制本身无状态。
+5. **子命令自检**：`ai-rss version` / `doctor` / `migrate` / `serve` / `worker` / `mcp` / `export` / `import`。
+
+### 4.2 源码部署（开发 / 定制）
+
+目标是**装完不污染系统**：Node 运行时、npm 缓存、依赖、构建产物、数据库全在项目目录内，删除目录即彻底卸载。
+
+```bash
+# Linux / macOS
+git clone … && cd ai-rss
+./scripts/bootstrap.sh          # 下载项目内 Node 24 + 初始化本地缓存（只需一次）
+./scripts/dev.sh                # = ./.toolchain/node/bin/node …（热重载）
+./scripts/build.sh              # 生产构建
+./scripts/build.sh --sea        # 产出本机平台二进制
+
+# Windows（PowerShell，无需 git-bash / WSL）
+git clone …; cd ai-rss
+.\scripts\bootstrap.ps1
+.\scripts\dev.ps1
+.\scripts\build.ps1 -Sea
+```
+
+**为什么每个脚本要有 `.sh` 与 `.ps1` 两份**：引导阶段系统里**还没有 Node**，所以第一步不可能写成 `.mjs`（没有解释器）。Windows 默认也没有 bash。两份薄脚本各自只做「下载 + 解压 + 转交」，逻辑本身放在共享的 `scripts/lib/toolchain.ps1` / `toolchain.sh` 里，避免双份维护。
+
+引导完成后按这个顺序找解释器，**永远优先项目内的**：
+
+```
+1. ./.toolchain/node/bin/node   （或 .toolchain\node\node.exe）
+2. 系统 PATH 里的 node（仅用于首次 bootstrap 之后的兜底提示，版本不符则报错退出）
+3. 都没有 → 打印下载指引，退出码 1
+```
+
+只依赖一个可执行体：项目内的 `.toolchain/node`。无需系统 Node、无需 C++ 工具链（不使用任何原生插件）。
+
+### 4.3 一切资源留在项目内（不污染系统环境）
+
+**约束**：除了「下载一次 Node 压缩包」这一步，任何环节都不写 `$HOME`、不写系统目录、不动全局 `npm`。
+
+```
+ai-rss/
+├─ .toolchain/                  # 项目内 Node 运行时（~104MB，git ignored）
+│  └─ node/                     #   node/npm/npx 全在这里，含完整 npm
+├─ .cache/npm/                  # npm 缓存（~200MB，git ignored）
+├─ .npm-global/                 # 万一需要 npm -g 时落这里（git ignored）
+├─ node_modules/                # 依赖（git ignored）
+├─ .tmp/                        # 构建临时目录（git ignored）
+├─ dist/                        # 构建产物（git ignored）
+├─ data/                        # 运行数据（git ignored，唯一需要备份的东西）
+└─ scripts/                     # bootstrap / dev / build（.sh + .ps1 各一份）
+```
+
+**落实手段**：
+
+| 资源 | 如何留在项目内 | 验证 |
+|---|---|---|
+| Node 运行时 | `scripts/bootstrap.{sh,ps1}` 下载官方压缩包解压到 `.toolchain/node/`；所有脚本用它启动 | `./.toolchain/node/bin/node -v` |
+| npm 缓存 | 项目 `.npmrc` 写 `cache=./.cache/npm` | `npm config get cache` 返回项目内路径 |
+| 全局安装 | **禁止用 `npm i -g`**；若必须，`npm_config_prefix=./.npm-global` 环境变量覆盖 | `ls .npm-global/bin` |
+| 依赖 | `node_modules/` 天然在项目内（`prefix` 不作用于本地安装） | — |
+| 构建工具 | `esbuild` / `postject` / `vite` 全部装为 **devDependencies**，用 `npx --no-install` 调 | `npm ci` 后即可构建 |
+| 临时文件 | 脚本内 `TMPDIR=./.tmp`、`TMP=./.tmp`、`TEMP=./.tmp` | 构建期间 `$HOME/.cache` 无新增 |
+| 数据 | `--data ./data`，默认值就是项目内 | `doctor` 打印绝对路径 |
+| Docker | 构建阶段缓存用 `--mount=type=cache`（§16.3），本地 buildx 用 `type=local,dest=.cache/docker` | — |
+
+**两个 npm 的限制（已实测）**：
+
+1. **`prefix` 不能写进项目 `.npmrc`** —— npm 会直接报错 `config prefix cannot be changed from project config`。只能用环境变量 `npm_config_prefix` 覆盖。
+2. **`cache` 可以写进项目 `.npmrc`**，实测生效。
+
+`.npmrc`：
+
+```ini
+# 全部落在项目内；注意 prefix 不能写这里，见上
+cache=./.cache/npm
+fund=false
+audit=false
+save-exact=true
+engine-strict=true
+```
+
+`bootstrap` 的核心逻辑（`.sh` 与 `.ps1` 只负责下载解压，其余共用 `scripts/lib/`）：
+
+```ts
+// 1. 按 nodejs.org/dist/index.json 校验版本存在，避免硬编码失效
+const VER = process.env.AI_RSS_NODE_VERSION ?? "v24.13.0";
+const plat = `${process.platform === "win32" ? "win" : "linux"}-x64`;
+const url = `https://nodejs.org/dist/${VER}/node-${VER}-${plat}.${process.platform === "win32" ? "zip" : "tar.xz"}`;
+
+// 2. 下载到 .tmp/ → 解压到 .toolchain/node/（解压后即删压缩包，省 36MB）
+// 3. 校验：运行 .toolchain/node/bin/node -v，必须等于 VER，否则删除重下
+// 4. 之后所有脚本都用这个 node 启动，不再读 PATH
+```
+
+**版本固定但可覆盖**：默认锁定 `v24.13.0`（与 CI 一致），需要试新 patch 时设 `AI_RSS_NODE_VERSION`。`engines` 只写 `>=24 <25`，次要版本升级不必改代码。
+
+**为什么不干脆用二进制部署**：源码部署的价值是「能改代码」。但它不该附带「必须先装好系统 Node」。把运行时也纳入项目目录后，两者可以并存 —— 同一份 `data/`，`./scripts/dev.sh` 与 `./ai-rss-linux-x64 serve` 随时互换。
+
+**代价**：项目目录多约 300MB（Node 104MB + npm 缓存 200MB）。这些都在 `.gitignore` 里，删项目即清空，不残留。
+
+### 4.4 Docker 部署
+
+```yaml
+services:
+  ai-rss:
+    image: ghcr.io/you/ai-rss:latest
+    ports: ["3000:3000"]
+    environment:
+      TZ: Asia/Shanghai
+      AI_BASE_URL: https://api.deepseek.com/v1
+      AI_API_KEY: ${AI_API_KEY}
+    volumes: ["./data:/app/data"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/ai-rss", "doctor", "--quiet"]
+      interval: 60s
+```
+
+镜像用编译后的二进制做 runtime 层，不含 Node：
+`node:24-bookworm-slim`（构建）→ esbuild + SEA → `debian:bookworm-slim`（运行时，仅 ca-certificates + tzdata）。约 **80MB**。
+
+**本地构建时缓存也留在项目内**：
+
+```bash
+# 不用 buildx 的 gha 缓存（那是 CI 专用）；本地用目录缓存
+docker buildx build \
+  --cache-from type=local,src=.cache/docker \
+  --cache-to   type=local,dest=.cache/docker,mode=max \
+  --platform linux/amd64 -t ai-rss:local .
+```
+
+`.cache/docker` 在 `.gitignore` 内。这样反复构建不重跑 `npm ci`，且缓存不落在 `~/.docker` 的共享区之外（基础镜像层仍由 Docker daemon 管理，这部分无法项目内化，属 Docker 本身机制）。
+
+### 4.5 三路部署的一致性保证
+
+| 保证 | 做法 |
+|---|---|
+| 代码同源 | 三条路径都由 `src/index.ts` 单一入口 |
+| 行为同源 | 配置全部走「环境变量 + `data/config.json` + UI」，没有只在某条路径存在的开关 |
+| 数据同源 | 只有 `data/app.db` + `data/files/`，无外部依赖 |
+| 迁移同源 | 迁移 SQL 内嵌；源码与 Docker 用同一份文件 |
+| 测试 | CI 对**产物二进制**跑全套集成测试，不只对源码跑 |
+| **卸载同源** | 删除项目目录即卸载干净；三路都不向系统写任何东西（检查点见下表） |
+
+**「不留残留」的三个验证点**（CI 也跑）：
+
+```bash
+# 1. 构建全程 $HOME 无新增文件
+before=$(find "$HOME" -newer /tmp/marker 2>/dev/null | wc -l)   # 先 touch /tmp/marker
+./scripts/build.sh
+after=$(find "$HOME" -newer /tmp/marker 2>/dev/null | wc -l)
+[ "$before" = "$after" ] || echo "有文件写到 HOME 之外"
+
+# 2. 所有路径都在项目根内
+./ai-rss doctor --json | jq -r '.paths[]' | grep -v "^$PWD" && echo "存在项目外路径"
+
+# 3. 删除项目目录后无残留
+rm -rf /tmp/ai-rss-copy && cp -r . /tmp/ai-rss-copy && rm -rf /tmp/ai-rss-copy && echo OK
+```
+
+---
+
+## 五、资源占用与性能
+
+自托管场景的硬约束是「能在最小规格的 NAS 上长期跑」。以下全部是实测值（Node 24.13 / Windows x64 / SQLite 内置），不是估算。
+
+### 5.1 内存
+
+| 状态 | RSS |
+|---|---|
+| 进程刚启动 | 44 MB |
+| + Hono 监听 | 50 MB |
+| + SQLite 打开（含 16MB 页缓存） | 51 MB |
+| + Readability 预热 | 67 MB |
+| + 连续提取 60 篇后稳态 | 81 MB |
+
+**稳态目标：120~200 MB RSS**（含前端资源、向量缓存、连接池）。`linkedom` 的 DOM 对象在每次提取后即丢弃，不累积（实测 20 次连续提取 heap 增长为 0）。
+
+**内存闸门**：
+- `--max-old-space-size=384` 写进启动脚本与 Dockerfile，节点跑飞时快速失败而非拖垮 NAS。
+- 提取并发上限 4（实测 4 路并发 40 篇耗时 49ms，再高无收益且吃内存）。
+- 向量不常驻：只在单次查询里从 BLOB 读出候选集，用完即弃。
+
+### 5.2 CPU
+
+| 操作 | 实测 |
+|---|---|
+| Readability 提取（60 段正文） | 1.5 ms/篇 |
+| 4 路并发提取 | 等效 1.2 ms/篇 |
+| 余弦相似度 5000 × 1536 维 | 14 ms |
+| 余弦相似度 20000 × 1536 维 | 55 ms |
+| FTS5 关键词查询 | 0.01~0.1 ms |
+| 时间线 / 阅读历史首页 | 0.03~0.08 ms |
+
+CPU 几乎全部花在**等待 AI 响应**上，本地计算占比可忽略。单核树莓派级别也能跑；真正的瓶颈是网络与模型延迟。
+
+**NAS 上要关掉的**：`cluster` 与 `digest` 的长上下文调用若与提取抢 CPU，用 `jobs` 表的 `priority` 把交互路径（L0~L4）置于 `cluster`/`digest` 之前 —— 已由 `ORDER BY priority DESC, id` 保证。
+
+### 5.3 磁盘（最重要的一节）
+
+10 万条（50 源 × 约 2000 条/源，跑满约一年）实测：
+
+| 表 / 索引 | 体积 | 占比 |
+|---|---|---|
+| `entry_contents` | **2090 MB** | **84%** |
+| `embeddings`（2.5 万条 × 1536 维） | 205 MB | 8% |
+| `entry_analysis` | 103 MB | 4% |
+| `entries` + 全部索引 | 68 MB | 3% |
+| `entries_fts` | 78 MB | 3% |
+| **合计** | **2.5 GB** | |
+
+体积几乎全部由正文决定，所以在 §13.3 用三条措施（gzip 2.6×、`raw_html` 30 天、`noise` 不存正文）压到 **0.8~1.0 GB / 10 万条**。**做这三条之前不要上线** —— 否则一年的库会到 2.5GB，NAS 备份开始痛苦。
+
+每日增量与年增量（500 篇/日，措施生效后）：
+
+```
+正文 7 MB/日 + 分析卡片 0.5 MB/日 + 向量(若全量) 3 MB/日  ≈ 10 MB/日 ≈ 3.6 GB/年
+```
+
+向量只对 `worth` 及以上做（`noise`/`normal` 不 embed），可省约 60%。
+
+### 5.4 启动与首屏
+
+| 指标 | 目标 | 措施 |
+|---|---|---|
+| 进程冷启动到可服务 | < 400 ms | 迁移内嵌、不扫全库、索引已在 |
+| 前端首屏 JS | < 250 KB（gzip 70 KB） | Vite 分包，路由级 lazy |
+| 前端 zip（内嵌进二进制） | 73 KB | 实测 React 19 空壳 + 40 条列表 |
+| 服务端 bundle（minify） | 945 KB | esbuild，`--external:node:*` |
+| 二进制总体积 | 90 MB（node）+ 1 MB | 无原生依赖 |
+
+### 5.5 索引清单与代价
+
+每条索引都在写入时付费，只保留被真实查询用到的：
+
+| 索引 | 用途 | 体积 |
+|---|---|---|
+| `idx_entries_timeline` | 收件箱时间线 | 2 MB |
+| `idx_entries_unread` | 未读角标 `COUNT(*)` | 1 MB |
+| `idx_entries_lastread` | 阅读历史 | 2 MB |
+| `idx_entries_urlnorm` | 去重 | 3 MB |
+| `idx_entries_hash` | 内容指纹去重 | 2 MB |
+| `idx_entries_stage` | 流水线扫待处理 | <1 MB |
+| `idx_analysis_tier` | 分级筛选 | 3 MB |
+| `entries_fts` | 全文检索 | 78 MB |
+
+**未读数必须走部分索引**：实测 `SELECT COUNT(*) WHERE is_read=0` 无索引时 **195 ms**（10 万条），加 `WHERE is_read = 0` 的部分索引后 **0.9 ms**。侧栏角标若每页都算，无索引会让整个 UI 明显发涩。
+
+### 5.6 三条性能红线（CI 断言）
+
+数值超标即 CI 失败，避免后续改动悄悄劣化：
+
+| 断言 | 阈值 |
+|---|---|
+| 10 万条库上时间线查询 | < 5 ms |
+| 10 万条库上关键词检索 | < 5 ms |
+| 10 万条库上未读数 COUNT | < 3 ms |
+
+---
+
+## 六、数据模型
+
+### 6.1 基础约定
+
+```ts
+// src/server/db/client.ts
+import { DatabaseSync } from "node:sqlite";
+import { drizzle } from "drizzle-orm/node-sqlite";
+
+const db = new DatabaseSync(`${dataDir}/app.db`);
+db.exec("PRAGMA journal_mode = WAL;");
+db.exec("PRAGMA synchronous = NORMAL;");
+db.exec("PRAGMA foreign_keys = ON;");
+db.exec("PRAGMA busy_timeout = 5000;");
+db.exec("PRAGMA cache_size = -16000;");      // 16MB 页缓存
+db.exec("PRAGMA mmap_size = 268435456;");    // 256MB 内存映射（实测全表扫描 353ms → 184ms）
+
+export const orm = drizzle({ client: db, schema });   // 必须传 { client }，不能 drizzle(db)
+```
+
+**类型映射**：SQLite 无原生 `timestamptz` / `boolean`，统一用 `integer`（epoch ms / 0\|1），在 Drizzle 层用 `mode: "timestamp_ms"` / `mode: "boolean"` 映射。JSON 字段用 `text({ mode: "json" })`。向量用 `blob`（`Float32Array`）。
+
+### 6.2 表结构
+
+```sql
+-- ── 用户与设置 ────────────────────────────────────────────────
+CREATE TABLE users (
+  id          TEXT PRIMARY KEY,          -- ulid
+  email       TEXT UNIQUE,
+  name        TEXT,
+  role        TEXT NOT NULL DEFAULT 'owner',
+  created_at  INTEGER NOT NULL
+);
+
+CREATE TABLE settings (
+  user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  ai_config     TEXT NOT NULL DEFAULT '{}',   -- provider/baseURL/models/budget
+  fetch_config  TEXT NOT NULL DEFAULT '{}',
+  digest_config TEXT NOT NULL DEFAULT '{}',
+  rsshub_config TEXT NOT NULL DEFAULT '{}',   -- baseUrl/accessKey
+  ui_config     TEXT NOT NULL DEFAULT '{}'
+);
+
+-- ── 分类法（受控：AI 只能选不能造）────────────────────────────
+CREATE TABLE categories (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  parent_id  TEXT REFERENCES categories(id) ON DELETE CASCADE,
+  slug       TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  hint       TEXT,      -- 给 LLM 的判定说明，显著影响一致率
+  keywords   TEXT,      -- JSON string[]
+  sort       INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (user_id, slug)
+);
+
+-- ── 订阅源 ────────────────────────────────────────────────────
+CREATE TABLE folders (
+  id      TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name    TEXT NOT NULL,
+  sort    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE feeds (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  folder_id        TEXT REFERENCES folders(id) ON DELETE SET NULL,
+  url              TEXT NOT NULL,
+  site_url         TEXT,
+  title            TEXT,
+  icon_url         TEXT,
+  fetch_interval   INTEGER NOT NULL DEFAULT 1800,
+  last_fetched_at  INTEGER,
+  next_fetch_at    INTEGER,
+  etag             TEXT,                 -- 条件请求
+  last_modified    TEXT,
+  error_count      INTEGER NOT NULL DEFAULT 0,
+  status           TEXT NOT NULL DEFAULT 'active',   -- active|paused|broken
+  analysis_profile TEXT NOT NULL DEFAULT 'standard', -- full|standard|headline
+  source_kind      TEXT NOT NULL DEFAULT 'rss',      -- rss|rsshub|opml
+  UNIQUE (user_id, url)
+);
+
+-- ── 条目（核心表）─────────────────────────────────────────────
+CREATE TABLE entries (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  feed_id       TEXT REFERENCES feeds(id) ON DELETE CASCADE,  -- 可空：网页捕获无 feed
+  guid          TEXT NOT NULL,
+  url           TEXT NOT NULL,
+  url_norm      TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  author        TEXT,
+  published_at  INTEGER NOT NULL,
+  fetched_at    INTEGER NOT NULL,
+
+  excerpt       TEXT,
+  content_hash  TEXT,
+  word_count    INTEGER,
+
+  -- 处理状态机
+  stage         TEXT NOT NULL DEFAULT 'pending',
+  stage_error   TEXT,
+  retry_count   INTEGER NOT NULL DEFAULT 0,
+
+  -- 状态位
+  is_read       INTEGER NOT NULL DEFAULT 0,
+  is_starred    INTEGER NOT NULL DEFAULT 0,
+  is_hidden     INTEGER NOT NULL DEFAULT 0,
+  duplicate_of  TEXT REFERENCES entries(id) ON DELETE SET NULL,
+
+  -- Huntly 插件兼容
+  source_type        TEXT NOT NULL DEFAULT 'rss',   -- rss|web|capture
+  archive_status     INTEGER NOT NULL DEFAULT 0,
+  read_later         INTEGER NOT NULL DEFAULT 0,
+  library_save_status INTEGER NOT NULL DEFAULT 0,
+  page_json          TEXT,        -- 对应 pageJsonProperties
+  favicon_url        TEXT,
+  site_name          TEXT,
+  thumbnail_url      TEXT,
+
+  -- 阅读历史
+  first_read_at  INTEGER,
+  last_read_at   INTEGER,
+  read_count     INTEGER NOT NULL DEFAULT 0,
+  read_progress  REAL,
+
+  -- 冗余计数
+  highlight_count INTEGER NOT NULL DEFAULT 0,
+
+  UNIQUE (feed_id, guid)
+);
+CREATE INDEX idx_entries_timeline ON entries (user_id, published_at DESC);
+CREATE INDEX idx_entries_stage    ON entries (user_id, stage) WHERE stage <> 'done';
+CREATE INDEX idx_entries_unread   ON entries (user_id, published_at DESC) WHERE is_read = 0;
+CREATE INDEX idx_entries_urlnorm  ON entries (user_id, url_norm);
+CREATE INDEX idx_entries_lastread ON entries (user_id, last_read_at DESC) WHERE last_read_at IS NOT NULL;
+CREATE INDEX idx_entries_hash     ON entries (content_hash);
+
+-- 全文检索：中文按 bigram 预切分后进 FTS5（不要用 trigram，见 §7.3）
+CREATE VIRTUAL TABLE entries_fts USING fts5(
+  title, summary,
+  content='',                -- 内容由程序维护，避免与 entries 双写
+  tokenize='unicode61'
+);
+
+CREATE TABLE entry_contents (
+  entry_id     TEXT PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
+  html         BLOB,      -- 清洗后 HTML，gzip 后存（实测压缩比 2.6×）
+  markdown     BLOB,      -- 供 LLM 与导出，gzip 后存
+  raw_html     BLOB,      -- 原始 HTML，仅保留 30 天（§13.3）
+  extracted_by TEXT       -- feed|readability|defuddle|manual
+);
+
+-- ── AI 单篇分析 ──────────────────────────────────────────────
+CREATE TABLE entry_analysis (
+  entry_id       TEXT PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
+  summary        TEXT NOT NULL,
+  key_points     TEXT NOT NULL,       -- JSON string[]
+  category_id    TEXT REFERENCES categories(id) ON DELETE SET NULL,
+  topics         TEXT NOT NULL,       -- JSON string[]
+  entities       TEXT NOT NULL,       -- JSON {people,orgs,products,tech}
+  importance     INTEGER NOT NULL,    -- 0~100
+  tier           TEXT NOT NULL,       -- must_read|worth|normal|noise
+  novelty        INTEGER,
+  sentiment      TEXT,
+  reading_time   INTEGER,
+  lang           TEXT,
+  model          TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  in_tokens      INTEGER, out_tokens INTEGER, cost_usd REAL,
+  created_at     INTEGER NOT NULL
+);
+CREATE INDEX idx_analysis_tier ON entry_analysis (tier, created_at DESC);
+
+-- ── 向量（BLOB，无扩展依赖）──────────────────────────────────
+CREATE TABLE embeddings (
+  entry_id   TEXT PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
+  model      TEXT NOT NULL,
+  dim        INTEGER NOT NULL,
+  vec        BLOB NOT NULL,          -- Float32Array，dim*4 字节
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX idx_emb_model ON embeddings (model);
+
+-- ── 跨篇聚合：事件簇 ─────────────────────────────────────────
+CREATE TABLE clusters (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL,        -- event|topic
+  title        TEXT NOT NULL,
+  summary      TEXT,
+  key_points   TEXT,                 -- JSON
+  consensus    TEXT,                 -- JSON: 多源一致的事实
+  conflicts    TEXT,                 -- JSON: [{claim, sources[]}]
+  centroid     BLOB,
+  entry_count  INTEGER NOT NULL DEFAULT 0,
+  source_count INTEGER NOT NULL DEFAULT 0,
+  heat         INTEGER,              -- 条目数 × 均值重要度 × 时间衰减
+  window_start INTEGER, window_end INTEGER,
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX idx_clusters_window ON clusters (user_id, window_end DESC);
+
+CREATE TABLE cluster_entries (
+  cluster_id TEXT NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
+  entry_id   TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  similarity REAL,
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (cluster_id, entry_id)
+);
+
+-- ── 高亮 ─────────────────────────────────────────────────────
+CREATE TABLE highlights (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  entry_id     TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  quote_exact  TEXT NOT NULL,
+  quote_prefix TEXT, quote_suffix TEXT,
+  pos_start    INTEGER, pos_end INTEGER,
+  range_json   TEXT,
+  color        TEXT,
+  note         TEXT,
+  ai_insight   TEXT,
+  is_orphaned  INTEGER NOT NULL DEFAULT 0,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL
+);
+CREATE INDEX idx_hl_entry   ON highlights (user_id, entry_id);
+CREATE INDEX idx_hl_created ON highlights (user_id, created_at DESC);
+
+-- ── 简报 ─────────────────────────────────────────────────────
+CREATE TABLE digests (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL,        -- daily|weekly|topic|manual
+  title        TEXT NOT NULL,
+  intro        TEXT,
+  body_md      TEXT NOT NULL,
+  period_start INTEGER, period_end INTEGER,
+  entry_count  INTEGER, cluster_count INTEGER,
+  model        TEXT, cost_usd REAL,
+  delivered_at INTEGER,
+  created_at   INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX uq_digest_period ON digests (user_id, kind, period_start);
+
+-- ── 任务队列 ─────────────────────────────────────────────────
+CREATE TABLE jobs (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind         TEXT NOT NULL,        -- fetch_feed|extract|analyze|embed|cluster|digest
+  dedupe_key   TEXT,
+  payload      TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'pending',  -- pending|running|done|failed|dead
+  priority     INTEGER NOT NULL DEFAULT 0,
+  run_after    INTEGER NOT NULL DEFAULT 0,
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  locked_by    TEXT, locked_at INTEGER,
+  last_error   TEXT,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL
+);
+CREATE INDEX idx_jobs_pick ON jobs (status, run_after, priority DESC, id);
+CREATE UNIQUE INDEX uq_jobs_dedupe ON jobs (dedupe_key)
+  WHERE dedupe_key IS NOT NULL AND status IN ('pending','running');
+
+-- ── 成本审计 ─────────────────────────────────────────────────
+CREATE TABLE ai_usage (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT NOT NULL,
+  purpose    TEXT NOT NULL,   -- analyze|embed|cluster|digest|chat|insight
+  model      TEXT NOT NULL,
+  in_tokens  INTEGER, out_tokens INTEGER,
+  cost_usd   REAL, latency_ms INTEGER,
+  ok         INTEGER, error TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX idx_usage_day ON ai_usage (user_id, created_at DESC);
+
+-- ── RSSHub 路由缓存 ──────────────────────────────────────────
+CREATE TABLE rsshub_cache (
+  key        TEXT PRIMARY KEY,     -- 'namespaces' | 'radar'
+  payload    TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL
+);
+
+-- ── 备份记录（GFS 保留策略依赖）──────────────────────────────
+CREATE TABLE backup_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind       TEXT NOT NULL,        -- daily|weekly|monthly|manual|export
+  path       TEXT NOT NULL,
+  size_bytes INTEGER,
+  schema_ver INTEGER NOT NULL,
+  ok         INTEGER NOT NULL,
+  error      TEXT,
+  created_at INTEGER NOT NULL
+);
+
+-- ── RAG 会话 ─────────────────────────────────────────────────
+CREATE TABLE chat_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT, created_at INTEGER NOT NULL
+);
+CREATE TABLE chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+  role TEXT NOT NULL, content TEXT NOT NULL,
+  citations TEXT,
+  created_at INTEGER NOT NULL
+);
+```
+
+---
+
+## 七、处理流水线与检索
+
+### 7.1 阶段与状态机
+
+| 阶段 | 工作 | 触发 | 耗时 |
+|---|---|---|---|
+| **L0 fetch** | 按 `next_fetch_at` 拉 feed（ETag / If-Modified-Since） | 每分钟 sweep | 0.3~2s |
+| **L1 extract** | 清洗 feed HTML；正文过短则抓原文 + Readability | L0 产出 | 0.5~3s |
+| **L2 dedupe** | URL 规范化 → 指纹近似 → 向量余弦(>0.95) | L1 产出 | <50ms |
+| **L3 analyze** | 一次 LLM 调用：摘要/要点/分类/标签/实体/分级 | L2 产出 | 2~8s |
+| **L4 embed** | 向量化（标题+摘要+首段）写 BLOB | L3 产出 | 0.2~1s |
+| **L5 cluster** | 滑动窗口聚类 → 簇级 LLM 归纳 | 每 6h | 10~40s |
+| **L6 digest** | 生成简报 | 每天 08:00 | 15~40s |
+| **L7 chat** | RAG 问答 | 用户请求 | 2~6s |
+
+```
+pending ─extract→ extracted ─analyze→ analyzed ─embed→ embedded ─▶ done
+        ↘ 失败: failed(reason)，retry_count++，≤3 次后置 dead
+```
+
+**幂等要求**：
+- 推进用乐观锁 `UPDATE ... WHERE id=? AND stage='<expected>'`，`changes === 0` 即放弃（防重复计费）。
+- job 用 `dedupe_key` 唯一索引兜底。
+- 结果写入受 **no-regression** 保护：不覆盖更优的既有结果。
+- 崩溃恢复：启动时把 `running` 且锁超 10 分钟的任务重置为 `pending`。
+
+### 7.2 Job Runner
+
+```ts
+// node:sqlite 为同步 API，用 BEGIN IMMEDIATE 保证认领原子性
+function claimBatch(n: number) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const rows = db.prepare(`
+      SELECT * FROM jobs
+       WHERE status='pending' AND run_after <= ?
+       ORDER BY priority DESC, id LIMIT ?`).all(Date.now(), n) as Job[];
+    const upd = db.prepare(`UPDATE jobs SET status='running', locked_by=?, locked_at=? WHERE id=?`);
+    for (const r of rows) upd.run(WORKER_ID, Date.now(), r.id);
+    db.exec("COMMIT");
+    return rows;
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+```
+
+单进程内 `setInterval(50ms)` 轮询，按 kind 分并发：fetch 5 / extract 4 / analyze 2 / embed 4 / cluster·digest 1。`WORKER_INLINE=false` 时以 `ai-rss worker` 独立进程启动。
+
+### 7.3 检索
+
+```
+query
+ ├─ A. 关键词：FTS5(title+summary)，中文按 bigram 预切分   ← 精确、0.1ms
+ ├─ B. 语义：embed(q) → 候选集内余弦排序                  ← 需 embedding
+ └─ C. 过滤：时间范围 / feed / category / tier             ← 硬约束
+        ↓  RRF 融合 → top 20 → 可选 rerank → top 8
+```
+
+**中文检索必须自己做分词。** 实测三种方案（10 万条 × 400 字语料）：
+
+| 方案 | 2 字中文词 | 3 字词 | 无命中查询 | 索引体积 | 结论 |
+|---|---|---|---|---|---|
+| `LIKE '%q%'` 全表扫描 | 0.03ms（早停）| 同 | **180~360ms** | 0 | 不可用为主力 |
+| FTS5 `trigram` | **0 条（查不到）** | 0.1ms | 0ms | +205MB | **不可用** |
+| FTS5 `unicode61` 裸用 | 0 条（不切中文） | 0 | — | — | 不可用 |
+| FTS5 + **程序侧 bigram** | 0.01ms | 0.01ms | 0.01ms | +78MB | **采用** |
+
+`trigram` 要求查询 ≥3 字符，「芯片」「裁员」「苹果」这类 2 字词直接返回空 —— 中文场景下这是致命的。`unicode61` 把整句中文当一个 token，同样查不到。所以必须在写入和查询两侧都做 bigram 切分：
+
+```ts
+// 中文按相邻两字切，英文/数字按词
+function bigrams(s: string): string[] {
+  const out: string[] = [];
+  const re = /[\u3400-\u4dbf\u4e00-\u9fff]+|[A-Za-z0-9_]+/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) {
+    const t = m[0];
+    if (/^[\u4e00-\u9fff]/.test(t)) {
+      if (t.length === 1) out.push(t);
+      for (let i = 0; i + 1 < t.length; i++) out.push(t.slice(i, i + 2));
+    } else out.push(t.toLowerCase());
+  }
+  return out;
+}
+
+// 写入侧：空格连接
+await fts.insert(rowid, bigrams(title).join(" "), bigrams(summary).join(" "));
+
+// 查询侧：每个词切成 bigram，用短语查询（引号）保证相邻，多词 AND
+function toMatch(q: string): string {
+  const parts: string[] = [];
+  for (const w of q.match(/[\u4e00-\u9fff]+|[A-Za-z0-9_]+/g) ?? []) {
+    parts.push(`"${bigrams(w).join(" ")}"`);   // "半导 导体" = 相邻短语
+  }
+  return parts.join(" AND ");
+}
+```
+
+**查询侧必须也用 bigram**，否则「半导体」在索引里是 `半导 导体` 两个 token，直接搜原文查不到。加了引号变成短语查询后，「半导X体」这类不连续文本不会被误命中（实测反例通过）。
+
+**为什么向量不需要扩展**：候选集 = 近 90 天已 embed 条目 ≈ 4.5 万条 × 1536 维 × 4B ≈ 276MB，单次全量余弦 80~200ms；先用关键词/分类/时间窗收窄到几千条则 <20ms（实测 5000 条 14ms）。留 `VectorStore` 接口，将来可换 `sqlite-vec` 或 pgvector 而不动业务代码。
+
+**去重阈值**：余弦 >0.95 判重；0.88~0.95 判「同事件不同报道」，进同一簇但不合并。阈值需用自己的数据校准。
+
+### 7.4 阅读历史
+
+按 `last_read_at` 倒序回溯「读过什么、何时读的」。**不能只用 `is_read` 布尔值**，否则无法排序。
+
+```ts
+// POST /entries/:id/read —— 幂等语义的关键
+UPDATE entries SET
+  first_read_at = COALESCE(first_read_at, :now),
+  last_read_at  = :now,
+  read_count    = read_count + 1,
+  is_read       = 1,
+  read_progress = COALESCE(:progress, read_progress)
+WHERE id = :id
+```
+
+> 不要用 `is_read = 1` 做幂等跳过 —— 那样重复打开不会刷新 `last_read_at`，「最近读过」排序会失效。
+
+**UI**：按日期分组（今天/昨天/本周/更早），卡片显示阅读进度条与 `read_count > 1` 角标。
+
+---
+
+## 八、AI 分析（分类分级）
+
+### 8.1 模型配置
+
+```jsonc
+// settings.ai_config
+{
+  "provider": "openai-compatible",
+  "baseURL": "https://api.deepseek.com/v1",
+  "apiKeyEnv": "AI_API_KEY",
+  "models": {
+    "fast":   "deepseek-chat",   // 粗筛、标签、打分
+    "strong": "deepseek-chat",   // 摘要、簇归纳、简报
+    "embed":  "text-embedding-3-small"
+  },
+  "limits": { "rpm": 60, "tpm": 200000, "concurrency": 2 },
+  "budget": { "dailyUsd": 1.0, "monthlyUsd": 20.0 },
+  "fallback": { "onBudgetExceeded": "fast_only" }
+}
+```
+
+### 8.2 结构化输出
+
+```ts
+const EntryAnalysisSchema = z.object({
+  summary:    z.string(),                                  // 3~5 句
+  key_points: z.array(z.string()).min(2).max(6),
+  category:   z.string(),                                  // 必须来自给定 slug 列表
+  topics:     z.array(z.string()).max(5),
+  entities:   z.object({
+    people: z.array(z.string()), orgs: z.array(z.string()),
+    products: z.array(z.string()), tech: z.array(z.string()),
+  }),
+  importance: z.number().int().min(0).max(100),
+  novelty:    z.number().int().min(0).max(100),
+  sentiment:  z.enum(["positive","neutral","negative","mixed"]),
+});
+```
+
+**稳健实现（最易被低估的一环）**：
+
+```
+1. 优先 response_format = { type:"json_schema", strict:true }   // OpenAI 系
+2. 不支持 → { type:"json_object" } + 提示词内嵌 schema            // DeepSeek / Ollama
+3. 文本 → 去 ```json 围栏 → JSON.parse → zod.safeParse
+4. 校验失败 → 把 zod 报错回灌模型重试一次（自愈）
+5. 二次失败 → stage=failed，进「问题条目」列表，不阻塞流水线
+```
+
+小模型 / 本地模型 100% 会出现 JSON 不合规。没有这套，流水线会持续堆失败条目。
+
+### 8.3 提示词约束
+
+```
+你是一名信息分析编辑。把一篇资讯压缩成结构化情报卡片。
+
+硬性要求：
+1. summary 用陈述句直接给结论与数据；禁止"本文/该文章/作者认为"等空话开头。
+2. key_points 每条须含具体事实（数字、名称、时间、结论），不写泛泛判断。
+3. 原文未提及的一律不得推断补充。信息不足时相应字段留空数组而非编造。
+4. category 必须从「可选分类」中选一个 slug；无法归类选 other。
+5. topics 优先复用「已有标签」；确无合适才新建，最多 5 个。
+6. importance 评分基准：
+   90+ 行业格局变化 / 重大技术发布 / 直接影响读者工作
+   70~89 有明确新信息与分析价值
+   40~69 常规更新、有参考价值的经验
+   0~39 营销稿、转述、无增量
+7. 只输出 JSON，不要解释文字或 Markdown 围栏。
+```
+
+### 8.4 分类分级落地
+
+- **受控分类法**：AI 只能从给定 `slug` 列表选，不能自造。每类有 `hint` 字段（判定说明），**填好 hint 能显著提升一致率**。
+- `importance` 0~100 → `tier` 四级：`must_read / worth / normal / noise`。UI 用红/橙/灰条区分，`noise` 默认折叠。
+- 准确率靠「黄金测试集 + 混淆矩阵」验证，不凭感觉。
+
+### 8.5 成本控制
+
+| 手段 | 做法 | 预估收益 |
+|---|---|---|
+| 分类分级粗筛 | 关键词粗判 + 小模型打分，低分只存不入精读 | 高噪音源省 50%+ |
+| 分级模型路由 | 粗筛 `fast`；摘要/簇/简报 `strong` | 降 60~80% |
+| 输入截断 | 只喂标题 + 摘要 + 前 4000 字 | 降约 50% |
+| 批量合并 | 同源同日 5~10 条合并为一次请求 | 省 30~40% |
+| 幂等缓存 | 正文 hash 未变不重分析 | 视源重叠度 |
+| 预算闸门 | 累计超 `dailyUsd` → 降 `fast_only`，再超则暂停分析 | 防账单爆炸 |
+
+---
+
+## 九、每日简报
+
+### 9.1 生成流程
+
+1. **聚类**（每 6h）：窗口内条目（约 100~200 条）暴力层次聚类，毫秒级完成，无需向量库。
+2. **簇级归纳**：LLM 综合 N 篇，输出结构化结果。
+3. **简报生成**（每天 08:00）：取 heat 排序前 12 簇，生成 Markdown。
+
+### 9.2 簇级归纳输出的关键字段
+
+```json
+{
+  "title":      "12 字以内事件标题",
+  "summary":    "综合 N 篇的综述，150 字内：发生了什么、各方观点差异、最新进展",
+  "key_points": ["..."],
+  "consensus":  ["多篇一致的事实"],
+  "conflicts":  [{"claim": "某方说法", "sources": ["来源A","来源B"]}]
+}
+```
+
+`consensus` / `conflicts` 是简报价值的来源。同类项目（Feed2040、feedforge、daily-briefing 等）普遍停在「摘要 + 打分排序」，没有跨篇聚合与多源冲突识别 —— 那样只是把 20 条摘要堆在一起，不构成「每天值得看」。
+
+### 9.3 简报结构
+
+```
+## 今日要点        3 条，各一句，最重要的事
+## 分主题展开      每主题 2~4 句 + {{cite:cluster_id}} 占位符
+## 值得一读        低热度但高价值长文 1~3 篇
+## 今日高亮        你当天标记的要点（§11.4）
+```
+
+**引用安全**：`{{cite:id}}` 占位符由程序替换为真实链接，防止模型编造 URL（比事后校验便宜）。
+
+**约束**：每个论断必须来自输入；单来源主题强制标注「单一来源，待验证」。
+
+---
+
+## 十、RSSHub 订阅搜索
+
+### 10.1 目标
+
+用户输入关键词或网站 URL，直接得到**可订阅的 RSS 地址**，不需要翻文档拼路由。RSS 工具最大的门槛是「找不到 RSS」。
+
+### 10.2 依赖的 RSSHub 接口
+
+| 接口 | 用途 |
+|---|---|
+| `GET /api/namespace` | 全部命名空间的路由清单（名称、URL、分类、语言、描述） |
+| `GET /api/namespace/{ns}` | 单命名空间详情 |
+| `GET /api/radar/rules` | 域名 → 路由映射，把任意 URL 反查成路由 |
+| `GET /api/routes/:name?` | 老接口，返回路径数组，作兜底 |
+
+> 公共实例 `rsshub.app` 有访问限制（需 `key`）。**必须允许配置自建实例**（`settings.rsshub.baseUrl` + `accessKey`）。
+
+### 10.3 三种搜索路径
+
+```
+用户输入
+  ├─ A. 看起来像 URL        → Radar 反查：域名匹配规则 → 候选路由
+  ├─ B. 关键词（中/英）      → 在 namespace 元数据里搜（name/description/categories）
+  └─ C. 已知 namespace       → 列出该 ns 下所有路由，配参数表单
+        ↓
+  统一返回：{ 路由模板, 示例URL, 参数列表, 分类, 说明 }
+        ↓
+  前端渲染参数表单 → 拼出完整 URL → 试订阅
+```
+
+### 10.4 核心设计：参数表单而非手拼字符串
+
+`/bilibili/user/video/:uid` 应渲染成「Bilibili 用户视频」+ 一个「用户 ID」输入框。**把路由模板变成表单**是「简洁清晰」的关键。
+
+### 10.5 实现要点
+
+- **缓存**：`namespaces` 与 `radar` 各存一份到 `rsshub_cache`，TTL 7 天，UI 提供「刷新路由库」。冷启动拉一次（数百 KB），之后搜索全本地。
+- **搜索**：本地模糊匹配 name / description / categories / 路由路径，中文用 `LIKE` + bigram。
+- **试订阅**：拼出 URL 后先抓一次，确认能解析出条目再落库，避免订阅到死源。
+- **整合流程**：搜索 → 选中候选 → 填参数 → **预览最近 5 条标题** → 确认订阅。
+
+---
+
+## 十一、高亮系统
+
+### 11.1 难点在锚定
+
+正文 HTML 每次重新提取（换提取器、改清洗规则、图片代理改写）都可能让字符偏移失效。只存 `start/end`，一次提取器升级就会让所有高亮错位。
+
+采用 **W3C Web Annotation 三选择器**：
+
+```json
+{
+  "quote":    { "exact": "被高亮的原文", "prefix": "前 32 字", "suffix": "后 32 字" },
+  "position": { "start": 1024, "end": 1052 },
+  "range":    { "startContainer": "/html/body/div[2]/p[3]", "startOffset": 12,
+                "endContainer": "/html/body/div[2]/p[3]", "endOffset": 40 }
+}
+```
+
+**恢复策略（按优先级降级）**：
+
+1. `position` 直接定位 → 校验 `quote.exact` 是否匹配
+2. 不匹配 → 用 `quote.exact` + `prefix/suffix` 做文本搜索（处理偏移漂移）
+3. 仍失败 → 用 `range` 的 XPath（处理段落重排）
+4. 全部失败 → 标 `is_orphaned`，在侧栏单独列出「原文已变化，无法定位」，**不静默丢失**
+
+> 没有降级链，用户发现高亮悄悄错位后就不再用了。
+
+### 11.2 API
+
+```
+GET    /entries/:id/highlights
+POST   /highlights            {entry_id, quote..., color?, note?}
+PATCH  /highlights/:id        {note?, color?}
+DELETE /highlights/:id
+GET    /highlights?cursor=&entryId=&tag=       全局列表
+POST   /highlights/:id/insight                 AI 解读这段（流式）
+```
+
+### 11.3 UI 交互
+
+- **选中即出工具条**：划词后在选区上方浮出 3~4 个图标（高亮 / 批注 / AI 解读），不弹侧栏、不跳页。
+- **三种色即可**：默认黄、可选绿/蓝。不做调色盘 —— 选择过载会让人不用。
+- **侧栏聚合**：列出本文所有高亮，点击滚动定位。
+- **键盘**：选中后 `h` 高亮、`n` 加批注。
+
+### 11.4 与 AI 的联动
+
+高亮是用户**主动**表达「这段重要」的信号，比隐式阅读行为更强：
+
+| 用途 | 做法 |
+|---|---|
+| 修正 importance | 把近期高亮作为 few-shot 示例注入 L3 prompt |
+| 单条解读 | `POST /highlights/:id/insight`，结合上下文流式解释 |
+| 简报素材 | 日报独立小节「你今天标记的要点」 |
+| 高亮聚类 | 高亮向量入库，「你反复标记的主题」反哺分类权重 |
+| RAG 提权 | 问答检索时含高亮的段落提权 |
+
+---
+
+## 十二、MCP 服务器
+
+### 12.1 为什么做
+
+个人 RSS 库天然适合 MCP：它是每天的信息输入，接进 Claude / Cursor 后能做「帮我总结本周关于芯片的报道」「我最近标记的高亮有什么共同点」。
+
+### 12.2 实现
+
+```ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+const server = new McpServer({ name: "ai-rss", version: "1.0.0" });
+
+server.tool("search_entries", { query: z.string(), since: z.string().optional(), limit: z.number().default(10) },
+  async ({ query, since, limit }) => ({ content: [{ type: "text", text: await searchEntries(query, since, limit) }] }));
+```
+
+**双传输**：
+
+| 传输 | 用途 | 配置 |
+|---|---|---|
+| **stdio** | Claude Desktop / Cursor 本地接入 | `command: "./ai-rss", args: ["mcp"]` |
+| **HTTP (Streamable)** | 远程接入、多客户端 | 挂在主服务 `/mcp`，Bearer token |
+
+### 12.3 工具设计原则
+
+1. **返回 Markdown 而非裸 JSON** —— LLM 读 Markdown 更省 token、更少解析错误。
+2. **每个工具都带时间过滤** —— 库会越来越大，无限查询会撑爆上下文。
+3. **只读优先** —— 第一批只做查询；写入类放第二批并显式确认。
+4. **复用既有检索** —— 内部直接调 §7.3 的混合检索。
+
+**六个工具（够用不臃肿）**：
+
+| 工具 | 说明 |
+|---|---|
+| `search_entries` | 混合检索条目，返回摘要卡 |
+| `get_entry` | 单篇全文 + AI 分析 |
+| `list_highlights` | 高亮列表（可按标签/时间/文章） |
+| `get_digest` | 某天的简报 |
+| `list_clusters` | 事件簇（跨源聚合） |
+| `list_feeds` | 订阅源与健康度 |
+
+> 不要一上来做 20 个工具。工具太多会让 LLM 选错，6 个覆盖 95% 场景。
+
+---
+
+## 十三、存档、备份与迁移
+
+### 13.1 状态单一、格式开放
+
+```
+./data/
+├─ app.db          # 全部结构化数据
+├─ files/          # 图片等二进制附件（本地代理落盘，不依赖外链）
+├─ config.json     # 配置
+└─ backups/        # 自动快照
+```
+
+四条设计约束：
+1. 不用外部数据库。
+2. 图片本地代理并落盘 —— 否则源站删图后存档残缺。
+3. 导出为开放格式（Markdown / JSONL / OPML），非私有格式。
+4. 迁移文件带版本号，降级有明确边界。
+
+### 13.2 三种自动备份
+
+先看实测成本，这决定了备份策略不能照抄常规做法：
+
+| 度量 | 实测值 |
+|---|---|
+| 10 万条（含正文 + 分析 + 2.5 万向量）库体积 | **2.5 GB** |
+| `VACUUM INTO` 全量快照耗时 | **30 s / 2.5 GB** |
+| GFS 保留 23 份的磁盘占用 | **≈57 GB** |
+
+每天在 NAS 上花 30 秒写一份 2.5GB 的全量副本、一个月堆到几十 GB —— 这不可接受。所以：
+
+| 机制 | 触发 | 产物 | 体积 | 用途 |
+|---|---|---|---|---|
+| **WAL 增量快照** | 每 6h | `data/backups/app-<ts>.db`（`backup()` API 的增量页） | 只含变化页 | 快速回滚，分钟级 RPO |
+| **全量快照** | 每日 03:00 | `VACUUM INTO` 的 `.db` | 全量 | 灾难恢复 |
+| **增量归档** | 每周 | 新增条目导出 JSONL（不含正文） | 数十 MB | 长期存档 |
+| **异地同步** | 可配（S3 / WebDAV / 本地路径） | 上述副本 | 同 | 防灾 |
+
+**关键实现**：
+
+```ts
+// 全量：在线一致性快照，不中断服务
+db.exec(`VACUUM INTO '${backupPath}'`);
+// 错误示范：cp app.db backup.db —— WAL 有未 checkpoint 内容时会得到损坏副本
+```
+
+`node:sqlite` 还提供 `backup()` 原生 API，可做增量备份（只写变化的页），用于 6h 级别的高频快照；`VACUUM INTO` 只用于每日全量。两者都产生可独立打开的完整库，`PRAGMA integrity_check` 均通过（已实测）。
+
+**保留策略**：**按体积而非份数**。GFS 的「7 日 + 4 周 + 12 月」在 2.5GB 库上等于 57GB，对小容量 NAS 是灾难。改为：
+
+```
+每日全量：保留最近 3 份
+每周全量：保留最近 4 份
+每月全量：保留最近 6 份
+超出 data/config.json 的 backups.maxGB（默认 10GB）时，从最旧的非周/月快照开始删
+```
+
+`doctor` 报当前备份总占用，超过预算时告警。
+
+### 13.3 正文分级保留（体积的真正来源）
+
+实测 2.5GB 里 **`entry_contents` 占 2090MB（84%）**，其余全部加起来才 390MB：
+
+| 表 | 10 万条体积 | 占比 |
+|---|---|---|
+| `entry_contents` | 2090 MB | 84% |
+| `embeddings` | 205 MB | 8% |
+| `entry_analysis` | 103 MB | 4% |
+| `entries` + 全部索引 | 68 MB | 3% |
+
+因此体积治理只在正文这一处。三条措施：
+
+1. **gzip 存储**：正文 HTML/Markdown 实测压缩比 **2.6×**（中英混合真实文本；不要用重复文本估，那会得到 130× 的假数据）。用 `zlib.gzipSync(buf, { level: 6 })`，读时解压。整个 `entry_contents` 从 2090MB 降到 ~800MB。
+2. **`raw_html` 只留 30 天**：它只用于「重新提取」这一件事。实测清空 `raw_html` 后 VACUUM 可省 **26%** 总体积（657MB）。保留期过后由每日维护任务置 NULL。
+3. **`noise` 级条目不存正文**：分类为 `noise` 的条目只保留标题、摘要、AI 卡片，抓完即弃正文。按 30% 噪音率估，再省约 1/4。
+
+三条合计把稳态体积从 2.5GB 压到 **约 0.8~1.0GB / 10 万条**，每日增量从 18MB 降到约 7MB。
+
+### 13.4 迁移
+
+```bash
+# 旧机器导出
+./ai-rss export --out ./export-20261023.tar.zst
+#  含 app.db（已 VACUUM）+ files/ + manifest.json（版本、schema 版本、条目数）
+
+# 新机器导入（任意部署方式）
+./ai-rss import ./export-20261023.tar.zst
+#  校验 schema 版本 → 必要时迁移 → 恢复 files → 重建索引
+```
+
+导入时若包内 schema 版本更新（降级），**明确拒绝并提示**，不半途损坏。
+
+### 13.5 内容导出
+
+```bash
+./ai-rss export --format markdown   # 每人一个 .md + 图片目录 + index.json
+./ai-rss export --format jsonl
+./ai-rss export --format opml       # 仅订阅源
+```
+
+### 13.6 doctor 检查项
+
+```
+[✓] 数据目录可写
+[✓] SQLite 版本 / journal_mode=WAL
+[✓] schema 版本与二进制匹配
+[✓] PRAGMA integrity_check
+[✓] 最近备份时间（>48h 告警）
+[✓] 备份总占用（超 backups.maxGB 告警）
+[✓] 磁盘剩余空间（<10% 告警）
+[✓] 库体积与正文占比（entry_contents 超 90% 提示清理）
+[✗] 图片附件缺失 3 个 → 列出条目
+```
+
+---
+
+## 十四、Huntly 浏览器插件兼容
+
+**这是 P0 硬需求，不是加分项。** 明确它意味着什么：
+
+> 用户在 Chrome 里装**官方原版 Huntly 插件**（不改代码、不装自定义构建），在插件设置里把服务器地址改成 `http://<本机或NAS>:3000`，之后「保存当前页面」「查看已保存角标」「收藏」「归档」「稍后读」全部正常工作。
+
+因此 M0 就要落 cookie session 与两条核心端点（§19.2 的 0.5 / 0.8），不能等到 M7。这一章的所有约束都源自「不许 fork 插件」这一个前提。
+
+### 14.1 可行性基础（已核实源码）
+
+1. **服务器地址可由用户填写** —— `serverUrl` 从 `chrome.storage.sync` 读取，拼成 `${serverUrl}/api/`。**不需要 fork 插件**。
+2. **`host_permissions` 为宽泛通配** —— 能访问 localhost 与局域网。
+3. **无 API Key 机制** —— 纯 cookie 会话，不需实现 OAuth。
+
+### 14.2 插件调用的端点清单
+
+```
+认证   GET    /api/auth/loginUserInfo
+页面   POST   /api/page/save                      ← 核心
+       GET    /api/page/pageOperateResult?id=&url= ← 核心
+       GET    /api/page/{id}
+       DELETE /api/page/{id}
+       PATCH  /api/page/{id}/detail
+       PATCH  /api/page/{id}/collection
+操作   POST   /api/page/star/{id}       /api/page/unStar/{id}
+       POST   /api/page/readLater/{id}  /api/page/unReadLater/{id}
+       POST   /api/page/archive/{id}
+       POST   /api/page/saveToLibrary/{id} /api/page/removeFromLibrary/{id}
+集合   GET    /api/collections/tree
+AI     GET    /api/article-shortcuts/enabled
+设置   GET    /api/setting/general/globalSetting
+       GET    /api/setting/general/blacklist
+```
+
+**挂载方式**：兼容层挂在 Hono 的 `/api/*` 子应用下，与自有 REST API 并存。自有 API 用 `/api/v1/*` 前缀，避免路径冲突。`compat/huntly/` 目录内不 import 任何业务模块，只调用 service 层 —— 将来 Huntly 大版本变更时整目录替换即可。
+
+### 14.3 登录流程（插件是这么用 cookie 的）
+
+插件的「连接服务器」不是一个 OAuth 流程，而是：
+
+```
+1. 用户填 serverUrl + 账号密码
+2. 插件 POST 登录 → 期望 Set-Cookie 落在 serverUrl 这个 origin 上
+3. 之后所有请求 credentials:'include'，靠浏览器自动带 cookie
+4. 启动时调 GET /api/auth/loginUserInfo 判断是否仍登录
+```
+
+由此得到三条实现约束：
+
+| 约束 | 原因 |
+|---|---|
+| session cookie 必须 `SameSite=Lax` 且 `Path=/` | 插件的 fetch 来自 `chrome-extension://` origin，跨站场景；`Strict` 会导致不回传 |
+| 同时支持 `Set-Cookie` 与 Bearer | 插件走 cookie，MCP 与脚本走 Bearer；认证中间件两者都认 |
+| `/api/auth/loginUserInfo` 未登录时返回 **200 + null 语义**，不要 401 | 插件对 401 的处理是直接报错，不会引导登录 |
+
+### 14.4 字段映射：`CapturePage` → `entries`
+
+插件 `page/save` 传约 20 个字段，必须逐个落到表上（`entries` 的兼容列已为此预留，见 §6.2）：
+
+| 插件字段 | 落点 | 说明 |
+|---|---|---|
+| `url` / `title` / `author` | `entries.url` / `title` / `author` | 直接映射 |
+| `content` | `entry_contents.raw_html` | 作为 `source_type='web'` |
+| `pageJsonProperties` | `entries.page_json` | 原样存字符串，不解析 |
+| `contentType`（数字） | `entries.source_type` | 需实测枚举：网页 / 微博 / 知乎等 |
+| `librarySaveStatus`（数字） | `entries.library_save_status` | 0/1 两态，实测确认 |
+| `faviconUrl` / `siteName` / `thumbnailUrl` | 对应列 | 直接映射 |
+| `collectionId` | `entries.folder_id` | 映射到 folders；不存在的集合按需创建 |
+| `starred` / `readLater` / `archived` | 对应状态位 | 布尔 |
+
+**必须实测确认的**：`contentType` 与 `librarySaveStatus` 的枚举值。这两个是数字而非字符串，猜错会导致 UI 分类显示错误但不报错 —— 属于典型的静默失败。
+
+### 14.5 四个技术障碍
+
+| 障碍 | 应对 |
+|---|---|
+| **必须 cookie 会话** | 所有请求为 `credentials: 'include'`。认证层必须支持 cookie session，不能只做 Bearer token |
+| **响应体格式逐端点不同** | `page/save` → `{data: pageId}`；`pageOperateResult` → 裸对象；`page/{id}` → `{page:{...}}`；`collections/tree` → 直接 JSON。**必须逐端点核对**，不能统一套一种格式 |
+| **`CapturePage` 字段多** | 约 20 字段，含 `pageJsonProperties`、`contentType`（数字枚举）、`librarySaveStatus`（数字枚举）。枚举值需实测 |
+| **失败静默** | 插件多处只 `console.error`。需要契约测试，不能靠人工点 |
+
+第一条与第二条是最容易做错的地方：套一个统一 `{code, data, message}` wrapper 是最自然的工程直觉，而插件恰恰不接受 —— 它对每个端点按各自形状解构，多一层包装就取不到值，且不报错。
+
+### 14.6 分两期实现
+
+- **兼容层 A（约 1 周，M0 先落 2 个端点）**：6 个核心端点 —— `auth/loginUserInfo`、`page/save`、`page/pageOperateResult`、`collections/tree`、`page/star/{id}`、`setting/general/globalSetting`。覆盖主流程：连上服务器 → 保存 → 看到已保存角标 → 收藏。其余端点返回结构正确的空值。
+- **兼容层 B（约 1.5 周）**：归档、稍后读、集合移动、黑名单等。
+
+**验收以真实插件为准**：用官方 Chrome 商店版插件指向本服务，完成「连接 → 保存网页 → 列表出现 → 角标变化 → 收藏 → 归档」，全程不改插件代码。任何一步失败即视为未完成，不因契约测试通过而放行。
+
+### 14.7 用 HAR 作为测试夹具
+
+```
+1. 官方 Huntly 镜像跑起来
+2. 装真实插件指向它，16 个端点全点一遍，抓 HAR
+3. 响应体固化为测试夹具
+4. 我们的实现逐字段比对（允许新增字段，不允许缺失/类型不符）
+```
+
+这是唯一能防「插件升级后静默失效」的办法。**风险**：这是逆向出的兼容层，无官方契约，Huntly 改字段就会断，每次大版本需重抓 HAR。
+
+---
+
+## 十五、UI 设计
+
+原则是**减少决策数量**，以下每条都是可检验的约束。
+
+### 15.1 信息架构：一级导航不超过 6 项
+
+```
+收件箱 │ 简报 │ 主题 │ 高亮 │ 订阅 │ 设置
+```
+
+Huntly 的导航有 10+ 项（Home / Recently Read / My List / Starred / Read Later / Archive / GitHub / All Feeds / X / Highlights / Folders / Search）—— 那是「功能全集」导航，不是简洁。低频项（归档 / 稍后读 / 已读历史）降级为**收件箱内的筛选器**：
+
+`全部 · 未读 · 必读 · 有高亮 · 已收藏 · 历史`
+
+### 15.2 列表项：一屏 8~10 条
+
+```
+┌─────────────────────────────────────────────┐
+│ ● 标题（最多 2 行，超出省略）               │  ● = tier 色点
+│   一句话 AI 摘要（1 行，省略号）            │
+│   源名称 · 3 小时前 · 8 分钟                │
+└─────────────────────────────────────────────┘
+```
+
+**不显示**：完整摘要、标签云、缩略图（除非图文源）、多个操作按钮（hover 才出现）。列表页的唯一任务是让你快速扫过去。
+
+### 15.3 阅读页：内容优先
+
+- **正文最大宽度 72 字符** —— 可读性硬指标，宽屏铺满会明显降低阅读速度。
+- **AI 摘要卡默认展开但可折叠** —— 既想快速判断也想读原文。
+- **高亮工具条随选区浮动** —— 不常驻、不遮挡。
+
+### 15.4 简报页
+
+```
+今日要点（3 条，粗体，各一行）
+────────────────────────────
+[主题分组]
+  · 事件标题 — 2 句综述
+    ├ 一致：xxx                    ← consensus
+    └ 分歧：xxx（来源A vs B）      ← conflicts
+────────────────────────────
+值得一读（低热度高价值）
+```
+
+**多源冲突视觉必须克制**：左侧细色条 + 小字标注，不用红色感叹号 —— 冲突是常态，不是警报。
+
+### 15.5 三条可检验的约束
+
+| 约束 | 检验方法 |
+|---|---|
+| 任何操作 ≤ 2 次点击可达 | 首页到「开始读某篇」应为 1 次点击 |
+| 键盘全覆盖 | 不用鼠标能完成浏览、标记、高亮、切换筛选 |
+| 空状态有引导 | 每个空列表都给出「下一步做什么」的具体按钮 |
+
+### 15.6 技术侧
+
+- **shadcn/ui + Tailwind**：组件源码在仓库里，删改不需对抗框架。
+- **暗色优先**：阅读器多在早晚使用，暗色是主色而非可选主题。
+- **不做动画炫技**：只保留「列表进入 50ms 淡入」这类功能性过渡。动效超过 200ms 会让高频操作变慢。
+
+---
+
+## 十六、CI 与发布
+
+### 16.1 三个 workflow
+
+| Workflow | 触发 | 作用 |
+|---|---|---|
+| `ci.yml` | push / PR | 类型检查、单测、lint、构建验证、残留检查 |
+| `release.yml` | tag `v*` | 二进制 + Docker 镜像 + 校验和 + Release |
+| `nightly.yml` | 每日 cron | 拉真实 RSSHub 路由库做集成回归，发现上游变更 |
+
+**CI 与本地用同一套工具链**：三个 workflow 都不装系统 Node，而是 `./scripts/bootstrap.sh` 后直接用 `.toolchain/node/bin/npm`。这样「本地能过、CI 挂掉」这类环境差异不存在，也让 §4.5 的残留检查在 CI 里天然可跑。
+
+唯一例外是 `binaries` job 需要**目标平台**的 node 可执行体（Windows 产物在 Linux runner 上造），所以它额外下载一份放到 `vendor-*`，这份不参与运行，只作为 SEA 的注入底本。
+
+### 16.2 `release.yml`
+
+```yaml
+name: Release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  # 与 bootstrap 的默认值保持同一处来源，改版本只改这里和 scripts/lib
+  AI_RSS_NODE_VERSION: v24.13.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # CI 也用项目内工具链：本地与 CI 走完全相同的解释器，避免「本地过 CI 挂」
+      - name: 引导项目内 Node
+        run: ./scripts/bootstrap.sh
+      - name: 依赖（缓存落在项目内 .cache/npm）
+        run: .toolchain/node/bin/npm ci
+      - run: .toolchain/node/bin/npm run typecheck
+      - run: .toolchain/node/bin/npm run lint
+      - run: .toolchain/node/bin/npm test
+      - run: .toolchain/node/bin/npm run build:client   # Vite → dist/client
+      - name: 残留检查（构建不写 $HOME）
+        run: ./scripts/check-no-residue.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: client-dist, path: dist/client }
+
+  binaries:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            node_os: linux
+            node_arch: x64
+          - target: windows-x64
+            node_os: win
+            node_arch: x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: 引导项目内 Node
+        run: ./scripts/bootstrap.sh
+      - run: .toolchain/node/bin/npm ci
+      - uses: actions/download-artifact@v4
+        with: { name: client-dist, path: dist/client }
+      - name: 构建标准 bundle
+        run: .toolchain/node/bin/npm run build:server
+      - name: 打包前端 zip（SEA assets 用，见 §3.4）
+        run: .toolchain/node/bin/npm run pack:client-zip
+      - name: 取得目标平台的 node 可执行体
+        id: nodebin
+        shell: bash
+        run: |
+          # 版本号来自 job 级 env，不依赖 runner 上装了什么
+          VER="${{ env.AI_RSS_NODE_VERSION }}"
+          case "${{ matrix.node_os }}" in
+            win)  PKG="node-$VER-win-x64.zip";          BIN="node.exe" ;;
+            *)    PKG="node-$VER-linux-x64.tar.xz";     BIN="node" ;;
+          esac
+          mkdir -p .tmp && cd .tmp
+          curl -fsSLo pkg "https://nodejs.org/dist/$VER/$PKG"
+          case "$PKG" in
+            *.zip)      unzip -q pkg -d raw ;;
+            *.tar.xz)   mkdir -p raw && tar -xJf pkg -C raw ;;
+          esac
+          SRC="$(find raw -maxdepth 2 -name "$BIN" -type f | head -1)"
+          cp "$SRC" "../vendor-$BIN"
+          echo "bin=vendor-$BIN" >> "$GITHUB_OUTPUT"
+      - name: 生成 SEA
+        run: |
+          # Node 25.5+ 可用一条 node --build-sea；Node 24 用 postject 三步
+          .toolchain/node/bin/node scripts/build-sea.mjs \
+            --main dist/server.js \
+            --executable "${{ steps.nodebin.outputs.bin }}" \
+            --out dist/ai-rss-${{ matrix.target }}
+      - name: 冒烟测试（linux）
+        if: matrix.target == 'linux-x64'
+        run: |
+          chmod +x dist/ai-rss-linux-x64
+          ./dist/ai-rss-linux-x64 version
+          ./dist/ai-rss-linux-x64 migrate --data .tmp/t
+          ./dist/ai-rss-linux-x64 serve --data .tmp/t --port 3111 &
+          sleep 3
+          curl -fsS localhost:3111/api/health
+          curl -fsS localhost:3111/ | grep -q 'id="root"'   # 静态资源内嵌校验
+          ./dist/ai-rss-linux-x64 doctor --data .tmp/t
+      - uses: actions/upload-artifact@v4
+        with: { name: bin-${{ matrix.target }}, path: "dist/ai-rss-${{ matrix.target }}*" }
+
+  docker:
+    needs: [build, binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - uses: actions/download-artifact@v4
+        with: { pattern: "bin-*", path: dist, merge-multiple: true }
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+```
+
+### 16.3 Dockerfile
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+# 依赖层单独缓存；.npmrc 里的 cache 路径在容器内指向 /app/.cache
+COPY package*.json .npmrc ./
+RUN --mount=type=cache,target=/app/.cache/npm \
+    npm ci --cache /app/.cache/npm
+COPY . .
+# 构建期临时文件也关在容器内
+ENV TMPDIR=/app/.tmp TMP=/app/.tmp TEMP=/app/.tmp
+RUN --mount=type=cache,target=/app/.cache/npm \
+    npm run build:client && npm run build:server && npm run build:sea
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /app/dist/ai-rss-linux-x64 /app/ai-rss
+ENV DATA_DIR=/app/data PORT=3000
+VOLUME ["/app/data"]
+EXPOSE 3000
+HEALTHCHECK --interval=60s --timeout=5s --start-period=20s \
+  CMD ["/app/ai-rss", "doctor", "--quiet"]
+ENTRYPOINT ["/app/ai-rss"]
+CMD ["serve"]
+```
+
+构建期缓存用 BuildKit 的 `--mount=type=cache`（缓存落在构建机 Docker 自己的区域，且不会进入最终镜像层），**不要**把 `npm ci` 的中间产物 COPY 进任何层 —— 那个会让镜像凭空多 300MB。
+
+### 16.4 六条发布门禁
+
+| 门禁 | 检查 | 拦住的问题 |
+|---|---|---|
+| 二进制冒烟 | 编译后启动 → 访问首页 → 建库 → doctor | 源码能跑、二进制跑不起来 |
+| 静态资源内嵌 | `curl /` 返回含 `id="root"` 的 HTML | 二进制启动但页面 404 |
+| 迁移幂等 | 空目录 migrate 两次不报错 | 重复执行迁移崩库 |
+| Docker healthcheck | 容器起来后变 healthy | 镜像能起但服务不可用 |
+| **导出/导入往返** | 导出 → 新容器导入 → 条目数一致 | 备份不可用 |
+| **项目外零写入** | 干净容器里跑 `bootstrap` + `build`，`$HOME` 与系统目录无新增 | 污染用户机器，卸载留垃圾 |
+
+倒数第二条经常被跳过，但它是「存档迁移备份」需求的**实际验收** —— 没有 CI 验证，备份坏了会在真需要时才发现。最后一条是 §4.3 承诺的验收，脚本见 §4.5。
+
+---
+
+## 十七、项目结构
+
+```
+ai-rss/
+├─ .toolchain/node/               # 项目内 Node 24 + npm（bootstrap 下载，gitignored）
+├─ .cache/{npm,docker}/           # npm 与 docker 构建缓存（gitignored）
+├─ .tmp/                          # 构建临时目录（gitignored）
+├─ .npmrc                         # cache=./.cache/npm（prefix 不能写，见 §4.3）
+├─ scripts/
+│  ├─ bootstrap.mjs               # 下载并解压 .toolchain/node
+│  ├─ dev.sh  build.sh            # 统一用 .toolchain/node/bin/node 启动
+│  ├─ build-server.mjs            # esbuild → dist/server.js
+│  ├─ build-sea.mjs               # bundle + postject/--build-sea
+│  └─ pack-client-zip.mjs         # dist/client → dist/client.zip
+├─ src/
+│  ├─ index.ts                    # 单一入口：serve|worker|migrate|doctor|version|mcp|export|import
+│  ├─ cli.ts                      # 子命令实现
+│  ├─ server/
+│  │  ├─ app.ts                   # Hono 装配
+│  │  ├─ routes/{feeds,entries,categories,clusters,digests,search,chat,settings,stats,highlights,rsshub,page}.ts
+│  │  ├─ middleware/{auth,error,logger}.ts
+│  │  ├─ db/{schema.ts,client.ts,migrate.ts,adapter.ts}   # adapter = 可换驱动的那层
+│  │  ├─ db/migrations/*.sql
+│  │  ├─ services/{feed,entry,digest,search,stats,highlight,rsshub,backup}.ts
+│  │  ├─ ai/{client,schemas,analyze,embed,cluster,digest,rag,vector}.ts
+│  │  ├─ mcp/server.ts
+│  │  ├─ extract/{feed-clean,article}.ts
+│  │  ├─ dedupe/{url,simhash,cosine}.ts
+│  │  ├─ jobs/{runner,handlers,queue}.ts
+│  │  ├─ auth/require-user.ts     # 多人预留的唯一开关点
+│  │  └─ compat/huntly/           # 插件兼容层（§14）
+│  ├─ embed-static.ts             # 静态资源/迁移/提示词的导入清单
+│  └─ client/                     # React SPA
+│     ├─ routes/{inbox,digest,highlights,feeds,settings,search}/
+│     ├─ components/{reader,highlight,rsshub-search}/
+│     └─ lib/api.ts
+├─ packages/prompts/*.md          # 带 version 头
+├─ Dockerfile
+├─ docker-compose.yml
+├─ .github/workflows/{ci,release,nightly}.yml
+└─ data/                          # 唯一状态：app.db, files/, config.json, backups/
+```
+
+`.gitignore` 关键项（决定「删目录即卸载」能否成立）：
+
+```gitignore
+.toolchain/
+.cache/
+.tmp/
+node_modules/
+dist/
+data/
+*.log
+```
+
+**只有 `data/` 需要备份**，其余全部可重建。
+
+---
+
+## 十八、API
+
+```
+# 订阅
+GET    /feeds                    列表（未读数、健康度）
+POST   /feeds                    {url} → 自动发现 feed
+PATCH  /feeds/:id                间隔/文件夹/分析档位
+DELETE /feeds/:id
+POST   /feeds/import  GET /feeds/export        OPML
+
+# RSSHub 搜索
+GET    /rsshub/search?q=&type=keyword|url
+POST   /rsshub/preview           {route, params} → 最近 5 条
+POST   /rsshub/refresh           刷新路由库
+
+# 条目
+GET    /entries                  ?feed=&category=&tier=&unread=&view=&since=&cursor=
+GET    /entries/:id              含正文 + AI 分析
+POST   /entries/read             {ids:[], progress?}
+POST   /entries/:id/analyze      手动重跑
+
+# 高亮
+GET    /entries/:id/highlights
+POST   /highlights  PATCH /highlights/:id  DELETE /highlights/:id
+GET    /highlights?cursor=&entryId=&tag=
+POST   /highlights/:id/insight   SSE
+
+# 聚合
+GET    /clusters                 ?window=24h&minHeat=
+GET    /clusters/:id             含 consensus/conflicts
+GET    /digests  GET /digests/:id  POST /digests
+
+# 检索 / 问答
+GET    /search?q=&mode=keyword|semantic|hybrid
+POST   /chat                     SSE，带 citations
+
+# 系统
+GET    /stats                    用量/成本/队列深度/失败条目/源健康
+GET    /settings  PATCH /settings
+POST   /settings/test-ai
+POST   /backup  GET /backup/list
+POST   /export  POST /import
+```
+
+错误体统一 `{ error: { code, message, retryable } }`。所有 handler 经 `requireUser()` 取 `userId` —— 预留多人的单点开关。
+
+---
+
+## 十九、分步实施与逐步自验证
+
+本章是**落地执行清单**。原则：**每一步结束都能自己判定通过/失败，不依赖"感觉差不多了"**。
+
+### 19.1 验证机制的基准
+
+每一步配一个 `verify` 脚本（`scripts/verify/<step>.mjs`），也可用 `ai-rss verify <step>` 调起。它**只做断言、不做修复**，输出：
+
+```
+PASS  m0-01-toolchain   4 项断言
+FAIL  m0-02-schema      schema_migrations 应为 1 行，实际 0
+```
+
+三条硬规则：
+
+| 规则 | 原因 |
+|---|---|
+| 每步必须**先失败再通过** —— 实现前跑一次确认它真能报红 | 否则可能是个永远绿的假断言 |
+| 断言检查**产物**（库里有什么、HTTP 返回什么），不检查"代码里有没有某函数" | 后者改了名字就失真 |
+| 每步独立可重跑，不依赖前面步骤的残留状态 | 有残留的验收会掩盖问题 |
+
+**第四条约束针对脚本本身**：`scripts/verify/` 下的每个断言都必须能追溯到本文档的某一节。脚本不放宽阈值的理由见附录 A.5 —— 改阈值要比改实现更慎重，因为前者会让所有指标一起失真。
+
+本文档的每一章都对应可执行的验收：§1.1 的需求表列出「规格章节 / 实施步骤 / 验收脚本」三列，任一需求都能顺着它查到具体是哪个脚本在验证。**查不到验收脚本的需求，等于没有验收标准**，不允许进入实现。
+
+**验收脚本统一用 `.mjs`**，跨平台不需要 `.sh`/`.ps1` 两份。Node 24 能直接执行 `.ts`，但脚本保持 `.mjs`，避免与业务代码的类型依赖纠缠：
+
+```bash
+./.toolchain/node/bin/node scripts/verify/m0-02-schema.mjs
+```
+
+这是 §4.3 把 Node 放进项目内的额外收益：**验收脚本不再受平台脚本差异困扰**。
+
+### 19.2 M0：骨架（5~6 天，拆成 8 步）
+
+| # | 步骤 | 产出 | 自验证命令 | 通过判据 |
+|---|---|---|---|---|
+| 0.1 | 项目内工具链 | `.toolchain/node`、`.npmrc`、`.gitignore`、`scripts/bootstrap.{sh,ps1}` | `m0-01-toolchain.mjs` | ① `node -v` = v24.13.0 ② `npm config get cache` 在项目内 ③ 构建前后 `$HOME` 文件数不变 |
+| 0.2 | 表结构与迁移 | `schema.ts`、`migrations/0001_init.sql`、`migrate.ts` | `m0-02-schema.mjs` | ① 19 张业务表逐一点名存在（不数数量，FTS5 的 shadow 表会干扰计数）② 再跑一次不报错且 `schema_migrations` 仍 1 行 ③ `integrity_check` = ok ④ `entries_fts` 可 `MATCH` |
+| 0.3 | 数据库访问层 | `db/client.ts`、`adapter.ts` | `m0-03-db.mjs` | ① WAL 生效 ② `busy_timeout`=5000 ③ 写 1 万条 < 3s ④ 两进程并发写不报 `SQLITE_BUSY` |
+| 0.4 | HTTP 骨架 | `src/index.ts`、`app.ts`、子命令 | `m0-04-server.mjs` | ① `version`/`doctor` 有输出 ② `/api/health` 200 ③ 未登录访问 `/api/v1/feeds` 返回 401 |
+| 0.5 | 认证 | cookie session + Bearer 双认 | `m0-05-auth.mjs` | ① 登录返回 `Set-Cookie`（`SameSite=Lax`、`Path=/`）② 带 cookie 200 ③ 带 Bearer 200 ④ `loginUserInfo` 未登录返回 **200** 而非 401 |
+| 0.6 | Job runner | `jobs/runner.ts` | `m0-06-jobs.mjs` | ① 入队 100 → 全 `done` ② 同 `dedupe_key` 只留 1 条 ③ handler 抛错 → `attempts=3` 后 `dead` ④ 杀进程重启后 `running` 重置为 `pending` |
+| 0.7 | 检索层 | `entries_fts`、bigram 双端切分 | `m0-07-search.mjs` | ① 10 万条下 `"芯片"` 有结果（**2 字词必须能查**）② 无命中 < 5ms ③ `"半导X体"` **不**误命中 `"半导体"` ④ 时间线 < 5ms、未读数 < 3ms |
+| 0.8 | 三路构建 | `build-sea.mjs`、`pack-client-zip.mjs`、Dockerfile | `m0-08-deploy.mjs` | ① 二进制启动首页 200 且含 `id="root"` ② 同一 `data/` 在源码/二进制/Docker 间互换启动 ③ 插件 3 端点在 Docker 里也通 ④ `$HOME` 零写入 |
+
+**M0 门禁**：`scripts/verify/m0.mjs` 依次跑完 8 项、全绿才进 M1。任何一项红都不能跳过 —— 这些是地基，跳过会在 M2 以后以「奇怪 bug」的形式回来。
+
+判据是**累积**的：跑到 0.5 时，0.1~0.5 五项过了就算这一步完成，0.6~0.8 仍应报红（它们还没实现）。这正是「先失败再通过」的意义：**每次新增一步，只应让对应的那项从红转绿，其余项状态不变**。如果 0.6 实现完 0.3 反而红了，说明引入了回归。
+
+### 19.3 M1：阅读 + RSSHub（2~2.5 周，6 步）
+
+| # | 步骤 | 自验证 | 通过判据 |
+|---|---|---|---|
+| 1.1 | feed CRUD + OPML | `m1-01-feeds.mjs` | ① 导入 100 源 OPML 成功 ② 导出再导入源数一致 ③ 非法 URL 返回 400 而非 500 |
+| 1.2 | 定时抓取 + 条件请求 | `m1-02-fetch.mjs` | ① 本地 mock RSS 抓 5 源全成功 ② 第二次带 `If-None-Match`，304 时不重复入库 ③ 源 404 → `error_count` 递增，3 次后 `broken` |
+| 1.3 | 正文提取 | `m1-03-extract.mjs` | ① 5 个真实站点正文 > 原文 60% ② gzip 后体积变小 ③ 提取失败回退 feed 内 HTML，不丢条目 |
+| 1.4 | 去重 | `m1-04-dedupe.mjs` | ① 同 URL 不同 utm 参数判重 ② 余弦 >0.95 判重 ③ 混入 20 条重复，重复率 < 1% |
+| 1.5 | 列表/阅读/历史 | `m1-05-ui-api.mjs` | ① 游标分页不重复不漏 ② `POST /read` 两次 → `read_count=2` 且 `last_read_at` 更新 ③ 历史按日期分组正确 |
+| 1.6 | RSSHub 搜索 | `m1-06-rsshub.mjs` | ① 关键词搜到路由 ② URL 反查到路由 ③ 预览拉到 ≥1 条 ④ 断网时用 7 天缓存仍能搜 |
+
+**M1 门禁**：`m1` 全绿 + **50 个真实源连跑 3 天无崩溃**（脚本跑不了，必须真跑）。
+
+### 19.4 M2：AI 分析（1~1.5 周，5 步）
+
+| # | 步骤 | 自验证 | 通过判据 |
+|---|---|---|---|
+| 2.1 | AI 客户端 + 结构化输出 | `m2-01-ai-client.mjs` | ① mock 返回裸文本/围栏 JSON/合法 JSON 三种都能解析 ② zod 失败自动重试一次 ③ 二次失败进死信不阻塞队列 |
+| 2.2 | 单篇分析流水线 | `m2-02-analyze.mjs` | ① 20 篇真实文章全产出摘要 ② 缺字段 → `stage=failed` 且 `stage_error` 可读 ③ 重跑不重复计费 |
+| 2.3 | 受控分类 + tier | `m2-03-classify.mjs` | ① slug 不在列表 → 判 `other` ② tier 边界正确（39/40/69/70/89/90） |
+| 2.4 | Embedding | `m2-04-embed.mjs` | ① 维度 = 配置值 ② BLOB 字节 = dim×4 ③ 1000 条余弦 < 20ms |
+| 2.5 | 成本审计 + 预算闸门 | `m2-05-budget.mjs` | ① 每次调用都有 `ai_usage` 记录 ② 设 `dailyUsd=0.001` 超限后降 `fast_only` ③ 再超则停止且 UI 可见 |
+
+**M2 门禁**：`m2` 全绿 + **黄金测试集 20~30 篇，摘要准确率 ≥85%、分类 ≥80%**（人工标注一次作为回归基线）。
+
+### 19.5 M3：每日简报（1.5 周，4 步）
+
+| # | 步骤 | 自验证 | 通过判据 |
+|---|---|---|---|
+| 3.1 | 聚类 | `m3-01-cluster.mjs` | ① 100 条同事件样本聚成 ≤3 簇 ② 不同事件不误聚 ③ 100 条 < 1s |
+| 3.2 | 簇级归纳 | `m3-02-cluster-summary.mjs` | ① 输出含 `consensus`/`conflicts` ② 单来源簇标注「单一来源」③ 输入 3 篇时 `conflicts` 为空而非编造 |
+| 3.3 | 简报生成 | `m3-03-digest.mjs` | ① `{{cite:id}}` 全被替换为真实链接 ② **无一处 URL 是模型编造**（逐条校验存在于库中）③ 同窗重跑不重复 |
+| 3.4 | 定时推送 | `m3-04-schedule.mjs` | ① 改时间到 08:00 触发一次 ② 失败重试且不重复推 ③ 无新内容不发空简报 |
+
+**M3 门禁**：`m3` 全绿 + **连跑 3 天，人工评估误聚 < 10%**。
+
+### 19.6 M4~M8
+
+| 阶段 | 关键步骤 | 自验证判据 |
+|---|---|---|
+| **M4 高亮**（1~1.5 周） | 三选择器存储 → 锚定恢复 → 降级链 → UI 工具条 | ① 改提取器后旧高亮仍能定位 ② 破坏 `position` 靠 `quote` 找回 ③ 再破坏 `quote` 靠 `range` 找回 ④ 全失败标 `orphaned` 且列表可见（**不静默丢**） |
+| **M5 检索 + MCP**（1~1.5 周） | 混合检索 → RAG 流式 → MCP 6 工具 | ① 20 个问题都有可点击引用 ② Inspector 能列出 6 个工具 ③ stdio 与 HTTP 都能调通 |
+| **M6 备份迁移**（1 周） | 增量快照 → 按体积保留 → 导出/导入 | ① `VACUUM INTO` 副本 `integrity_check`=ok ② 超 `maxGB` 时最旧被删 ③ **导出→干净环境导入→条目数/高亮数一致** |
+| **M7 插件补全**（1~1.5 周） | 归档/稍后读/集合/黑名单 | ① 16 端点逐个对照 HAR 契约 ② 真实插件全流程走通 |
+| **M8 打磨**（1 周） | 分类 UI、监控、prompt 回归 | ① 黄金测试集全绿 ② 连跑 2 周无人工介入 |
+
+### 19.7 需求 → 步骤 → 脚本 反查索引
+
+§1.1 的每项需求，都能顺着这张表查到「在哪一步实现、由哪个脚本验收」。**这是本文档作为验收标准的实际载体** —— 任何一项需求若在这张表里找不到脚本，说明它的验收标准缺失，不允许开工。
+
+| 需求（§1.1） | 实施步骤 | 验收脚本 | 里程碑门禁 |
+|---|---|---|---|
+| 1 RSS 订阅 / OPML / 全文提取 | 1.1 / 1.2 / 1.3 | `m1-01` `m1-02` `m1-03` | `verify/m1` |
+| 2 RSSHub 搜索 | 1.6 | `m1-06` | `verify/m1` |
+| 3 AI 分类分级 | 2.1 / 2.2 / 2.3 | `m2-01` `m2-02` `m2-03` | `verify/m2` |
+| 4 每日简报 | 3.1 / 3.2 / 3.3 / 3.4 | `m3-01`~`m3-04` | `verify/m3` |
+| 5 高亮 | M4（4 步） | `m4-01`~`m4-04` | `verify/m4` |
+| 6 阅读历史 | 1.5 | `m1-05` | `verify/m1` |
+| 7 检索与 RAG | 0.7 / M5 | `m0-07` `m5-*` | `verify/m0` `verify/m5` |
+| 8 MCP 服务器 | M5 | `m5-*` | `verify/m5` |
+| 9 备份 / 迁移 | 1.4 / M6 | `m1-04` `m6-*` | `verify/m6` |
+| 10 Huntly 插件兼容 | 0.5 / 0.8 / M7 | `m0-05` `m0-08` `m7-*` | 真实插件 |
+| 11 现代简洁 UI | 1.5 / M8 | `m1-05` `m8-*` | `verify/m8` |
+| 12 CI 打包 + Docker | 0.8 | `m0-08` | `verify/m0` |
+| 约束：三路部署 | 0.8 | `m0-08` | `verify/m0` |
+| 约束：环境隔离 | 0.1 / 0.8 | `m0-01` `m0-08` | `verify/m0` |
+| 约束：多人预留 | 0.5 | `m0-05` | `verify/m0` |
+
+**十项需求里，只有第 10 项（插件兼容）的最终验收不完全靠脚本** —— 它必须用官方原版插件真人操作一次。这是本文档唯一承认「脚本无法覆盖」的地方，因此在门禁里单列，不混进 `verify` 的自动判定。
+
+### 19.8 依赖与并行
+
+```
+0.1 工具链
+ └─ 0.2 表结构 ─┬─ 0.3 DB 层 ─┬─ 0.4 HTTP ─┬─ 0.5 认证 ─┬─ M1 阅读
+                │              │            │            └─ 0.8 部署
+                │              │            └─ 0.6 Job runner ─┬─ M1 抓取
+                │              └─ 0.7 检索 ───────────────────┴─ M2 AI
+                └─ （M4 高亮需要 0.2 的高亮表，可与 M2 并行）
+```
+
+可并行三处：
+
+- **0.7 检索** 与 **0.6 Job runner** 互不依赖，可同时做。
+- **M4 高亮**（前端 + 锚定算法）与 **M2 AI** 无依赖，两人时可并行。
+- **M6 备份** 只依赖 0.3，可在 M1 之后任意时点插入。
+
+### 19.9 工期汇总
+
+| 阶段 | 步数 | 工期 | 累计 |
+|---|---|---|---|
+| M0 | 8 | 5~6 天 | 5~6 天 |
+| M1 | 6 | 2~2.5 周 | 3~3.5 周 |
+| M2 | 5 | 1~1.5 周 | 4~5 周 |
+| M3 | 4 | 1.5 周 | 5.5~6.5 周 |
+| M4 高亮 | 4 | 1~1.5 周 | 6.5~8 周 |
+| M5 检索+MCP | 3 | 1~1.5 周 | 7.5~9.5 周 |
+| M6 备份 | 3 | 1 周 | 8.5~10.5 周 |
+| M7 插件 | 2 | 1~1.5 周 | 9.5~12 周 |
+| M8 打磨 | 3 | 1 周 | **10.5~13 周** |
+| **合计** | **38 步** | | |
+
+**建议顺序**：M0 → M1 → M2 → M3 得到可自用闭环（约 6.5 周），再 M4 → M5 → M6 → M7 → M8。
+
+三条排期理由：
+
+- **插件兼容拆两段**：M0 的 0.5 落 cookie session、0.8 落「连接+保存+角标」三个端点，因为这三点决定表结构与认证方式，晚做要返工；其余 M7 补完。
+- **RSSHub 搜索放在 M1**：它是获取内容的前提，找不到源后面全是空转。
+- **MCP 提前到 M5**：复用检索层，成本低、日常收益明显。
+
+### 19.10 通用自检
+
+不确定某步是否真做对时，跑这三个（比单点断言更早暴露问题）：
+
+```bash
+# 1. 全量验证
+./.toolchain/node/bin/node scripts/verify/all.mjs
+
+# 2. 从零重建（确认没有隐式依赖上一步的残留）
+./.toolchain/node/bin/node scripts/verify/all.mjs --fresh
+
+# 3. 干净环境（确认没有隐式依赖开发机的状态）
+docker run --rm -v "$PWD":/app -w /app node:24-bookworm-slim \
+  bash -c './scripts/bootstrap.sh && ./.toolchain/node/bin/node scripts/verify/all.mjs --fresh'
+```
+
+---
+
+## 二十、成本估算
+
+假设 50 源、日均新增 500 条、去重后 300 条进分析：
+
+| 项 | 计算 | 量级 |
+|---|---|---|
+| 单篇分析输入 | 300 × ~4000 token | 1.2M/日 |
+| 单篇分析输出 | 300 × ~400 token | 0.12M/日 |
+| Embedding | 300 × ~500 token | 0.15M/日 |
+| 聚类 + 简报 | 每日 1~3 次长上下文 | 0.1M/日 |
+| **合计** | | **≈1.6M token/日 ≈ 4800 万/月** |
+
+按国内主力模型每百万 token 数元级估算，**月成本几十元量级**；用 GPT-4 级模型放大 10~20 倍。因此**分级路由是必需项**，不是优化项。
+
+开启粗筛 + 截断 + 批量合并后，实际进入精读的通常降到 150~200 条/日。
+
+### 20.1 磁盘成本（容易被忽略的一半）
+
+AI 成本之外还有磁盘。按 §13.3 的措施生效后：
+
+| 时段 | 条目数 | 库体积 | 备份（上限 10GB） | 合计 |
+|---|---|---|---|---|
+| 第 1 月 | ~1.5 万 | ~150 MB | ~1 GB | **~1.2 GB** |
+| 第 6 月 | ~9 万 | ~0.9 GB | ~6 GB | **~7 GB** |
+| 第 12 月 | ~18 万 | ~1.8 GB | 10 GB（触顶按体积滚动） | **~12 GB** |
+
+**不做 §13.3 那三条措施的话，12 个月是 ~4.5GB 库 + 57GB 备份 = 61GB** —— 这是必须在上线前解决的事，不是后期优化。
+
+NAS 上 12GB 是可接受量级；给 `data/` 预留 20GB 即可舒适运行一年。
+
+### 20.2 开发目录占用（源码部署）
+
+按 §4.3 把工具链也放进项目后，整个目录的构成：
+
+| 部分 | 体积 | 说明 |
+|---|---|---|
+| `.toolchain/node` | ~104 MB | Node 24 + 完整 npm（解压后，压缩包即删） |
+| `.cache/npm` | ~150~200 MB | 依赖包缓存，重复安装不再下载 |
+| `node_modules` | ~120 MB | 含 esbuild / vite / react / react-dom |
+| `dist/` | ~2 MB | 前端 224KB + 服务端 bundle 945KB + 二进制 |
+| `data/` | 视使用 | 唯一需要备份 |
+| **合计（不含 data）** | **~380~430 MB** | 全部在 `.gitignore` 内 |
+
+对比「系统装 Node + 全局缓存」的方式：占用相近，但**删目录即完全卸载**，且不同项目之间不会互相污染依赖版本。
+
+Docker 镜像 ~80MB、`data/` 预留 20GB、源码目录 ~400MB —— 三者互不重叠，一台 64GB 的小 NAS 余量充足。
+
+---
+
+## 二十一、风险与对策
+
+| 风险 | 后果 | 对策 |
+|---|---|---|
+| `node:sqlite` 是 RC | API 可能调整 | 抽 `Db` 适配层（约 40 行）；Node 版本锁 24.x |
+| TS 只能用可擦除语法 | 不能用 `enum` | 用 `const` 对象 + union；`tsconfig` 开 `erasableSyntaxOnly` 提前拦截 |
+| SEA 不支持 Alpine / darwin-x64 | 这两个平台无二进制 | 只用 glibc Linux 与 Windows 产物；其他平台走源码 |
+| 编译产物跑不起来 | 用户下载即失败 | CI 门禁：编译后启动并跑 E2E |
+| 静态资源未内嵌 | 二进制启动但页面 404 | 发布前检查：洁净目录单独运行，首页必须 200 |
+| 三路部署行为分叉 | 只有 Docker 能跑 | 配置项全集审计；CI 对三条路径跑同一套集成测试 |
+| LLM 幻觉 | 摘要含原文没有的信息 | Prompt 硬约束 + 黄金测试集 + `{{cite}}` 强制溯源；UI 标注 |
+| JSON 不合规 | 流水线大量失败 | 三级降级 + zod 自愈重试 + 死信列表 |
+| 成本失控 | 账单爆炸 | 预算闸门自动降级；`ai_usage` 实时累计；首次导入限速 |
+| SQLite 网络盘 | 锁异常 / 库损坏 | 数据目录须为本地块存储；`doctor` 检测告警；WAL + `busy_timeout` |
+| **备份不可用** | 真需要时才发现坏了 | CI 强制「导出→新容器导入→条目数一致」往返测试 |
+| **磁盘被正文吃光** | 一年后 2.5GB，NAS 告警 | gzip + `raw_html` 30 天 + `noise` 不存正文（§13.3）；`doctor` 监控正文占比 |
+| **备份体积失控** | GFS 23 份 × 2.5GB = 57GB | 改为按体积保留、默认上限 10GB（§13.2） |
+| 源反爬 / 失效 | 抓不到 | 条件请求、per-domain 限速、UA、退避、`status=broken` |
+| SSRF | 内网探测 | 添加源/抓原文时禁内网与元数据 IP、禁非 http(s)、重定向逐跳校验 |
+| 中文 2 字查询 | 搜不到 | FTS5 + 程序侧 bigram（`trigram` 实测查不到 2 字词）；语义召回兜底 |
+| 未读数卡顿 | 角标每页算 195ms | `WHERE is_read=0` 部分索引，实测降到 0.9ms |
+| 聚类漂移 | 标签越用越乱 | 受控分类法为主；无监督聚类只产「新主题建议」待确认 |
+| Prompt 劣化 | 改一处坏一片 | 版本化 + 20~30 篇黄金测试集回归 |
+| RSSHub 限流 / 需 key | 搜索不可用 | 支持自建实例 + accessKey；路由库本地缓存 7 天，搜索不打网络 |
+| RSSHub 路由失效 | 订阅到死源 | 试订阅前抓一次预览；连续失败置 `broken` |
+| 高亮锚定失效 | 换提取器后错位 | 三选择器 + 四级降级链；失败标 `orphaned` 并在侧栏列出 |
+| MCP 工具过多 | LLM 选错 | 只做 6 个工具；返回 Markdown；强制时间过滤 |
+| Huntly 插件改字段 | 兼容层静默失效 | HAR 契约测试；每次大版本重抓校验 |
+| **文档与实现脱节** | 文档失去验收效力，项目变成"凭记忆开发" | 每次提交回写文档（附录 A.4）；连续两步不一致即视为文档失效（A.5） |
+| **验收脚本被放宽** | 指标全绿但实际已坏 | 改阈值需单独提交 + 在文档写明理由（A.5） |
+| **范围被"顺便"撑大** | 工期失控 | §1.2 的排除清单是需求的一部分；新增需求必须经需求方确认（A.1.1），实现者不能自行加行 |
+
+---
+
+## 二十二、M0 逐项清单（对应 §19.2 的 8 步）
+
+§19.2 给的是「每步做什么 + 怎么验收」，本节给的是「每步具体要写哪些文件」。两步一一对应，**不要跳过任何一步** —— 0.1 与 0.2 定下的事，后面全部要依赖。
+
+### 22.1 步骤 0.1 项目内工具链
+
+```
+[ ] .npmrc：cache=./.cache/npm（prefix 不能写，见 §4.3）
+[ ] .gitignore：.toolchain/ .cache/ .tmp/ node_modules/ dist/ data/ *.log
+[ ] scripts/lib/toolchain.sh + toolchain.ps1   # 版本判定、路径解析（唯一逻辑来源）
+[ ] scripts/bootstrap.sh + bootstrap.ps1       # 下载 → 解压 → 校验 → 删压缩包
+[ ] scripts/dev.sh + dev.ps1                   # 用 .toolchain/node 启动
+[ ] scripts/build.sh + build.ps1               # 同上，生产构建
+[ ] scripts/verify/m0-01-toolchain.mjs
+```
+
+### 22.2 步骤 0.2 表结构与迁移
+
+```
+[ ] npm init；装 hono @hono/node-server drizzle-orm@1.0.0-rc.5 drizzle-kit zod
+      @mozilla/readability linkedom esbuild fflate @modelcontextprotocol/sdk
+      postject（devDep）
+[ ] src/server/db/schema.ts               # 全部 18 表，含 entries_fts 与高亮表
+[ ] npx drizzle-kit generate → migrations/0001_init.sql
+[ ] src/server/db/migrate.ts              # 按 schema_migrations 逐条执行
+[ ] src/embed-static.ts                   # --loader:.sql=text 的导入清单
+[ ] scripts/verify/m0-02-schema.mjs
+```
+
+**一次性建好全部表**（含 `highlights` / `rsshub_cache` / `backup_log` / `chat_*`），不要后续挤牙膏 —— 迁移文件的累积成本远低于改表。
+
+### 22.3 步骤 0.3 数据库访问层
+
+```
+[ ] src/server/db/client.ts    # WAL + foreign_keys + busy_timeout + cache_size + mmap_size
+[ ] src/server/db/adapter.ts   # ~40 行，唯一与驱动打交道的地方
+[ ] 正文以 gzip BLOB 读写      # M0 就定，后改要全量重写
+[ ] scripts/verify/m0-03-db.mjs
+```
+
+### 22.4 步骤 0.4 HTTP 骨架
+
+```
+[ ] src/index.ts               # 子命令 serve|worker|migrate|doctor|version|mcp|export|import
+[ ] src/cli.ts
+[ ] src/server/app.ts          # Hono 装配；自有 API 挂 /api/v1，插件兼容挂 /api
+[ ] src/server/middleware/{auth,error,logger}.ts
+[ ] GET /api/health
+[ ] scripts/verify/m0-04-server.mjs
+```
+
+### 22.5 步骤 0.5 认证
+
+```
+[ ] cookie session（SameSite=Lax + Path=/）+ Bearer 双认
+[ ] GET /api/auth/loginUserInfo       # 未登录返回 200 + null，不是 401
+[ ] src/server/auth/require-user.ts   # 多人预留的唯一开关点
+[ ] scripts/verify/m0-05-auth.mjs
+```
+
+### 22.6 步骤 0.6 Job runner
+
+```
+[ ] src/server/jobs/runner.ts   # claim（BEGIN IMMEDIATE）→ dispatch → 完成/失败/退避
+[ ] src/server/jobs/queue.ts    # dedupe_key 幂等入队
+[ ] 启动时重置超时 running → pending
+[ ] scripts/verify/m0-06-jobs.mjs
+```
+
+### 22.7 步骤 0.7 检索层
+
+```
+[ ] entries_fts + 写入侧 bigram 切分
+[ ] 查询侧 toMatch()（短语 + AND），见 §7.3
+[ ] scripts/verify/m0-07-search.mjs    # 含「半导X体」不误命中「半导体」的反例
+```
+
+### 22.8 步骤 0.8 三路构建
+
+```
+[ ] Vite 前端骨架 → scripts/pack-client-zip.mjs
+[ ] scripts/build-sea.mjs      # esbuild bundle + postject/--build-sea，linux-x64 / windows-x64
+[ ] sea-config.json 用 assets（不是 vfsArchive，见 §3.4）
+[ ] 运行时 getAsset() + fflate 解压 → 静态服务
+[ ] Dockerfile 多阶段（--platform linux/amd64，debian:bookworm-slim runtime）
+[ ] /api/page/save + /api/page/pageOperateResult（兼容层 A 起点的两个）
+[ ] scripts/verify/m0-08-deploy.mjs
+[ ] ai-rss doctor 输出完整自检（备份体积、正文占比、绝对路径）
+```
+
+### 22.9 M0 总判据
+
+四条，全部要过：
+
+1. 同一个 `data/` 目录能在 **Windows 源码模式、Linux x64 二进制模式、x64 Docker 模式**之间互换启动，且 `doctor` 全绿。
+2. **官方原版 Huntly 插件能连上并保存一个网页** —— 通过即说明 cookie session、端点形状、字段映射三个最容易错的地方同时对了。
+3. 10 万条假数据下，时间线 / 检索 / 未读数三条性能红线达标（§5.6）。
+4. **项目目录之外零写入** —— 在没装过 Node 的干净机器上，`git clone` + `bootstrap` + `build` 全程可用，`$HOME` 无新增（§4.5）。
+
+### 22.10 M0 必须一起定的六件事（后补会返工）
+
+| # | 决定 | 返工成本 |
+|---|---|---|
+| 1 | `entries.feed_id` 允许 NULL（网页捕获无 feed） | 中：改表 + 改所有查询 |
+| 2 | 认证走 cookie session（插件是 `credentials: include`） | 高：认证层重写 |
+| 3 | 插件端点响应体格式**逐端点不同**，不能统一 wrapper | 高：全部端点返工 |
+| 4 | 阅读历史用 `last_read_at` 时间戳而非布尔值，`POST /read` 幂等 | 中：历史数据无法回溯排序 |
+| 5 | 高亮位置存**三选择器**（quote/position/range） | **极高**：要重算全部历史高亮 |
+| 6 | 正文以 **gzip BLOB** 入库，不是 TEXT | **极高**：要重写全部历史正文 |
+
+---
+
+## 附录 A、文档的变更控制
+
+本文档既然是需求来源与验收标准，它的**修改方式**本身需要规则。否则它会退化成一份「谁会改谁就改」的笔记，重新失去效力。
+
+### A.1 什么时候必须改文档
+
+| 触发 | 必须做的动作 |
+|---|---|
+| 实现中发现设计不可行 | 先改对应章节 + 在 §19 补/改验收脚本，**再改代码** |
+| 需求方新增/删除一项需求 | **先经需求方确认**（A.1.1），确认后才改 §1.1 表格；若影响工期，同步改 §19.9 |
+| 工期或步骤拆分调整 | 改 §19 对应阶段表 + §19.9 汇总 |
+| 弃用一个已写入的机制 | 不能只是删掉，要在 §21 风险表保留「为什么放弃」 |
+
+#### A.1.1 新增需求必须经需求方确认
+
+**任何需求的新增、删除、修改，都必须先得到需求方（项目所有者）的明确确认，才能写进 §1.1 的表格。**
+
+不允许出现的行为：
+
+| 行为 | 为什么禁止 |
+|---|---|
+| 实现者自行"发现"一个需求并直接加进表 | 需求来源必须是需求方，不是实现者的推测 |
+| 把参考项目（Huntly / Feed2040 等）有的功能当作需求补进来 | 参考项目是参考，不是需求。**Huntly 有 ≠ 我们要有** |
+| 在实现中顺手做了一项**功能**，事后补记一行"顺带实现" | 需求层要先确认再实现，补记不认。注意：实现层的内部细节不在此列（A.2.1） |
+| 用一句「顺便也加上吧」就并入范围 | 没有确认动作的增项，工期与验收都不会被重新评估 |
+
+**确认包含三件事，缺一不可**：
+
+1. **明确表态** —— 需求方确认「要做」，而不是默认、不是没反对。模糊表述（"看看能不能"、"你觉得呢"）不算确认，需要先给出方案再请其定夺。
+2. **写入 §1.1** —— 表格新增一行，填全「规格落点 / 实施步骤 / 验收脚本」三列。填不全说明这项需求还没想清楚，暂不纳入。
+3. **重估影响** —— 明确说明它影响哪些既有步骤、增加多少工期、是否要改里程碑顺序。**不做这一步就等于悄悄膨胀范围**。
+
+**提议格式**（实现者提需求时必须这样写，让需求方能一句话拍板）：
+
+```
+【需求提议】高亮支持导出为 Markdown
+- 归属：§11 高亮系统（新增 11.5 小节）
+- 实施步骤：4.5（M4 内，+2 天）
+- 验收脚本：m4-05-export.mjs —— 导出文件含全部高亮，引用文本可回查
+- 影响：M4 从 1~1.5 周变 1.5~2 周；不影响其他阶段
+- 若不采纳：高亮仍可在 UI 查看，只是无法导出
+```
+
+需求方回一句「加」或「不加」即可，双方无歧义。
+
+### A.2 什么不需要走确认流程
+
+三类，都不必经过 A.1.1：
+
+| 类型 | 例子 | 处理 |
+|---|---|---|
+| **实现层自由** | 变量名、函数拆分、模块内部组织、日志措辞、CSS 类名 | 直接做，不记录 |
+| **技术事实纠错** | "drizzle 0.45 无该驱动"、"Node 24 的 SEA 没有 VFS" | 直接改，提交信息说明 |
+| **规格层微调** | 补一个索引、调整缓存策略、把一个函数换成两个 | 先改文档对应章节，再改代码 |
+
+前两类不必确认也不必记录。第三类要改文档但不需需求方点头 —— 因为它不改变"交付什么"，只改"怎么实现才可行"。
+
+**判断标准一句话**：改的是**「要做什么」**还是**「怎么做可行」**。前者走 A.1.1 等确认，后者自主决定。
+
+### A.2.1 文档沉默处的处理
+
+文档不可能覆盖所有细节，这是必然的，不是缺陷。遇到没写的地方：
+
+```
+这个决定会被用户看到吗？
+ ├─ 会 → 规格层，先写进对应章节（§5~§17），再实现
+ └─ 不会
+     ├─ 涉及历史数据格式 / 已发布 API / 数据库结构？
+     │   └─ 会 → 规格层，写进文档（这类改起来贵，必须留依据）
+     └─ 不会 → 实现层，直接做
+         └─ 半年后可能有人问"为什么这么做"？ → 记进附录 B
+```
+
+一句话：**贵的、看得见的要写进文档；便宜的、内部的直接做，值得记的记附录 B。**
+
+
+### A.3 版本号规则
+
+```
+v1.0  需求定稿，实现未开始        ← 当前
+v1.x  实现推进，需求未变（仅在文档尾部追加「实施记录」不影响 v1.x）
+v2.0  需求范围变化（增删 §1.1 任一行）
+```
+
+**判断标准只有一条**：§1.1 的表格有没有变。变了就是 v2.0，并要求重新评估工期与验收脚本。
+
+版本号由 A.1.1 的确认动作决定：**需求方确认的那一刻才升版本**。实现者不能自行把文档改成 v2.0。
+
+### A.3.1 需求变更记录
+
+每次 §1.1 变动都在这里留一行。**没有这行记录的需求变更，视为未确认** —— 这一栏是「用户点头了」的唯一凭据。
+
+| 版本 | 日期 | 变更 | 需求方确认 |
+|---|---|---|---|
+| v1.0 | 2026-10-23 | 初始 12 项需求定稿 | ✅ 全量确认 |
+| — | — | 示例：新增「高亮导出 Markdown」（§11 / 步骤 4.5 / `m4-05`，+2 天） | ✅ 待确认 |
+
+填写规则：
+
+- **只记"加/删/改需求"**，不记实现进度（进度看 §19 的脚本状态）。
+- 「需求方确认」列只能填 ✅ 或 ⏳，**不能留空** —— 留空等于未走流程，那一行需求应被撤下。
+- 一次确认涉及多项时，每项各占一行，便于将来追溯是哪一项让工期变了。
+
+### A.4 每次实现提交的对应关系
+
+一个提交对应文档里的一处改动，提交信息要能指回去：
+
+```
+feat(0.2): 建表与迁移内嵌
+docs: §6.2 补 entry_contents 索引
+
+m0-02-schema: 4/4 PASS
+```
+
+**提交信息里带不上验收结果，说明这一步还没做完。** 这是最轻量的强制手段：让「文档 §19 的脚本通过」成为提交的一部分，而不是事后补的一张清单。
+
+### A.5 什么时候本文档失效
+
+两种情况，任一发生则文档不再能当验收标准：
+
+1. **规格层脱离实现** —— 连续两个步骤的代码与文档写明的机制不一致且未修正（注意：实现层差异不算，那是正常的）。
+2. **验收脚本被改成"能过"而不是"修好"** —— 脚本只应因实现变好而变绿，不应因断言放宽而变绿。改动断言阈值必须同时在文档里写明理由。
+
+第 2 条比第 1 条更隐蔽：它会让所有指标看起来正常，直到真出问题。因此**修改 `scripts/verify/` 下的阈值需要单独一次提交，并在提交信息里说明为什么原阈值不适用**。
+
+---
+
+## 附录 B、实现决策记录
+
+记录**文档未规定、但影响可逆成本较高**的实现选择。目的不是留痕审批，是防止半年后有人推翻一个其实有理由的决定。
+
+**只记这类**：文档沉默、用户不可见、但改起来不算便宜的决定。
+
+不记的：纯风格选择、一次性代码、能一眼看懂的决定。
+
+| 步骤 | 决定 | 理由 | 可推翻条件 |
+|---|---|---|---|
+| — | （示例）`entries_fts` 用 external content 表而非 contentless | 需要支持按 rowid 回查原文做高亮对齐 | 若 FTS 体积成为问题，可改 contentless 并接受无法回查 |
+| — | — | — | — |
+
+填写规则：
+
+- **每行都要有"可推翻条件"**。写不出来，说明这个决定其实不可逆，应该升级到规格层写进正文。
+- 发现某个记录已失效（后来的实现换掉了它），不要删，改成 ~~删除线~~ 并注明被哪一步取代。
+- 这张表**不参与验收**。它是参考材料，verifying 脚本不读它。
+
+

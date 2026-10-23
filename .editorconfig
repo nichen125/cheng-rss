@@ -1,0 +1,27 @@
+root = true
+
+# 默认 LF。Windows 下编辑器自行显示 CRLF，但文件内容保持 LF，
+# 否则 .sh 脚本在 Linux 上无法执行（#!/bin/sh\r）。
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.md]
+# Markdown 行尾两个空格是换行语义，不能裁
+trim_trailing_whitespace = false
+
+[*.{ps1,cmd,bat}]
+end_of_line = crlf
+
+[*.{yml,yaml,json,jsonc}]
+indent_size = 2
+
+[*.sql]
+indent_size = 2
+
+[Makefile]
+indent_style = tab

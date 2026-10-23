@@ -1,0 +1,27 @@
+# 提交信息规范（Conventional Commits）
+#
+# 格式：
+#   <type>(<scope>): <subject>
+#   <空行>
+#   <body>
+#   <空行>
+#   <footer>
+#
+# type：feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert
+# scope：步骤号或模块，如 0.2 / db / search / huntly
+#
+# 关键约束（见 PLAN.md 附录 A.4）：
+#   涉及实现的提交，body 里必须带本步的验收结果，例如
+#     m0-02-schema: 4/4 PASS
+#   带不上验收结果，说明这一步还没做完。
+#
+# 示例：
+#   feat(0.2): 建表与迁移内嵌
+#
+#   - 19 张业务表 + entries_fts
+#   - 迁移 SQL 用 esbuild text loader 内嵌
+#
+#   m0-02-schema: 4/4 PASS
+#
+# ------------------------------------------------------------
+# 请在下面填写（本行以下为注释，不参与提交）

@@ -12,11 +12,14 @@ import { JobRunner } from './server/jobs/runner.ts';
 import { buildHandlers } from './server/jobs/handlers.ts';
 import { ensureOwnerUser, countUsers, purgeExpiredSessions } from './server/auth/session.ts';
 
+// esbuild 打包时注入（scripts/build-server.mjs）；源码模式走 package.json
+declare const __AI_RSS_VERSION__: string | undefined;
+
 const VERSION = readVersion();
 
 function readVersion(): string {
+  if (typeof __AI_RSS_VERSION__ === 'string') return __AI_RSS_VERSION__;
   try {
-    // 源码模式下从 package.json 读；打包后 esbuild 会把这里 define 成常量
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
     return String(pkg.version ?? '0.0.0');
   } catch {
@@ -337,13 +340,24 @@ async function cmdServe(args: Args): Promise<void> {
 
   const shutdown = async (sig: string) => {
     log.info(`收到 ${sig}，正在关闭`);
-    if (runner) await runner.stop();
-    server.close(() => {
-      h.close();
-      process.exit(0);
+    try {
+      if (runner) await runner.stop();
+    } catch { /* runner 已停 */ }
+
+    // 顺序很重要：先 close 停止接受新连接，再关库，最后才退出。
+    // 之前直接在 close 回调里 process.exit()，Windows 上会触发
+    // libuv 的 "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" ——
+    // 因为 SQLite 的异步句柄还在关闭途中就被强退了。
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      // 有长连接时 close 可能不回调，给 2 秒兜底
+      setTimeout(resolve, 2000).unref();
     });
-    // 兜底：5 秒内没关完就强退
-    setTimeout(() => process.exit(1), 5000).unref();
+
+    try { h.close(); } catch { /* 已关 */ }
+
+    // 让 libuv 完成一轮关闭再退出，避免句柄断言
+    setImmediate(() => process.exit(0));
   };
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });

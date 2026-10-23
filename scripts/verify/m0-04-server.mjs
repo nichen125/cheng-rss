@@ -125,12 +125,25 @@ if (srv.ready) {
   });
   check('401 的 code = UNAUTHORIZED', () => eq(ub?.error?.code, 'UNAUTHORIZED'));
 
-  // 未知路由 404 且同形状
-  const nr = await fetch(`${base}/nosuch/route`);
-  const nb = await nr.json();
-  check('未知路由返回 404 且错误体同形状', () => {
-    return ok(nr.status === 404 && nb?.error?.code === 'NOT_FOUND',
-      `实际: ${nr.status} ${JSON.stringify(nb)}`);
+  // 未知 API 路由：未登录时先被 401 拦截（这是正确的优先级），
+  // 登录后才应看到 404。两条都验，顺序不能反。
+  const nrAnon = await fetch(`${base}/api/v1/nosuch`);
+  const nbAnon = await nrAnon.json();
+  check('未登录访问未知 API 先 401（认证优先于 404）', () => {
+    return ok(nrAnon.status === 401 && nbAnon?.error?.code === 'UNAUTHORIZED',
+      `实际: ${nrAnon.status} ${JSON.stringify(nbAnon).slice(0, 120)}`);
+  });
+
+  // 非 API 路径的行为取决于前端是否已构建：
+  //   已构建 → 200 + index.html（SPA fallback）
+  //   未构建 → 200 + 提示页
+  // 两种都算对，关键是不要落到 404 而让前端路由失效。
+  const spa = await fetch(`${base}/nosuch/route`);
+  await spa.text();
+  check('非 API 路径返回 HTML（SPA 或构建提示页）', () => {
+    const ct = spa.headers.get('content-type') ?? '';
+    return ok(spa.status === 200 && ct.includes('html'),
+      `status=${spa.status} ct=${ct}`);
   });
 
   // 根路径可用
@@ -163,6 +176,16 @@ if (srv.ready) {
   check('Bearer token 可访问 /api/v1/me', () => eq(br2.status, 200));
   check('Bearer 模式解析出正确 userId', () => eq(bb?.id, 'u-test'));
 
+  // 已登录后访问未知 API 才是真正的 404
+  const nrAuth = await fetch(`${base}/api/v1/nosuch`, {
+    headers: { cookie: 'ai_rss_sid=tok-abc' },
+  });
+  const nbAuth = await nrAuth.json();
+  check('已登录访问未知 API 返回 404 且错误体同形状', () => {
+    return ok(nrAuth.status === 404 && nbAuth?.error?.code === 'NOT_FOUND',
+      `实际: ${nrAuth.status} ${JSON.stringify(nbAuth).slice(0, 120)}`);
+  });
+
   // 过期会话应被拒
   const db2 = new DatabaseSync(join(dataDir, 'app.db'));
   db2.prepare('INSERT INTO sessions (id, user_id, token, expires_at, created_at) VALUES (?,?,?,?,?)')
@@ -173,9 +196,21 @@ if (srv.ready) {
 }
 
 // ── 清理 ────────────────────────────────────────────────────
-try { srv.proc.kill('SIGTERM'); } catch { /* ignore */ }
-await new Promise((r) => setTimeout(r, 500));
-try { srv.proc.kill('SIGKILL'); } catch { /* ignore */ }
+// Windows 上 SIGTERM 不会终止进程，且立即 SIGKILL 可能触发 libuv 的
+// "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)"。
+// 用 taskkill /T 杀整棵树，并给它一点时间收尾。
+if (srv?.proc?.pid) {
+  try {
+    if (process.platform === 'win32') {
+      execFileSync('taskkill', ['/F', '/T', '/PID', String(srv.proc.pid)], { stdio: 'pipe' });
+    } else {
+      srv.proc.kill('SIGTERM');
+      await new Promise((r) => setTimeout(r, 400));
+      srv.proc.kill('SIGKILL');
+    }
+  } catch { /* 已退出 */ }
+}
+await new Promise((r) => setTimeout(r, 300));
 rmSync(tmp, { recursive: true, force: true });
 
 summary('m0-04-server');

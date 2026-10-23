@@ -20,9 +20,17 @@ export interface SearchHit {
 export function indexEntry(
   db: DatabaseSync,
   entryId: string,
-  fields: { title?: string | null; summary?: string | null },
+  fields: { title?: string | null; summary?: string | null; topics?: string[] | null; excerpt?: string | null },
 ): void {
-  const text = toIndexText(fields.title, fields.summary);
+  // 索引范围：标题 + AI 摘要 + 主题标签 + 摘要片段。
+  // 不含正文全文 —— 正文体积大且会在 gzip 里，进 FTS 会让索引膨胀数倍；
+  // 正文检索在 M5 用向量 + 段落级检索解决（PLAN §7.3）。
+  const text = toIndexText(
+    fields.title,
+    fields.summary,
+    fields.topics?.join(' ') ?? null,
+    fields.excerpt,
+  );
   // contentless FTS5 不能 UPDATE，只能 delete + insert
   const existing = db.prepare('SELECT fts_rowid FROM entry_fts_map WHERE entry_id = ?')
     .get(entryId) as { fts_rowid: number } | undefined;
@@ -128,18 +136,35 @@ export function rebuildIndex(db: DatabaseSync): { indexed: number } {
   db.exec('DELETE FROM entries_fts');
   db.exec('DELETE FROM entry_fts_map');
   const rows = db.prepare(`
-    SELECT e.id, e.title, a.summary
+    SELECT e.id, e.title, e.excerpt, a.summary, a.topics
       FROM entries e
       LEFT JOIN entry_analysis a ON a.entry_id = e.id
-  `).all() as { id: string; title: string | null; summary: string | null }[];
+  `).all() as { id: string; title: string | null; excerpt: string | null; summary: string | null; topics: string | null }[];
 
   db.exec('BEGIN IMMEDIATE');
   try {
-    for (const r of rows) indexEntry(db, r.id, { title: r.title, summary: r.summary });
+    for (const r of rows) {
+      indexEntry(db, r.id, {
+        title: r.title,
+        summary: r.summary,
+        excerpt: r.excerpt,
+        topics: safeTopics(r.topics),
+      });
+    }
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
     throw e;
   }
   return { indexed: rows.length };
+}
+
+function safeTopics(v: string | null): string[] | null {
+  if (!v) return null;
+  try {
+    const x = JSON.parse(v);
+    return Array.isArray(x) ? x.map(String) : null;
+  } catch {
+    return null;
+  }
 }

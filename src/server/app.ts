@@ -3,6 +3,8 @@ import { AppError, toErrorBody, unauthorized } from './errors.ts';
 import { log } from './logger.ts';
 import { getUserId } from './auth/require-user.ts';
 import { authRoutes } from './routes/auth.ts';
+import { entryRoutes } from './routes/entries.ts';
+import { getStaticAssets, indexHtml, looksLikeAsset, mimeFor } from './static.ts';
 import type { DbHandle } from './db/client.ts';
 import type { RuntimeConfig } from './config.ts';
 
@@ -120,18 +122,83 @@ export function createApp(ctx: AppContext): Hono<{ Variables: Variables }> {
   v1.route('/auth', auth.v1);
   compat.route('/', auth.compat);
 
+  // 条目读取 + 已读标记
+  v1.route('/', entryRoutes(ctx));
+
   app.route('/api/v1', v1);
   app.route('/api', compat);
 
-  // ── 根路径：0.8 之前返回一个说明，之后由静态资源接管 ────────
-  app.get('/', (c) =>
-    c.html(
-      `<!DOCTYPE html><html><head><meta charset="utf-8"><title>AI RSS</title></head>` +
-      `<body><div id="root"></div>` +
-      `<p style="font-family:sans-serif;padding:2rem">前端资源尚未内嵌（0.8 步骤）。` +
-      `API 可用：<code>/api/health</code></p></div></body></html>`,
-    ),
-  );
+  // ── 根路径：静态资源 + SPA fallback ───────────────────────
+  //
+  // SEO 无关的单页应用，除 /api 外所有非静态路径都回 index.html，
+  // 让前端路由自己处理（PLAN §15）。
+  app.get('*', async (c) => {
+    const path = c.req.path;
+
+    if (path.startsWith('/api/')) {
+      return c.json(
+        { error: { code: 'NOT_FOUND', message: `没有这个接口: ${path}`, retryable: false } },
+        404,
+      );
+    }
+
+    const assets = await getStaticAssets();
+
+    if (!assets.ok) {
+      // 前端还没构建：给出明确指引而不是 404
+      return c.html(
+        `<!DOCTYPE html><html><head><meta charset="utf-8"><title>AI RSS</title></head>` +
+        `<body style="font-family:system-ui;padding:3rem;max-width:640px;margin:0 auto;line-height:1.6">` +
+        `<h1 style="font-size:20px">前端尚未构建</h1>` +
+        `<p style="color:#666">当前运行的是 API 服务，前端资源不可用。</p>` +
+        `<pre style="background:#f5f5f5;padding:12px;border-radius:6px;overflow-x:auto">` +
+        `./scripts/build.sh</pre>` +
+        `<p>构建完成后重启服务即可。</p>` +
+        `<p style="color:#888;font-size:13px">来源: ${assets.source}</p>` +
+        `</body></html>`,
+        200,
+      );
+    }
+
+    const rel = path === '/' ? 'index.html' : path.replace(/^\/+/, '');
+    const buf = assets.get(rel);
+    if (buf) {
+      return new Response(toArrayBuffer(buf), {
+        headers: {
+          'content-type': mimeFor(rel),
+          // 带 hash 的资源可长缓存；index.html 必须每次校验
+          'cache-control': rel === 'index.html'
+            ? 'no-cache'
+            : 'public, max-age=31536000, immutable',
+        },
+      });
+    }
+
+    // SPA fallback：非静态资源路径交给前端路由
+    const index = indexHtml(assets);
+    if (index && !looksLikeAsset(path)) {
+      return new Response(toArrayBuffer(index), {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
+      });
+    }
+
+    return c.text('Not Found', 404);
+  });
 
   return app;
+}
+
+/**
+ * Uint8Array → ArrayBuffer，供 Response body 使用。
+ *
+ * 不能直接传 buf.buffer：如果 buf 是某个更大 Buffer 的视图
+ * （Node 的 Buffer.from 常这样），会连带把整块内存当响应体发出去。
+ */
+function toArrayBuffer(buf: Uint8Array): ArrayBuffer {
+  if (buf.byteOffset === 0 && buf.byteLength === buf.buffer.byteLength) {
+    return buf.buffer as ArrayBuffer;
+  }
+  const copy = new Uint8Array(buf.byteLength);
+  copy.set(buf);
+  return copy.buffer;
 }

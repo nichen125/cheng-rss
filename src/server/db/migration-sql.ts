@@ -10,15 +10,33 @@ import { fileURLToPath } from 'node:url';
 // 用「是否被 esbuild 定义过」来区分，而不是靠 NODE_ENV 之类的运行时标志 ——
 // 后者在二进制里容易配错，前者是编译期事实。
 //
-// esbuild 会在 bundle 时替换：
-//   0001_init.sql  →  const __SQL_0001__ = "CREATE TABLE ...";
-declare const __SQL_0001__: string | undefined;
+// esbuild 会在 bundle 时替换为字符串常量（见 scripts/build-server.mjs）。
+// 声明可选类型：源码模式下这两个标识符不存在，typeof 检查为 'undefined'。
+declare const __SQL_0001_INIT__: string | undefined;
 
-const IS_BUNDLED = typeof __SQL_0001__ === 'string';
+function bundledSql(): string | null {
+  // typeof 对未声明标识符不会抛 ReferenceError
+  return typeof __SQL_0001_INIT__ === 'string' ? __SQL_0001_INIT__ : null;
+}
 
-// 源码模式下定位 migrations 目录。本文件位于 src/server/db/，
-// 所以 migrations 就在同级。
-const HERE = dirname(fileURLToPath(import.meta.url));
+// 源码模式下定位 migrations 目录。
+// 本文件位于 src/server/db/，所以 migrations 就在同级。
+// 打包后 import.meta.url 会被注入的 shim 替代成 bundle 所在位置，
+// 但我们不用它找文件 —— 打包时 SQL 已通过 define 变成常量。
+function currentDir(): string {
+  try {
+    // 打包成 CJS 时 import.meta 不存在，用 __dirname（esbuild 会保留）
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyGlobal = globalThis as any;
+    if (typeof anyGlobal.__dirname === 'string') return anyGlobal.__dirname;
+  } catch { /* ignore */ }
+  try {
+    return dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return process.cwd();
+  }
+}
+const HERE = currentDir();
 
 function loadFromFs(name: string): string {
   const candidates = [
@@ -37,8 +55,10 @@ function loadFromFs(name: string): string {
 
 export function loadMigrationSql(name: string): string {
   switch (name) {
-    case '0001_init.sql':
-      return IS_BUNDLED ? (__SQL_0001__ as string) : loadFromFs(name);
+    case '0001_init.sql': {
+      const bundled = bundledSql();
+      return bundled ?? loadFromFs(name);
+    }
     default:
       throw new Error(`未登记的迁移文件: ${name}`);
   }

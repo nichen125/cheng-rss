@@ -1,0 +1,29 @@
+services:
+  ai-rss:
+    build: .
+    image: ai-rss:local
+    container_name: ai-rss
+    ports:
+      - "3000:3000"
+    environment:
+      TZ: Asia/Shanghai
+      # 数据目录在容器内固定为 /app/data，由下面的 volume 映射出来
+      DATA_DIR: /app/data
+      PORT: "3000"
+      HOST: 0.0.0.0
+      LOG_LEVEL: info
+      # 模型配置（M2 起使用）。key 通过 .env 传入，不写进镜像
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com/v1}
+      AI_API_KEY: ${AI_API_KEY:-}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/ai-rss", "doctor", "--quiet"]
+      interval: 60s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    # 单进程 SQLite，不需要额外权限
+    security_opt:
+      - no-new-privileges:true

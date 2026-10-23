@@ -28,6 +28,7 @@ const dbPath = join(dataDir, 'app.db');
 
 const probe = String.raw`
 import { DatabaseSync } from 'node:sqlite';
+import { gzipSync } from 'node:zlib';
 import { drizzle } from 'drizzle-orm/node-sqlite';
 import { migrate } from './src/server/db/migrate.ts';
 import { openDb, readPragmas } from './src/server/db/client.ts';
@@ -83,6 +84,8 @@ if (mode === 'single') {
     longOk: longBack === long,
     shortOk: shortBack === short,
     nullOk: nullBack === null,
+    // 早期数据是裸 gzip（0x1f8b 开头，无 0x01 标记），换实现后必须仍能读
+    legacyOk: unpackText(gzipSync(Buffer.from(long, 'utf8'))) === long,
     ratio: longRaw / longPacked,
     longRaw, longPacked,
     ormBound: ormBoundToSameConnection(),
@@ -151,6 +154,7 @@ check('1 万条全部落库', () => eq(single.count, 10000));
 check('正文 gzip 往返一致', () => ok(single.longOk, '解压结果与原文不符'));
 check('短文本走未压缩分支且往返一致', () => ok(single.shortOk));
 check('null 输入返回 null', () => ok(single.nullOk));
+check('裸 gzip（无 0x01 标记的旧数据）仍可读', () => ok(single.legacyOk));
 check('正文压缩比 > 2.0×', () => {
   return ok(single.ratio > 2.0,
     `压缩比 ${single.ratio.toFixed(2)}×（${single.longRaw}B → ${single.longPacked}B）`);

@@ -193,6 +193,28 @@ if (srv.ready) {
   db2.close();
   const er = await fetch(`${base}/api/v1/me`, { headers: { cookie: 'ai_rss_sid=tok-expired' } });
   check('过期会话被拒（401）', () => eq(er.status, 401));
+
+  // ── 详情页正文：走真实 HTTP 读路径 ──
+  // 验收长期只看列表，所以"正文解不出来"能一路绿灯到最后。正文一定要真读一次。
+  const { gzipSync } = await import('node:zlib');
+  const bodyHtml = '<p>' + '正文可读性回归 '.repeat(60) + '</p>';
+  const db3 = new DatabaseSync(join(dataDir, 'app.db'));
+  db3.prepare(
+    'INSERT INTO entries (id,user_id,guid,url,url_norm,title,published_at,fetched_at) VALUES (?,?,?,?,?,?,?,?)'
+  ).run('e-detail', 'u-test', 'g-detail', 'https://e.com/d', 'e.com/d', '详情测试', Date.now(), Date.now());
+  // 裸 gzip：早期数据的真实形状（无 0x01 标记）
+  db3.prepare('INSERT INTO entry_contents (entry_id, html) VALUES (?,?)')
+    .run('e-detail', gzipSync(Buffer.from(bodyHtml, 'utf8')));
+  db3.close();
+
+  const dr = await fetch(`${base}/api/v1/entries/e-detail`, {
+    headers: { cookie: 'ai_rss_sid=tok-abc' },
+  });
+  const db_ = await dr.json();
+  check('详情接口返回 200 且正文可读', () => {
+    return ok(dr.status === 200 && String(db_?.contentHtml ?? '').includes('正文可读性回归'),
+      `status=${dr.status} body=${JSON.stringify(db_).slice(0, 200)}`);
+  });
 }
 
 // ── 清理 ────────────────────────────────────────────────────

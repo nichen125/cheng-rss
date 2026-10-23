@@ -36,6 +36,9 @@ export function packText(text: string | null | undefined): Uint8Array | null {
 export function unpackText(blob: Uint8Array | null | undefined): string | null {
   if (!blob || blob.length < 1) return null;
   const marker = blob[0];
+  // 0x1f8b 是 gzip 魔数：早期数据是裸 gzip，没有 0x01 标记。
+  // 靠 2 字节魔数判定，比 §13.3 里否决的"试 gunzip 失败就当明文"可靠。
+  if (marker === 0x1f && blob[1] === 0x8b) return gunzipSync(blob).toString('utf8');
   const body = blob.subarray(1);
   if (marker === 0x00) return Buffer.from(body).toString('utf8');
   if (marker === 0x01) return gunzipSync(body).toString('utf8');

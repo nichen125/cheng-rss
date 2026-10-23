@@ -73,10 +73,17 @@ export function assertSchemaCompatible(
   db: DatabaseSync,
   expectVersion = CURRENT_SCHEMA_VERSION,
 ): { ok: true } | { ok: false; reason: string; dbVersion: number } {
-  const row = db
-    .prepare('SELECT MAX(version) AS v FROM schema_migrations')
-    .get() as { v: number | null } | undefined;
-  const dbVersion = row?.v ?? 0;
+  // 全新库还没有这张表。此时不应抛错 —— 调用方会在 migrate 之后校验，
+  // 这里返回 0 表示"尚无迁移记录"，由版本比较自然放行。
+  let dbVersion = 0;
+  try {
+    const row = db
+      .prepare('SELECT MAX(version) AS v FROM schema_migrations')
+      .get() as { v: number | null } | undefined;
+    dbVersion = Number(row?.v ?? 0);
+  } catch {
+    dbVersion = 0;
+  }
 
   if (dbVersion > expectVersion) {
     return {

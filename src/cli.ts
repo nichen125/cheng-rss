@@ -279,12 +279,17 @@ async function cmdServe(args: Args): Promise<void> {
   writeDefaultConfigIfAbsent(cfg);
 
   const h = openDb({ dataDir: cfg.dataDir });
+
+  // 顺序很重要：先 migrate 再 assertSchemaCompatible。
+  // 反过来的话，全新库还没有 schema_migrations 表，断言会直接抛
+  // "no such table"，表现为服务起不来 —— 而这恰好是首次启动的常态。
+  migrate(h.db);
+
   const compat = assertSchemaCompatible(h.db);
   if (!compat.ok) {
     h.close();
     throw new Error(compat.reason);
   }
-  migrate(h.db);
 
   const app = createApp({
     cfg, dbh: h, version: VERSION, startedAt: Date.now(),

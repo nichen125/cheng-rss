@@ -6,11 +6,13 @@
 
 -- ── 用户与设置 ────────────────────────────────────────────────
 CREATE TABLE users (
-  id          TEXT PRIMARY KEY,
-  email       TEXT UNIQUE,
-  name        TEXT,
-  role        TEXT NOT NULL DEFAULT 'owner',
-  created_at  INTEGER NOT NULL
+  id            TEXT PRIMARY KEY,
+  email         TEXT UNIQUE,
+  name          TEXT,
+  role          TEXT NOT NULL DEFAULT 'owner',
+  -- scrypt$<salt-hex>$<hash-hex>；带算法前缀便于将来换算法时识别旧格式
+  password_hash TEXT,
+  created_at    INTEGER NOT NULL
 );
 
 CREATE TABLE settings (

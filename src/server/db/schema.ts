@@ -13,6 +13,8 @@ export const users = sqliteTable('users', {
   email: text('email').unique(),
   name: text('name'),
   role: text('role').notNull().default('owner'),
+  // scrypt$<salt-hex>$<hash-hex>
+  passwordHash: text('password_hash'),
   createdAt: ts('created_at').notNull(),
 });
 

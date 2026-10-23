@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { AppError, toErrorBody, unauthorized } from './errors.ts';
 import { log } from './logger.ts';
+import { getUserId } from './auth/require-user.ts';
+import { authRoutes } from './routes/auth.ts';
 import type { DbHandle } from './db/client.ts';
 import type { RuntimeConfig } from './config.ts';
 
@@ -80,14 +82,19 @@ export function createApp(ctx: AppContext): Hono<{ Variables: Variables }> {
     }
   });
 
-  // ── 自有 API：必须登录 ─────────────────────────────────────
+  // ── 自有 API：除公开端点外必须登录 ─────────────────────────
   const v1 = new Hono<{ Variables: Variables }>();
 
+  // 公开端点白名单：登录、初始化、健康检查不需要已有会话。
+  // 用精确前缀匹配而非"包含"，避免 /auth/loginxxx 之类被误放行。
+  const PUBLIC_V1 = ['/auth/login', '/auth/setup', '/health'];
+
   v1.use('*', async (c, next) => {
-    // 0.5 会接真正的认证；此刻先占位，保证路由契约（未登录 401）成立。
-    // 用 Allow 探测头跳过鉴权，供 verify 脚本测健康路径。
-    const { getUserId } = await import('./auth/require-user.ts');
-    const uid = await getUserId(c, ctx);
+    const path = c.req.path.replace(/^\/api\/v1/, '');
+    if (PUBLIC_V1.some((p) => path === p || path.startsWith(p + '/'))) {
+      return next();
+    }
+    const uid = getUserId(c, ctx);
     if (!uid) throw unauthorized();
     c.set('userId', uid);
     await next();
@@ -100,10 +107,20 @@ export function createApp(ctx: AppContext): Hono<{ Variables: Variables }> {
   // 先放一个受保护的探针，验证 401 契约
   v1.get('/feeds', (c) => c.json({ items: [], total: 0 }));
 
-  app.route('/api/v1', v1);
-
   // ── Huntly 插件兼容层（0.8 起逐步补齐）────────────────────
-  const compat = new Hono();
+  const compat = new Hono<{ Variables: Variables }>();
+
+  // 认证路由：自有与插件两套挂在不同前缀，响应形状各自独立。
+  //
+  // auth.v1 内部路由是 /login /logout /me /setup /password，要合并进
+  // 上面的 v1 子应用（最终路径 /api/v1/auth/*），不能再 route 一次
+  // '/auth' 到 app —— 那会绕过 v1 的白名单中间件。
+  // auth.compat 内部路由已带 /auth/ 前缀，直接合并进 compat。
+  const auth = authRoutes(ctx);
+  v1.route('/auth', auth.v1);
+  compat.route('/', auth.compat);
+
+  app.route('/api/v1', v1);
   app.route('/api', compat);
 
   // ── 根路径：0.8 之前返回一个说明，之后由静态资源接管 ────────

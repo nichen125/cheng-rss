@@ -27,9 +27,28 @@ const binPath = join(root, 'dist', binName);
 
 group('0.8 三路构建');
 
+// 二进制不在就先构建一次。
+// 理由：这一步验的是"产物对不对"，而不是"你有没有记得先跑构建"。
+// 全新 clone 里只跑过 build.sh（不含 --sea）是很正常的状态，
+// 此时报 FAIL 会误导人以为实现坏了。
+if (!existsSync(binPath)) {
+  process.stdout.write('  \u001b[33m!\u001b[0m 二进制不存在，先构建一次…\n');
+  try {
+    execFileSync(nodeBin, [join(root, 'scripts/build-sea.mjs')], {
+      cwd: root,
+      stdio: 'pipe',
+      timeout: 600000,
+    });
+  } catch (e) {
+    // 构建失败才是真失败，把原因带出来
+    const msg = String(e.stderr ?? e.message).slice(0, 600);
+    process.stdout.write(`  \u001b[31m构建失败\u001b[0m\n${msg}\n`);
+  }
+}
+
 check('二进制已构建', () => {
   if (!existsSync(binPath)) {
-    return ok(false, `缺失 ${binName}，先运行 scripts/build-sea.mjs`);
+    return ok(false, `无法产出 ${binName}。手动运行: node scripts/build-sea.mjs`);
   }
   const size = statSync(binPath).size;
   return ok(size > 20 * 1024 * 1024, `体积只有 ${(size / 1e6).toFixed(0)}MB，可能没内嵌资源`);

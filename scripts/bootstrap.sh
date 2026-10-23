@@ -48,9 +48,18 @@ fi
 # ── 下载 ────────────────────────────────────────────────────────
 PKG_PATH="$PROJECT_ROOT/.tmp/$NODE_PKG"
 info "下载 $NODE_URL"
+info "约 35MB，网速慢时可能几分钟，请耐心等待（不是卡死）"
+
 if command -v curl >/dev/null 2>&1; then
-  curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 \
-       -o "$PKG_PATH" "$NODE_URL" || die "下载失败: $NODE_URL"
+  # 交互终端下显示进度条；重定向/CI 下不显示（否则日志全是 \r）
+  if [ -t 2 ]; then
+    CURL_PROGRESS="--progress-bar"
+  else
+    CURL_PROGRESS="--silent --show-error"
+  fi
+  # shellcheck disable=SC2086
+  curl -fL $CURL_PROGRESS --retry 3 --retry-delay 2 --connect-timeout 20 \
+       --max-time 900 -o "$PKG_PATH" "$NODE_URL" || die "下载失败: $NODE_URL"
 else
   die "未找到 curl，无法下载。请手动下载 $NODE_URL 并解压到 $NODE_DIR"
 fi

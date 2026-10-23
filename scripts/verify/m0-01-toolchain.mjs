@@ -87,6 +87,21 @@ check('未使用系统全局 npm 前缀', () => {
 //   .toolchain/   # 项目内 Node
 // 整行被当成模式，永远匹配不上，导致 104MB 的 node.exe 进了暂存区。
 // 所以这里用 git check-ignore 实测，不看文件内容。
+//
+// 但 git check-ignore 只在 git 仓库里有效。用 `git archive` 导出的
+// tarball 或复制出来的目录没有 .git，此时无法实测 —— 这不是实现
+// 缺陷，应降级为"检查规则文本存在"而不是报 FAIL。
+function isGitRepo() {
+  try {
+    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: root, stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const GIT_REPO = isGitRepo();
+
 function gitIgnored(relPath) {
   try {
     execFileSync('git', ['check-ignore', '-q', relPath], { cwd: root, stdio: 'pipe' });
@@ -97,14 +112,22 @@ function gitIgnored(relPath) {
 }
 
 check('.gitignore 对 .toolchain/ 实际生效', () => {
-  const probe = join(root, '.toolchain', 'node', 'node.exe');
-  const existed = existsSync(probe);
-  // 目录已存在时直接问；否则用一个假路径问规则是否覆盖
+  if (!GIT_REPO) {
+    const gi = readFileSync(join(root, '.gitignore'), 'utf8');
+    return ok(/^\.toolchain\/?$/m.test(gi), '非 git 目录，只能查规则文本；未找到 .toolchain/');
+  }
+  const existed = existsSync(join(root, '.toolchain', 'node', 'node.exe'));
   return ok(gitIgnored('.toolchain/node/node.exe'),
     `git check-ignore 未忽略 .toolchain/node/node.exe（目录${existed ? '存在' : '不存在'}，规则文本可能存在但不生效）`);
 });
 
 check('.gitignore 对 .cache / .tmp / data / dist / node_modules 实际生效', () => {
+  if (!GIT_REPO) {
+    const gi = readFileSync(join(root, '.gitignore'), 'utf8');
+    const missing = ['.cache/', '.tmp/', 'data/', 'dist/', 'node_modules/']
+      .filter((p) => !gi.includes(p));
+    return ok(missing.length === 0, `非 git 目录，查规则文本；缺少: ${missing.join(', ')}`);
+  }
   const probes = [
     '.cache/npm/.probe',
     '.tmp/.probe',

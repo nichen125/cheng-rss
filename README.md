@@ -206,7 +206,7 @@ node scripts/verify/m0-09-ui.mjs         # 真实浏览器验布局（需 Chromi
 | `m1-03-sanitize` | 30 | XSS 白名单：script/iframe/svg/onerror/javascript: 全拦 |
 | `m1-04-feeds` | 47 | 订阅/发现/条件请求 304/404 置 broken/删订阅保留已读/清洗落库 |
 | `m1-05-mobile` | 28 | 底部 tab bar、触摸目标 44px、字号 16px、安全区、横屏 |
-| `m1-06-feeds-ui` | 25 | 30+ 源行高一致、长标题截断、操作不越界、头部吸顶、手机操作可点 |
+| `m1-06-feeds-ui` | 28 | 30+ 源行高一致、长标题截断、操作不越界、头部吸顶、手机操作可点、图标降级 |
 | `docker-path` | 12 | Dockerfile 结构 + 真产出 linux ELF |
 
 **写新断言前先跑一次确认它会红** —— 永远绿的断言没有价值。

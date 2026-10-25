@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiFailure, type EntryDetail, type EntrySummary, type User } from './api.ts';
 import {
   IconArrowLeft, IconBookmark, IconChevronRight, IconCircle, IconClock,
-  IconExternal, IconInbox, IconLogout, IconRss, IconSearch, IconSparkle, IconStar,
+  IconExternal, IconInbox, IconLogout, IconMenu, IconRss, IconSearch, IconSparkle, IconStar,
 } from './icons.tsx';
+import { FeedsPage } from './FeedsPage.tsx';
 
 // 主界面 = 三栏（PLAN §15.1/§15.2/§15.3）
 //
@@ -35,8 +36,10 @@ const NAV: NavItem[] = [
 // 未接入的导航项：给用户"以后会有"的确定感，而不是装作不存在
 const SOON: { label: string; icon: React.ReactNode }[] = [
   { label: '简报', icon: <IconSparkle /> },
-  { label: '订阅', icon: <IconRss /> },
 ];
+
+/** 当前页：条目列表 or 订阅管理 */
+type Page = 'entries' | 'feeds';
 
 export function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -198,6 +201,7 @@ function SetupPage(props: { onDone: (u: User) => void }) {
 interface Stats { entries: number; feeds: number; unread: number; starred: number }
 
 function Main(props: { user: User; onLogout: () => void }) {
+  const [page, setPage] = useState<Page>('entries');
   const [view, setView] = useState<View>('inbox');
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -312,7 +316,7 @@ function Main(props: { user: User; onLogout: () => void }) {
   );
 
   return (
-    <div className="app">
+    <div className={`app ${page === 'feeds' ? 'feeds-mode' : ''}`}>
       {/* ── 侧栏 ─────────────────────────────────────────── */}
       <aside className="sidebar">
         <div className="brand">
@@ -328,8 +332,8 @@ function Main(props: { user: User; onLogout: () => void }) {
             return (
               <button
                 key={n.key}
-                className={`nav-item ${view === n.key ? 'active' : ''}`}
-                onClick={() => setView(n.key)}
+                className={`nav-item ${page === 'entries' && view === n.key ? 'active' : ''}`}
+                onClick={() => { setPage('entries'); setView(n.key); }}
                 title={n.label}
               >
                 <span className="nav-icon">{n.icon}</span>
@@ -342,10 +346,23 @@ function Main(props: { user: User; onLogout: () => void }) {
           })}
         </nav>
 
+        <div className="nav-section">订阅源</div>
+        <nav className="nav">
+          <button
+            className={`nav-item ${page === 'feeds' ? 'active' : ''}`}
+            onClick={() => setPage('feeds')}
+            title="订阅"
+          >
+            <span className="nav-icon"><IconRss /></span>
+            <span className="nav-label">订阅</span>
+            {stats && stats.feeds > 0 && <span className="badge">{stats.feeds}</span>}
+          </button>
+        </nav>
+
         <div className="nav-section">即将支持</div>
         <nav className="nav">
           {SOON.map((s) => (
-            <button key={s.label} className="nav-item soon" disabled title="M1~M4 落地">
+            <button key={s.label} className="nav-item soon" disabled title="M2~M3 落地">
               <span className="nav-icon">{s.icon}</span>
               <span className="nav-label">{s.label}</span>
               <span className="soon-tag">待接入</span>
@@ -365,6 +382,11 @@ function Main(props: { user: User; onLogout: () => void }) {
         </div>
       </aside>
 
+      {/* ── 订阅页：跨后两栏 ─────────────────────────────── */}
+      {page === 'feeds' ? (
+        <FeedsPage onOpenInbox={() => setPage('entries')} />
+      ) : (
+        <>
       {/* ── 列表栏 ───────────────────────────────────────── */}
       <section className={`list-pane ${openId ? 'narrow' : ''}`}>
         <header className="pane-head">
@@ -391,7 +413,11 @@ function Main(props: { user: User; onLogout: () => void }) {
           {err && <div className="alert error inset">{err}</div>}
 
           {!loading && items.length === 0 && (
-            <EmptyState hasQuery={Boolean(debounced)} view={view} />
+            <EmptyState
+              hasQuery={Boolean(debounced)}
+              view={view}
+              onGoFeeds={() => setPage('feeds')}
+            />
           )}
 
           <ul className="entry-list">
@@ -460,11 +486,48 @@ function Main(props: { user: User; onLogout: () => void }) {
           />
         )}
       </section>
+        </>
+      )}
+
+      {/* ── 移动端底部导航（≤640px 才显示，见 styles.css）───────── */}
+      <nav className="tabbar">
+        {NAV.map((n) => {
+          const badge = n.count === 'unread' ? stats?.unread
+            : n.count === 'starred' ? stats?.starred
+            : undefined;
+          return (
+            <button
+              key={n.key}
+              className={`tab ${page === 'entries' && view === n.key ? 'active' : ''}`}
+              onClick={() => { setPage('entries'); setView(n.key); setOpenId(null); }}
+            >
+              <span className="tab-icon">
+                {n.icon}
+                {badge !== undefined && badge > 0 && (
+                  <span className="tab-badge">{badge > 99 ? '99+' : badge}</span>
+                )}
+              </span>
+              <span className="tab-label">{n.label}</span>
+            </button>
+          );
+        })}
+        <button
+          className={`tab ${page === 'feeds' ? 'active' : ''}`}
+          onClick={() => { setPage('feeds'); setOpenId(null); }}
+        >
+          <span className="tab-icon"><IconRss size={18} /></span>
+          <span className="tab-label">订阅</span>
+        </button>
+      </nav>
     </div>
   );
 }
 
-function EmptyState(props: { hasQuery: boolean; view: View }) {
+function EmptyState(props: {
+  hasQuery: boolean;
+  view: View;
+  onGoFeeds?: () => void;
+}) {
   if (props.hasQuery) {
     return (
       <div className="empty">
@@ -496,7 +559,12 @@ function EmptyState(props: { hasQuery: boolean; view: View }) {
     <div className="empty">
       <div className="ph-art"><IconInbox size={26} /></div>
       <h2>收件箱是空的</h2>
-      <p>M1 会加入订阅管理与自动抓取。现在可以用 Huntly 浏览器插件保存网页，条目会直接落到这里。</p>
+      <p>还没有订阅任何源。添加一个 RSS 源后，新文章会自动出现在这里。</p>
+      {props.onGoFeeds && (
+        <div className="empty-actions">
+          <button className="btn primary" onClick={props.onGoFeeds}>去添加订阅</button>
+        </div>
+      )}
     </div>
   );
 }

@@ -738,26 +738,4 @@ input::placeholder { color: var(--fg-faint); }
   }
 }
 
-/* ── 窄屏 ───────────────────────────────────────────────── */
-
-@media (max-width: 1180px) {
-  :root { --list-w: 340px; }
-}
-
-@media (max-width: 900px) {
-  .app { grid-template-columns: var(--sidebar-w) 1fr; }
-  .reader-pane { display: none; }
-  .reader-pane.open {
-    display: flex;
-    position: fixed;
-    inset: 0;
-    z-index: 20;
-    background: var(--bg);
-  }
-}
-
-@media (max-width: 640px) {
-  :root { --sidebar-w: 0px; }
-  .sidebar { display: none; }
-  .app { grid-template-columns: 1fr; }
-}
+/* 响应式规则见 mobile.css —— 集中一处，避免两套断点互相打架 */

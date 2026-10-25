@@ -5,6 +5,7 @@ import { getUserId } from './auth/require-user.ts';
 import { countUsers } from './auth/session.ts';
 import { authRoutes } from './routes/auth.ts';
 import { entryRoutes } from './routes/entries.ts';
+import { feedRoutes } from './routes/feeds.ts';
 import { getStaticAssets, indexHtml, looksLikeAsset, mimeFor } from './static.ts';
 import type { DbHandle } from './db/client.ts';
 import type { RuntimeConfig } from './config.ts';
@@ -111,8 +112,6 @@ export function createApp(ctx: AppContext): Hono<{ Variables: Variables }> {
     return c.json({ id: c.get('userId') });
   });
 
-  // 先放一个受保护的探针，验证 401 契约
-  v1.get('/feeds', (c) => c.json({ items: [], total: 0 }));
 
   // ── Huntly 插件兼容层（0.8 起逐步补齐）────────────────────
   const compat = new Hono<{ Variables: Variables }>();
@@ -126,6 +125,9 @@ export function createApp(ctx: AppContext): Hono<{ Variables: Variables }> {
   const auth = authRoutes(ctx);
   v1.route('/auth', auth.v1);
   compat.route('/', auth.compat);
+
+  // 订阅管理（含 OPML 导入导出、手动刷新）
+  v1.route('/', feedRoutes(ctx));
 
   // 条目读取 + 已读标记
   v1.route('/', entryRoutes(ctx));

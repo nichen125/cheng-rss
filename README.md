@@ -94,6 +94,38 @@ ai-rss import     # 导入（M6）
 
 ---
 
+## 添加订阅
+
+启动后打开 UI → 侧栏「订阅」→「+ 添加订阅」，贴任何地址都行：
+
+| 你贴的 | 会发生什么 |
+|---|---|
+| 完整 feed URL（`https://x.com/feed.xml`） | 直接订阅 |
+| 网站首页（`https://sspai.com`） | 从页面 `<link rel="alternate">` 找订阅地址 |
+| 裸域名（`sspai.com`） | 补 `https://` 再按首页处理 |
+| 一段带 URL 的文字 | 抠出第一个 URL |
+| 找不到 `<link>` 的站点 | 探测 `/feed` `/rss` `/atom.xml` 等 14 个常见路径 |
+
+发现到**多个** feed 时会让用户选，不替他挑。订阅前会先真抓一次 ——
+拉不到内容的源不会进列表，所以"订阅成功但空的"不会发生。
+
+也可以导入别的阅读器导出的 OPML（文件夹层级会保留），或导出自己的订阅。
+
+### 抓取行为
+
+| 行为 | 值 | 说明 |
+|---|---|---|
+| 默认间隔 | 30 分钟 | 添加后可改，最小 5 分钟 |
+| 条件请求 | ETag / Last-Modified | 304 时不重复入库，也不消耗解析 |
+| 失败退避 | 间隔 × (1 + 失败数×2)，最多 7 倍 | 成功一次即复位 |
+| 置 `broken` | 连续 3 次失败，或 404/410 | 不再自动重试，UI 标「失效」 |
+| 取消订阅 | 未读条目删除；**已读/已收藏保留** | 历史记录不该因为退订而消失 |
+
+正文在入库前过白名单清洗（`feeds/sanitize.ts`），读出来时再洗一次 ——
+feed 是外部输入，`<script>`、`onerror`、`javascript:` 都必须拦掉。
+
+---
+
 ## 兼容 Huntly 浏览器插件
 
 在官方 Huntly 插件的设置里把服务器地址改成 `http://<你的地址>:3000`，即可用：
@@ -138,12 +170,15 @@ node scripts/verify-all.mjs
 输出汇总：
 
 ```
-验收汇总  10 个脚本，耗时 30s
-  PASS  docker-path.mjs            3.5s
-  PASS  m0-01-toolchain.mjs        1.0s
+验收汇总  15 个脚本，耗时 46s
+  PASS  docker-path.mjs            3.8s
+  PASS  m0-01-toolchain.mjs        1.3s
   ...
-  PASS  m0-09-ui.mjs               10.5s
-全部通过 10/10
+  PASS  m0-09-ui.mjs               11.1s
+  PASS  m1-01-feed-parse.mjs       0.4s
+  ...
+  PASS  m1-05-mobile.mjs           9.8s
+全部通过 15/15
 ```
 
 单独跑某一步：
@@ -165,6 +200,11 @@ node scripts/verify/m0-09-ui.mjs         # 真实浏览器验布局（需 Chromi
 | `m0-07-search` | 22 | bigram 切分、索引更新、10 万条四条性能红线 |
 | `m0-08-deploy` | 18 | 二进制内嵌资源、内嵌前端非陈旧、三路互换、插件端点 |
 | `m0-09-ui` | 25 | 三栏布局、列表密度、72ch 实测、默认暗色、键盘、窄屏 |
+| `m1-01-feed-parse` | 34 | RSS2.0 / Atom / RDF 解析、content:encoded 优先、坏日期钳制 |
+| `m1-02-opml` | 16 | 文件夹层级、导出导入往返、属性大小写容错 |
+| `m1-03-sanitize` | 30 | XSS 白名单：script/iframe/svg/onerror/javascript: 全拦 |
+| `m1-04-feeds` | 47 | 订阅/发现/条件请求 304/404 置 broken/删订阅保留已读/清洗落库 |
+| `m1-05-mobile` | 28 | 底部 tab bar、触摸目标 44px、字号 16px、安全区、横屏 |
 | `docker-path` | 12 | Dockerfile 结构 + 真产出 linux ELF |
 
 **写新断言前先跑一次确认它会红** —— 永远绿的断言没有价值。
@@ -242,15 +282,19 @@ Docker 构建天然满足这一点（容器里跑的就是 linux node），所�
   本地逐条验证（`scripts/verify/docker-path.mjs`），并且**真的产出了能内嵌资源的
   linux-x64 ELF**，但 `docker build` 本身没跑过。首次在有 docker 的机器上构建时
   请留意：若失败，最可能的原因是 `package-lock.json` 与容器内 npm 版本差异。
-- M0 只做了读取链路，**订阅抓取与 AI 分析在 M1/M2**
-- 侧栏的「简报 / 订阅」标灰注明"待接入"，点了不会有反应（不是 bug，是明确标注的未实现）
+- **订阅已可用**：RSS 2.0 / Atom / RDF、OPML 导入导出、自动发现地址、定时抓取、条件请求
+- **AI 分析仍待 M2**：「AI 摘要」卡片目前只在演示数据里出现，真实抓取的条目没有分析结果
+- **正文提取是简化版**：feed 自带全文就直接清洗入库；只有摘要时**不会**去抓原网页跑 Readability，
+  这项在 M1 后续步骤补齐（`m1-06-extract`）
+- **去重只有 URL 与标题指纹两层**，向量余弦判重在 M1 后续步骤（`m1-07-dedupe`）
+- 侧栏的「简报」标灰注明"待接入"，点了不会有反应（不是 bug，是明确标注的未实现）
 
 ### 想先看界面上手
 
-M0 没有抓取能力，空库打开是空的。灌一批演示条目：
+订阅功能已可用，最直接的方式是启动后贴一个真实 feed 地址。想先看效果也可以灌演示数据：
 
 ```bash
-# 先启动一次让库建好，完成初始化后停掉（或保持运行）
+# 先启动一次让库建好，完成初始化
 ./ai-rss serve --data ./data
 
 # 另一个终端灌 4 条演示数据（四种 tier 各一条，带正文与 AI 卡片）
@@ -260,9 +304,14 @@ node scripts/seed-demo.mjs --data ./data
 重复执行会覆盖同一批，不累积。想截图留档：
 
 ```bash
+# 桌面（1440×960）：登录页、列表、阅读页、搜索、浅色主题、窄屏
 node scripts/shot-ui.mjs --base http://127.0.0.1:3000
-# 输出到 .tmp/shots/：登录页、列表、阅读页、搜索、浅色主题、窄屏
+
+# 移动端（iPhone 14 Pro 逻辑尺寸 + 真实安全区）：列表、阅读、订阅页、横屏
+node scripts/shot-mobile.mjs --base http://127.0.0.1:3000
 ```
+
+两者都输出到 `.tmp/shots*/`，用本机 Edge/Chrome 的无头模式，不下载 playwright。
 
 ### Docker 验证到哪一步了
 

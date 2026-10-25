@@ -5,6 +5,7 @@ import { requireUserId } from '../auth/require-user.ts';
 import { searchKeyword, searchLike } from '../search/index.ts';
 import { queueStats } from '../jobs/queue.ts';
 import { unpackText } from '../db/text-blob.ts';
+import { sanitizeHtml } from '../feeds/sanitize.ts';
 
 // 条目相关 API。
 //
@@ -129,7 +130,9 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     const content = ctx.dbh.db.prepare('SELECT html FROM entry_contents WHERE entry_id = ?')
       .get(id) as { html: Uint8Array | null } | undefined;
     if (content?.html) {
-      html = unpackText(content.html);
+      // 读时再洗一次：写入侧已清（feeds/store.ts），但历史数据可能来自
+      // 早期版本或插件导入路径，不能假设它已经干净。
+      html = sanitizeHtml(unpackText(content.html), { baseUrl: String(row.url) }).html;
     }
 
     const analysis = row.summary

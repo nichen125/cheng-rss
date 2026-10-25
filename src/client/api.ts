@@ -103,6 +103,42 @@ export interface HealthResponse {
   };
 }
 
+export interface FeedItem {
+  id: string;
+  url: string;
+  title: string | null;
+  siteUrl: string | null;
+  iconUrl: string | null;
+  status: 'active' | 'paused' | 'broken';
+  fetchInterval: number;
+  lastFetchedAt: number | null;
+  nextFetchAt: number | null;
+  errorCount: number;
+  unread: number;
+  total: number;
+}
+
+export interface FeedListResponse {
+  items: FeedItem[];
+  total: number;
+  counts: { active: number; broken: number; paused: number; unread: number };
+}
+
+export interface DiscoverCandidate {
+  url: string;
+  title: string | null;
+  siteUrl: string | null;
+  iconUrl: string | null;
+  itemCount: number;
+}
+
+export interface DiscoverResponse {
+  found: boolean;
+  candidates: DiscoverCandidate[];
+  notes: string[];
+  message?: string;
+}
+
 export const api = {
   // /api/health 不在 /api/v1 下，走 rawRequest
   health: () => rawRequest<HealthResponse>('/api/health'),
@@ -146,4 +182,38 @@ export const api = {
     starred?: number;
     queue: { pending: number; running: number; dead: number };
   }>('/stats'),
+
+  // ── 订阅 ────────────────────────────────────────────────
+  listFeeds: () => request<FeedListResponse>('/feeds'),
+  discoverFeed: (url: string) =>
+    request<DiscoverResponse>('/feeds/discover', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+  addFeed: (url: string) =>
+    request<{ created: boolean; feed: FeedItem; imported?: number }>('/feeds', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+  refreshFeed: (id: string) =>
+    request<{ ok: boolean; queued: boolean }>(`/feeds/${id}/refresh`, { method: 'POST' }),
+  refreshAllFeeds: () =>
+    request<{ ok: boolean; queued: number; total: number }>('/feeds/refresh-all', { method: 'POST' }),
+  updateFeed: (id: string, patch: { title?: string | null; fetchInterval?: number; status?: 'active' | 'paused' }) =>
+    request<{ feed: FeedItem }>(`/feeds/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteFeed: (id: string) =>
+    request<{ ok: boolean }>(`/feeds/${id}`, { method: 'DELETE' }),
+  exportOpml: async (): Promise<string> => {
+    const r = await fetch('/api/v1/feeds/export', { credentials: 'include' });
+    if (!r.ok) throw new ApiFailure(r.status, null, '导出失败');
+    return r.text();
+  },
+  importOpml: (opml: string) =>
+    request<{ created: number; skipped: number; items: { id: string; title: string | null }[] }>(
+      '/feeds/import',
+      { method: 'POST', headers: { 'content-type': 'text/x-opml' }, body: opml },
+    ),
 };

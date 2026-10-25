@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { serve } from '@hono/node-server';
-import { createApp } from './server/app.ts';
+import { createApp, type AppContext } from './server/app.ts';
 import { openDb, readPragmas } from './server/db/client.ts';
 import { migrate, MIGRATIONS, CURRENT_SCHEMA_VERSION, assertSchemaCompatible } from './server/db/migrate.ts';
 import {
@@ -10,6 +10,7 @@ import {
 import { log, setLogLevel } from './server/logger.ts';
 import { JobRunner } from './server/jobs/runner.ts';
 import { buildHandlers } from './server/jobs/handlers.ts';
+import { sweepDueFeeds } from './server/routes/feeds.ts';
 import { ensureOwnerUser, countUsers, purgeExpiredSessions } from './server/auth/session.ts';
 
 // esbuild 打包时注入（scripts/build-server.mjs）；源码模式走 package.json
@@ -312,15 +313,35 @@ async function cmdServe(args: Args): Promise<void> {
   // job runner：默认与服务同进程（单进程部署最简单）。
   // WORKER_INLINE=false 时改由独立的 `ai-rss worker` 进程跑。
   const inlineWorker = process.env.WORKER_INLINE !== 'false';
+
+  // 先建 app 再建 runner：fetch_feed handler 需要 AppContext（要读 feeds 表、
+  // 要复用 routes/feeds.ts 的 runFetch），顺序反了只能把 ctx 拆开传两遍。
+  const appCtx: AppContext = {
+    cfg, dbh: h, version: VERSION, startedAt: Date.now(),
+  };
+  const app = createApp(appCtx);
+
+  // 定时 sweep：每分钟把到期的订阅入队（PLAN §7.1 L0）。
+  // 为什么不靠每个源自己的 setTimeout：源可能有几百个，
+  // 定时器方案要么几百个 timer 要么一次全打出去；单表扫一遍更简单。
+  const sweepTimer = setInterval(() => {
+    try {
+      const n = sweepDueFeeds(appCtx);
+      if (n > 0) log.debug(`sweep: ${n} 个订阅已入队`);
+    } catch (e) {
+      log.warn('sweep 失败', { err: (e as Error).message });
+    }
+  }, 60_000);
+  sweepTimer.unref?.();
+
   let runner: JobRunner | null = null;
   if (inlineWorker) {
-    runner = new JobRunner({ db: h.db, handlers: buildHandlers({ dataDir: cfg.dataDir, log: log.info }) });
+    runner = new JobRunner({
+      db: h.db,
+      handlers: buildHandlers({ dataDir: cfg.dataDir, log: log.info, app: appCtx }),
+    });
     runner.start();
   }
-
-  const app = createApp({
-    cfg, dbh: h, version: VERSION, startedAt: Date.now(),
-  });
 
   const server = serve({
     fetch: app.fetch,
@@ -340,6 +361,7 @@ async function cmdServe(args: Args): Promise<void> {
 
   const shutdown = async (sig: string) => {
     log.info(`收到 ${sig}，正在关闭`);
+    clearInterval(sweepTimer);
     try {
       if (runner) await runner.stop();
     } catch { /* runner 已停 */ }
@@ -371,9 +393,13 @@ async function cmdWorker(args: Args): Promise<void> {
   const h = openDb({ dataDir: cfg.dataDir });
   migrate(h.db);
 
+  // 独立 worker 也要 AppContext —— fetch_feed 复用 runFetch，
+  // 那条路径要读 feeds 表、要写条目，不能少于 serve 模式的那套依赖。
+  const appCtx: AppContext = { cfg, dbh: h, version: VERSION, startedAt: Date.now() };
+
   const runner = new JobRunner({
     db: h.db,
-    handlers: buildHandlers({ dataDir: cfg.dataDir, log: log.info }),
+    handlers: buildHandlers({ dataDir: cfg.dataDir, log: log.info, app: appCtx }),
   });
   runner.start();
   log.info('独立 worker 已启动');

@@ -111,6 +111,9 @@ if (srv.ready) {
   const hb = await hr.json();
   check('/api/health 返回 200', () => eq(hr.status, 200));
   check('/api/health 报告 db=ok', () => eq(hb.db, 'ok'));
+  // 前端首屏靠这个字段决定显示初始化页还是登录页。它曾经是写死的
+  // `=== 0 && false`（恒 false），结果永远进不了初始化页。
+  check('空库时 health.needsSetup = true', () => ok(hb.needsSetup === true, `实际 ${hb.needsSetup}`));
 
   // 未登录 → 401
   const ur = await fetch(`${base}/api/v1/feeds`);
@@ -193,6 +196,10 @@ if (srv.ready) {
   db2.close();
   const er = await fetch(`${base}/api/v1/me`, { headers: { cookie: 'ai_rss_sid=tok-expired' } });
   check('过期会话被拒（401）', () => eq(er.status, 401));
+
+  // 有用户之后同一字段必须翻转，否则"有账号还显示初始化页"
+  const h2 = await (await fetch(`${base}/api/health`)).json();
+  check('有用户后 health.needsSetup = false', () => ok(h2.needsSetup === false, `实际 ${h2.needsSetup}`));
 
   // ── 详情页正文：走真实 HTTP 读路径 ──
   // 验收长期只看列表，所以"正文解不出来"能一路绿灯到最后。正文一定要真读一次。

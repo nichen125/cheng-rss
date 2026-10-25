@@ -148,6 +148,17 @@ if (binReady) {
       return ok((ar.headers.get('content-type') ?? '').includes('javascript'),
         ar.headers.get('content-type') ?? '');
     });
+    // 内嵌资源必须是本次构建的，不能是几天前打进二进制的旧 zip。
+    // 曾经的 bug：zip 存在就跳过重打，于是改了前端、构建全绿、
+    // 浏览器看到的还是旧 UI。
+    const onDisk = join(root, 'dist/client', assetHref.replace(/^\/+/, ''));
+    check('二进制内嵌的前端与 dist/client 一致（不是陈旧 zip）', () => {
+      if (!existsSync(onDisk)) {
+        return ok(false, `dist/client 里没有 ${assetHref}，二进制内嵌了过期前端`);
+      }
+      return ok(body === readFileSync(onDisk, 'utf8'),
+        '二进制里的 JS 与磁盘上的不是同一份，client.zip 没重打');
+    });
   }
 
   // 健康检查

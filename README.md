@@ -138,12 +138,12 @@ node scripts/verify-all.mjs
 输出汇总：
 
 ```
-验收汇总  9 个脚本，耗时 21s
-  PASS  docker-path.mjs            4.3s
-  PASS  m0-01-toolchain.mjs        1.3s
-  PASS  m0-02-schema.mjs           0.3s
+验收汇总  10 个脚本，耗时 30s
+  PASS  docker-path.mjs            3.5s
+  PASS  m0-01-toolchain.mjs        1.0s
   ...
-全部通过 9/9
+  PASS  m0-09-ui.mjs               10.5s
+全部通过 10/10
 ```
 
 单独跑某一步：
@@ -151,21 +151,32 @@ node scripts/verify-all.mjs
 ```bash
 node scripts/verify/m0-02-schema.mjs
 node scripts/verify/m0-07-search.mjs     # 含 10 万条性能红线
+node scripts/verify/m0-09-ui.mjs         # 真实浏览器验布局（需 Chromium 系浏览器）
 ```
 
 | 脚本 | 断言数 | 验什么 |
 |---|---|---|
 | `m0-01-toolchain` | 11 | 项目内 Node、npm 缓存位置、gitignore 真生效 |
 | `m0-02-schema` | 13 | 19 张表、迁移幂等、FTS 可用、关键列 |
-| `m0-03-db` | 13 | PRAGMA、1 万条写入、并发写、gzip 往返 |
-| `m0-04-server` | 20 | 子命令、health、401/404 契约、鉴权优先级 |
+| `m0-03-db` | 14 | PRAGMA、1 万条写入、并发写、gzip 往返（含旧裸 gzip 兼容） |
+| `m0-04-server` | 23 | 子命令、health/needsSetup、401/404 契约、鉴权优先级、详情正文可读 |
 | `m0-05-auth` | 25 | cookie 属性、`loginUserInfo` 返回 200+null、改密失效 |
 | `m0-06-jobs` | 14 | 认领原子性（跨进程）、幂等、退避、死信、僵死恢复 |
 | `m0-07-search` | 22 | bigram 切分、索引更新、10 万条四条性能红线 |
-| `m0-08-deploy` | 17 | 二进制内嵌资源、三路互换、插件端点 |
+| `m0-08-deploy` | 18 | 二进制内嵌资源、内嵌前端非陈旧、三路互换、插件端点 |
+| `m0-09-ui` | 25 | 三栏布局、列表密度、72ch 实测、默认暗色、键盘、窄屏 |
 | `docker-path` | 12 | Dockerfile 结构 + 真产出 linux ELF |
 
 **写新断言前先跑一次确认它会红** —— 永远绿的断言没有价值。
+
+#### 关于 `m0-09-ui` 的浏览器依赖
+
+它用本机 Edge/Chrome 的**无头模式 + 裸 CDP** 验布局，不下载 playwright。
+找不到 Chromium 系浏览器时整节 SKIP（退出 0）并打印说明 —— 环境缺失不算失败，
+但 SKIP 会在汇总里看得见，不会静默通过。
+
+为什么需要它：其余脚本全是行为断言（状态码、字节数、耗时），一个布局错乱、
+正文只有 66 字符宽、或者点开条目就跳页的界面能让 9/9 全绿。
 
 #### 关于 `docker-path` 的产物验证
 
@@ -232,6 +243,26 @@ Docker 构建天然满足这一点（容器里跑的就是 linux node），所�
   linux-x64 ELF**，但 `docker build` 本身没跑过。首次在有 docker 的机器上构建时
   请留意：若失败，最可能的原因是 `package-lock.json` 与容器内 npm 版本差异。
 - M0 只做了读取链路，**订阅抓取与 AI 分析在 M1/M2**
+- 侧栏的「简报 / 订阅」标灰注明"待接入"，点了不会有反应（不是 bug，是明确标注的未实现）
+
+### 想先看界面上手
+
+M0 没有抓取能力，空库打开是空的。灌一批演示条目：
+
+```bash
+# 先启动一次让库建好，完成初始化后停掉（或保持运行）
+./ai-rss serve --data ./data
+
+# 另一个终端灌 4 条演示数据（四种 tier 各一条，带正文与 AI 卡片）
+node scripts/seed-demo.mjs --data ./data
+```
+
+重复执行会覆盖同一批，不累积。想截图留档：
+
+```bash
+node scripts/shot-ui.mjs --base http://127.0.0.1:3000
+# 输出到 .tmp/shots/：登录页、列表、阅读页、搜索、浅色主题、窄屏
+```
 
 ### Docker 验证到哪一步了
 

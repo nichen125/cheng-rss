@@ -64,6 +64,9 @@ export interface EntrySummary {
   summary: string | null;
   siteName: string | null;
   highlightCount: number;
+  faviconUrl: string | null;
+  thumbnailUrl: string | null;
+  wordCount: number | null;
 }
 
 export interface EntryDetail extends EntrySummary {
@@ -90,6 +93,8 @@ export interface HealthResponse {
   version: string;
   uptimeMs: number;
   db: string;
+  /** 库里还没有任何用户时为 true，前端据此显示初始化页 */
+  needsSetup?: boolean;
   stats?: {
     entries: number;
     feeds: number;
@@ -134,5 +139,11 @@ export const api = {
     }),
   toggleStar: (id: string) =>
     request<{ isStarred: boolean }>(`/entries/${id}/star`, { method: 'POST' }),
-  stats: () => request<HealthResponse['stats']>('/stats'),
+  stats: () => request<{
+    entries: number;
+    feeds: number;
+    unread: number;
+    starred?: number;
+    queue: { pending: number; running: number; dead: number };
+  }>('/stats'),
 };

@@ -63,6 +63,7 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       SELECT e.id, e.title, e.url, e.author, ${orderCol} AS sort_at,
              e.published_at AS published_at, e.excerpt, e.is_read, e.is_starred,
              e.highlight_count, e.site_name, e.read_count, e.last_read_at,
+             e.favicon_url, e.thumbnail_url, e.word_count,
              a.summary AS summary, a.tier AS tier
         FROM entries e
         LEFT JOIN entry_analysis a ON a.entry_id = e.id
@@ -88,6 +89,9 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       summary: row.summary,
       siteName: row.site_name,
       highlightCount: Number(row.highlight_count ?? 0),
+      faviconUrl: row.favicon_url,
+      thumbnailUrl: row.thumbnail_url,
+      wordCount: row.word_count === null ? null : Number(row.word_count),
     }));
 
     const last = page[page.length - 1];
@@ -216,6 +220,7 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       entries: one('SELECT COUNT(*) c FROM entries WHERE user_id = ?'),
       feeds: one('SELECT COUNT(*) c FROM feeds WHERE user_id = ?'),
       unread: one('SELECT COUNT(*) c FROM entries WHERE user_id = ? AND is_read = 0'),
+      starred: one('SELECT COUNT(*) c FROM entries WHERE user_id = ? AND is_starred = 1'),
       queue: { pending: q.pending, running: q.running, dead: q.dead },
     });
   });

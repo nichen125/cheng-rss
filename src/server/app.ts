@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { AppError, toErrorBody, unauthorized } from './errors.ts';
 import { log } from './logger.ts';
 import { getUserId } from './auth/require-user.ts';
+import { countUsers } from './auth/session.ts';
 import { authRoutes } from './routes/auth.ts';
 import { entryRoutes } from './routes/entries.ts';
 import { getStaticAssets, indexHtml, looksLikeAsset, mimeFor } from './static.ts';
@@ -69,6 +70,10 @@ export function createApp(ctx: AppContext): Hono<{ Variables: Variables }> {
           return 'error';
         }
       })(),
+      // 前端靠它决定首屏是初始化页还是登录页。判据必须与
+      // POST /auth/setup 里那道 countUsers 门禁一致，否则会出现
+      // "有账号却显示初始化页"这种自相矛盾。
+      needsSetup: countUsers(ctx.dbh.db) === 0,
     });
   });
 

@@ -81,15 +81,16 @@ execFileSync(nodeBin, [join(root, 'scripts/build-server.mjs'), '--sea'], {
 });
 
 // ── 2. 前端 zip ─────────────────────────────────────────────
-if (!existsSync(join(dist, 'client.zip'))) {
-  if (!existsSync(join(dist, 'client/index.html'))) {
-    fail('前端未构建。先运行 scripts/build-client.mjs');
-  }
-  console.log('打包前端 zip');
-  execFileSync(nodeBin, [join(root, 'scripts/pack-client-zip.mjs')], {
-    cwd: root, stdio: 'inherit',
-  });
+// 必须每次重打。曾经这里是"存在就跳过"，结果改了前端、构建成功、
+// 二进制里嵌的还是旧 zip —— 浏览器看到的是几天前的 UI，而所有
+// 构建日志都是绿的。zip 只有 77KB，重打比判断依赖关系便宜。
+if (!existsSync(join(dist, 'client/index.html'))) {
+  fail('前端未构建。先运行 scripts/build-client.mjs');
 }
+console.log('打包前端 zip');
+execFileSync(nodeBin, [join(root, 'scripts/pack-client-zip.mjs')], {
+  cwd: root, stdio: 'inherit',
+});
 
 // ── 3. sea-config ───────────────────────────────────────────
 const seaConfig = join(dist, 'sea-config.json');

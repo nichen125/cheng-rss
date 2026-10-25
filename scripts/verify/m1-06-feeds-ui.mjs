@@ -140,6 +140,12 @@ ins.run('f_notitle', uid, `https://b.example.com/${'very-long-path/'.repeat(8)}f
 // 边界：图标地址拉不到（验证降级成占位图标，不留空方块）
 ins.run('f_badicon', uid, 'https://badicon.example.com/feed', 'https://badicon.example.com',
   '图标加载失败', 'http://127.0.0.1:1/nope.png', Date.now(), Date.now(), 0, 'active');
+// 边界：图标能加载（data URI，离线可用）。
+// 没有它的话，"有 favicon 的格数"恒为 0，降级断言的对照样本缺失。
+// 1x1 透明 GIF
+const OK_ICON = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+ins.run('f_goodicon', uid, 'https://goodicon.example.com/feed', 'https://goodicon.example.com',
+  '图标正常', OK_ICON, Date.now(), Date.now(), 0, 'active');
 db.exec('COMMIT');
 db.close();
 
@@ -285,7 +291,7 @@ const desk = await evaluate(`(() => {
 
 // ① 行高一致
 // 30 个正常源 + 3 个边界（超长标题 / 无标题 / 图标拉不到）
-check('33 个源全部渲染', () => ok(desk.count === 33, `实际 ${desk.count}`));
+check('34 个源全部渲染', () => ok(desk.count === 34, `实际 ${desk.count}`));
 check('所有行高一致（长标题不撑高）', () => {
   return ok(desk.minH === desk.maxH,
     `高度分布 ${JSON.stringify(desk.heights)}（min ${desk.minH} / max ${desk.maxH}）`);
@@ -335,25 +341,24 @@ const iconFallback = await evaluate(`(() => {
     if (!box) { bad.push('no-icon-box'); continue; }
     const br = box.getBoundingClientRect();
     if (br.width < 20 || br.height < 20) { bad.push('tiny-box'); continue; }
-    const img = box.querySelector('img');
+    // 每一格都必须有占位图标在底层 —— 这是"永远不出现空方块"的核心
     const svg = box.querySelector('svg');
-    // 有 img 时它必须真的加载出来了（naturalWidth > 0）；否则要有 svg 兜底
+    if (!svg) bad.push('no-fallback-icon');
+    const img = box.querySelector('img');
     if (img) {
       const shown = getComputedStyle(img).display !== 'none';
+      // 图片显示了但实际没加载出来（0 宽度）就是坏图
       if (shown && img.complete && img.naturalWidth === 0) bad.push('broken-img-shown');
+      // 图片被撤掉后仍然要靠底层占位图标，不能是空盒子
       if (!shown && !svg) bad.push('img-hidden-no-fallback');
-    } else if (!svg) {
-      bad.push('empty-box');
     }
   }
   return {
     total: rows.length,
     bad: bad.slice(0, 6),
-    brokenImgCount: rows.filter((r) => {
-      const i = r.querySelector('.feed-icon img');
-      return i && getComputedStyle(i).display === 'none';
-    }).length,
     fallbackCount: rows.filter((r) => r.querySelector('.feed-icon svg')).length,
+    // 有多少格真的挂了 favicon（不管加载成功与否）
+    faviconAttempts: rows.filter((r) => r.querySelector('.feed-icon img')).length,
   };
 })()`);
 
@@ -361,9 +366,13 @@ check('图标加载失败时回退到占位图标（不留空方块）', () => {
   return ok(iconFallback.bad.length === 0,
     `${iconFallback.bad.length}/${iconFallback.total} 行有问题: ${JSON.stringify(iconFallback.bad)}`);
 });
-check('测试数据里真的有一个加载失败的图标（否则上一条是空转）', () => {
-  return ok(iconFallback.brokenImgCount > 0 || iconFallback.fallbackCount > 0,
-    `brokenImg=${iconFallback.brokenImgCount} fallback=${iconFallback.fallbackCount}`);
+check('每一格都有底层占位图标（加载中也不会是空方块）', () => {
+  return ok(iconFallback.fallbackCount === iconFallback.total,
+    `${iconFallback.fallbackCount}/${iconFallback.total} 有占位图标`);
+});
+check('测试数据里真的存在待加载的 favicon（否则降级路径是空转）', () => {
+  return ok(iconFallback.faviconAttempts > 0,
+    `有 favicon 的格数 ${iconFallback.faviconAttempts}`);
 });
 
 // ④ 吸顶头部

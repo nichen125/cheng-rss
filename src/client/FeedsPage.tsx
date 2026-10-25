@@ -299,15 +299,16 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
           {feeds.map((f) => (
             <li key={f.id} className={`feed-row ${f.status}`}>
               <div className="feed-icon">
-                {f.iconUrl && !iconFailed.has(f.id) ? (
+                {/* 占位图标始终渲染在底下，favicon 叠在上面。
+                    这样"正在加载"和"加载失败"两种情况都不会出现空方块 ——
+                    只在 onError 时才换成占位图标的话，DNS 卡住的那几秒
+                    依然是个空格子（实测就长这样）。 */}
+                <IconRss size={16} className="feed-icon-fallback" />
+                {f.iconUrl && !iconFailed.has(f.id) && (
                   <img
                     src={f.iconUrl} alt="" loading="lazy"
                     onError={() => setIconFailed((prev) => new Set(prev).add(f.id))}
                   />
-                ) : (
-                  // 图标加载失败必须回退到占位图标。
-                  // 只 display:none 会留一个空方块，看起来像渲染坏了。
-                  <IconRss size={16} />
                 )}
               </div>
               <div className="feed-main">

@@ -121,8 +121,18 @@
   color: var(--fg-dim);
   flex-shrink: 0;
   overflow: hidden;
+  position: relative;
 }
-.feed-icon img { width: 18px; height: 18px; object-fit: contain; }
+/* 占位图标在底层，favicon 叠在上面。
+   两层同时存在，"正在加载"也不会出现空方块。 */
+.feed-icon-fallback { opacity: 0.55; }
+.feed-icon img {
+  position: absolute;
+  inset: 6px;
+  width: 18px; height: 18px;
+  object-fit: contain;
+  border-radius: 3px;
+}
 
 .feed-main { flex: 1; min-width: 0; }
 .feed-title {

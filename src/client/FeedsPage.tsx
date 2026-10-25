@@ -27,6 +27,8 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
   const [notes, setNotes] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /** 加载失败的图标 id，回退成占位图标而不是留空方块 */
+  const [iconFailed, setIconFailed] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -258,7 +260,8 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
                   disabled={busy}
                 >
                   {c.iconUrl
-                    ? <img className="favicon" src={c.iconUrl} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                    ? <img className="favicon" src={c.iconUrl} alt=""
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }} />
                     : <IconRss size={15} />}
                   <div className="candidate-main">
                     <div className="candidate-title">{c.title ?? c.url}</div>
@@ -296,10 +299,16 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
           {feeds.map((f) => (
             <li key={f.id} className={`feed-row ${f.status}`}>
               <div className="feed-icon">
-                {f.iconUrl
-                  ? <img src={f.iconUrl} alt="" loading="lazy"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-                  : <IconRss size={16} />}
+                {f.iconUrl && !iconFailed.has(f.id) ? (
+                  <img
+                    src={f.iconUrl} alt="" loading="lazy"
+                    onError={() => setIconFailed((prev) => new Set(prev).add(f.id))}
+                  />
+                ) : (
+                  // 图标加载失败必须回退到占位图标。
+                  // 只 display:none 会留一个空方块，看起来像渲染坏了。
+                  <IconRss size={16} />
+                )}
               </div>
               <div className="feed-main">
                 <div className="feed-title">

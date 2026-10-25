@@ -137,6 +137,9 @@ ins.run('f_long', uid, 'https://long.example.com/feed', 'https://long.example.co
 // 边界：无标题（URL 兜底）
 ins.run('f_notitle', uid, `https://b.example.com/${'very-long-path/'.repeat(8)}feed.xml`,
   'https://b.example.com', null, null, Date.now(), Date.now(), 0, 'active');
+// 边界：图标地址拉不到（验证降级成占位图标，不留空方块）
+ins.run('f_badicon', uid, 'https://badicon.example.com/feed', 'https://badicon.example.com',
+  '图标加载失败', 'http://127.0.0.1:1/nope.png', Date.now(), Date.now(), 0, 'active');
 db.exec('COMMIT');
 db.close();
 
@@ -281,7 +284,8 @@ const desk = await evaluate(`(() => {
 })()`);
 
 // ① 行高一致
-check('31 个源全部渲染', () => ok(desk.count === 32, `实际 ${desk.count}`));
+// 30 个正常源 + 3 个边界（超长标题 / 无标题 / 图标拉不到）
+check('33 个源全部渲染', () => ok(desk.count === 33, `实际 ${desk.count}`));
 check('所有行高一致（长标题不撑高）', () => {
   return ok(desk.minH === desk.maxH,
     `高度分布 ${JSON.stringify(desk.heights)}（min ${desk.minH} / max ${desk.maxH}）`);
@@ -318,6 +322,49 @@ check('操作按钮的 title 语义正确（不是星形冒充暂停）', () => 
   return ok(missing.length === 0, `缺 ${JSON.stringify(missing)}，实际 ${JSON.stringify(titles)}`);
 });
 check('桌面无横向溢出', () => ok(desk.overflowX <= 1, `溢出 ${desk.overflowX}px`));
+
+// ③.5 图标加载失败的降级
+//
+// 反例：onError 里只 display:none 会留一个 30px 的空方块，
+// 截图上看着像"渲染坏了"。必须回退到占位图标。
+const iconFallback = await evaluate(`(() => {
+  const rows = [...document.querySelectorAll('.feed-row')];
+  const bad = [];
+  for (const r of rows) {
+    const box = r.querySelector('.feed-icon');
+    if (!box) { bad.push('no-icon-box'); continue; }
+    const br = box.getBoundingClientRect();
+    if (br.width < 20 || br.height < 20) { bad.push('tiny-box'); continue; }
+    const img = box.querySelector('img');
+    const svg = box.querySelector('svg');
+    // 有 img 时它必须真的加载出来了（naturalWidth > 0）；否则要有 svg 兜底
+    if (img) {
+      const shown = getComputedStyle(img).display !== 'none';
+      if (shown && img.complete && img.naturalWidth === 0) bad.push('broken-img-shown');
+      if (!shown && !svg) bad.push('img-hidden-no-fallback');
+    } else if (!svg) {
+      bad.push('empty-box');
+    }
+  }
+  return {
+    total: rows.length,
+    bad: bad.slice(0, 6),
+    brokenImgCount: rows.filter((r) => {
+      const i = r.querySelector('.feed-icon img');
+      return i && getComputedStyle(i).display === 'none';
+    }).length,
+    fallbackCount: rows.filter((r) => r.querySelector('.feed-icon svg')).length,
+  };
+})()`);
+
+check('图标加载失败时回退到占位图标（不留空方块）', () => {
+  return ok(iconFallback.bad.length === 0,
+    `${iconFallback.bad.length}/${iconFallback.total} 行有问题: ${JSON.stringify(iconFallback.bad)}`);
+});
+check('测试数据里真的有一个加载失败的图标（否则上一条是空转）', () => {
+  return ok(iconFallback.brokenImgCount > 0 || iconFallback.fallbackCount > 0,
+    `brokenImg=${iconFallback.brokenImgCount} fallback=${iconFallback.fallbackCount}`);
+});
 
 // ④ 吸顶头部
 check('订阅页头部是 sticky', () => ok(desk.headSticky === 'sticky', String(desk.headSticky)));

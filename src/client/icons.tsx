@@ -131,3 +131,38 @@ export function IconBookmark({ size, className }: P) {
     </svg>
   );
 }
+
+export function IconRefresh({ size, className }: P) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M20 12a8 8 0 1 1-2.4-5.7" />
+      <path d="M20 4v4.5h-4.5" />
+    </svg>
+  );
+}
+
+export function IconPause({ size, className }: P) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M9.5 5v14M14.5 5v14" />
+    </svg>
+  );
+}
+
+export function IconPlay({ size, className }: P) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M8 5.5l11 6.5-11 6.5z" />
+    </svg>
+  );
+}
+
+export function IconTrash({ size, className }: P) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M4.5 6.5h15" />
+      <path d="M9 6.5V4.8a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1.7" />
+      <path d="M6.5 6.5l.8 12a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4l.8-12" />
+    </svg>
+  );
+}

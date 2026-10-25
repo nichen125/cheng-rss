@@ -17,8 +17,10 @@
 .feeds-page {
   grid-column: 2 / -1;
   overflow-y: auto;
-  padding: 28px 32px 80px;
-  max-width: 860px;
+  /* 左对齐 + max-width：居中会让宽屏左右各留 160px 死白，
+     看起来像内容没加载完。列表页贴左边更好扫。 */
+  padding: 0 32px 80px;
+  max-width: 900px;
 }
 
 .feeds-head {
@@ -28,6 +30,18 @@
   gap: 16px;
   flex-wrap: wrap;
   margin-bottom: 18px;
+  /* 30+ 个源时头部跟着滚走，就再也点不到"添加订阅"了。
+     padding 放在头部而不是容器上，否则 sticky 贴顶会留一条缝，
+     列表从缝里透出来。 */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  padding: 28px 0 14px;
+  margin-bottom: 0;
+  /* 滚动的行会从头部下方穿过。没有这条线时它看起来像"渲染错位"，
+     而不是"内容在头部下面滚动"。 */
+  box-shadow: 0 1px 0 var(--border-soft);
 }
 .feeds-head h1 { font-size: 21px; margin: 0 0 3px; font-weight: 650; letter-spacing: -0.01em; }
 .feeds-head .muted { margin: 0; font-size: 12.5px; }
@@ -118,9 +132,15 @@
   align-items: center;
   gap: 7px;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  /* 标题本身可以被截断，但徽标（失效/已暂停）不能被截 —— 
+     它是状态，丢了用户就不知道这个源坏了。所以徽标 flex-shrink:0。 */
+  text-overflow: ellipsis;
 }
+.feed-title > .tag { flex-shrink: 0; }
+/* 让标题文字是唯一可被压缩的部分 */
+.feed-title { min-width: 0; }
+.feed-title-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .feed-meta {
   font-size: 11.5px;
   color: var(--fg-faint);
@@ -128,8 +148,14 @@
   gap: 5px;
   align-items: center;
   margin-top: 2px;
-  flex-wrap: wrap;
+  /* 不换行：换行会让"2 次失败"掉到第三行，行高从 68 涨到 89 */
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
 }
+.feed-meta > span { flex-shrink: 0; }
+/* 只有"共 N 条 / 抓取时间"这类可以截断，失败次数是告警不能丢 */
+.feed-meta > span:not(.warn):first-child { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .feed-meta .warn { color: var(--warn); }
 .unread-dot { color: var(--accent); font-weight: 500; }
 
@@ -145,6 +171,21 @@
 .tag.bad { background: rgba(255, 107, 107, 0.15); color: var(--must); }
 
 .feed-ops { display: flex; gap: 2px; align-items: center; flex-shrink: 0; }
+
+.feed-unread {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 20px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  text-align: center;
+  margin-right: 4px;
+  font-weight: 500;
+}
 .icon-btn.danger:hover { color: var(--must); background: rgba(255, 107, 107, 0.1); }
 
 .feeds-foot {
@@ -225,7 +266,8 @@
     bottom: 0;
     padding-bottom: 0;
   }
-  .feeds-page { grid-column: 2 / -1; padding: 24px 22px 90px; }
+  .feeds-page { grid-column: 2 / -1; padding: 0 22px 90px; }
+  .feeds-head { padding: 24px 0 14px; }
 }
 
 /* ── 手机（< 640px）：无侧栏 + 底部导航 + 单栏 ──────────── */
@@ -240,8 +282,10 @@
   .list-pane { padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
   .feeds-page {
     grid-column: 1 / -1;
-    padding: 18px 14px calc(76px + env(safe-area-inset-bottom, 0px));
+    padding: 0 14px calc(76px + env(safe-area-inset-bottom, 0px));
+    max-width: none;
   }
+  .feeds-head { padding: 18px 0 12px; }
 
   /* 阅读浮层：全屏但要照顾刘海与 Home 条 */
   .reader-pane.open {
@@ -280,8 +324,12 @@
   .feeds-actions { justify-content: flex-start; }
   .add-row { flex-direction: column; align-items: stretch; }
   .add-row .search-box { min-width: 0; }
-  .feed-ops .icon-btn:not(.danger) { display: none; }
-  .feed-ops .icon-btn.danger { width: 44px; height: 44px; }
+  /* 手机上只保留高频的三个：刷新、暂停、删除。
+     "访问网站"是低频次要操作，藏起来换空间。
+     第一版写成 .icon-btn:not(.danger) 全藏，结果刷新和暂停都点不到。 */
+  .feed-ops .icon-btn[href] { display: none; }
+  .feed-ops .icon-btn { width: 40px; height: 40px; }
+  .feed-unread { margin-right: 2px; }
 }
 
 /* 横屏矮视口（手机横放）—— 阅读区优先，隐藏底栏
@@ -298,8 +346,10 @@
   .reader-pane.open { padding-top: 0; padding-bottom: 0; }
   .feeds-page {
     grid-column: 1 / -1;
-    padding: 14px 16px 24px;
+    padding: 0 16px 24px;
+    max-width: none;
   }
+  .feeds-head { padding: 14px 0 12px; }
   /* 横屏阅读：高度是稀缺资源，压缩上下留白 */
   .reader { padding: 12px 22px 40px; }
   .reader-meta { margin-bottom: 14px; }

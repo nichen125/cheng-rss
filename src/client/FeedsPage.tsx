@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiFailure, type DiscoverCandidate, type FeedItem } from './api.ts';
 import {
-  IconChevronRight, IconExternal, IconRss, IconSearch, IconSparkle, IconStar,
+  IconChevronRight, IconExternal, IconPause, IconPlay, IconRefresh, IconRss,
+  IconSearch, IconTrash,
 } from './icons.tsx';
 
 // 订阅管理（PLAN §10、§18）。
@@ -302,14 +303,12 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
               </div>
               <div className="feed-main">
                 <div className="feed-title">
-                  {f.title ?? hostOf(f.url) ?? f.url}
+                  <span className="feed-title-text">{f.title ?? hostOf(f.url) ?? f.url}</span>
                   {f.status === 'broken' && <span className="tag bad">失效</span>}
                   {f.status === 'paused' && <span className="tag">已暂停</span>}
                 </div>
                 <div className="feed-meta">
-                  <span className={f.unread > 0 ? 'unread-dot' : ''}>{f.unread} 未读</span>
-                  <span>·</span>
-                  <span>共 {f.total} 条</span>
+                  <span>{f.total > 0 ? `共 ${f.total} 条` : '还没有条目'}</span>
                   {f.lastFetchedAt && (
                     <>
                       <span>·</span>
@@ -325,11 +324,12 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
                 </div>
               </div>
               <div className="feed-ops">
+                {f.unread > 0 && <span className="feed-unread">{f.unread}</span>}
                 <button className="icon-btn" title="立即刷新" onClick={() => void refreshOne(f.id)}>
-                  <IconSparkle size={15} />
+                  <IconRefresh size={15} />
                 </button>
-                <button className="icon-btn" title={f.status === 'paused' ? '恢复' : '暂停'} onClick={() => void togglePause(f)}>
-                  {f.status === 'paused' ? <IconStar size={15} filled /> : <IconStar size={15} />}
+                <button className="icon-btn" title={f.status === 'paused' ? '恢复抓取' : '暂停抓取'} onClick={() => void togglePause(f)}>
+                  {f.status === 'paused' ? <IconPlay size={15} /> : <IconPause size={15} />}
                 </button>
                 {f.siteUrl && (
                   <a className="icon-btn" href={f.siteUrl} target="_blank" rel="noreferrer" title="访问网站">
@@ -337,7 +337,7 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
                   </a>
                 )}
                 <button className="icon-btn danger" title="取消订阅" onClick={() => void remove(f)}>
-                  ✕
+                  <IconTrash size={15} />
                 </button>
               </div>
             </li>

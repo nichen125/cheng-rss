@@ -79,10 +79,42 @@ console.log('\nHTML 清洗');
   const r = sanitizeHtml('<a href="/rel">相对</a>', { baseUrl: 'https://example.com/post/1' });
   check('相对链接按 baseUrl 补全', has(r.html, 'https://example.com/rel'), r.html);
   check('外链自动加 noopener', has(r.html, 'noopener'), r.html);
+  check('外链自动加 target=_blank（§15.11）', has(r.html, 'target="_blank"'), r.html);
 }
 {
   const r = sanitizeHtml('<a href="https://x.com">x</a>');
   check('绝对链接保持原样', has(r.html, 'href="https://x.com"'), r.html);
+}
+
+// §15.11：三类链接的出口各不相同。这三条直接决定"点一下会不会丢掉阅读器"，
+// 所以放在清洗层验，而不是只在 UI 脚本里验 —— 数据脏了 UI 那边救不回来。
+{
+  const r = sanitizeHtml('<a href="#sec">锚点</a>', { baseUrl: 'https://example.com/post/1' });
+  check('页内锚点不加 target', !has(r.html, 'target='), r.html);
+  check('页内锚点仍补全成完整 URL', has(r.html, 'https://example.com/post/1#sec'), r.html);
+}
+{
+  const r = sanitizeHtml('<a href="mailto:a@b.c">写信</a>', { baseUrl: 'https://example.com/p' });
+  check('mailto 不加 target', !has(r.html, 'target='), r.html);
+}
+{
+  const r = sanitizeHtml('<a href="tel:+8613800000000">电话</a>', { baseUrl: 'https://example.com/p' });
+  check('tel 不加 target', !has(r.html, 'target='), r.html);
+}
+
+// 同一个 HTML 洗两遍，结果必须一样（幂等）。
+//
+// 为什么这条重要：entries 详情接口每次请求都会"读时再洗一次"（历史数据可能
+// 来自旧版本）。第一次洗已经把 `#sec` 补成 `https://site/post#sec`，第二次
+// 如果只判 `startsWith('#')`，就会把锚点误认成外链、给它加 target ——
+// 第一版就是这么错的。幂等断言能在不碰浏览器的情况下抓住它。
+{
+  const once = sanitizeHtml('<a href="#sec">锚点</a><a href="/rel">相对</a>',
+    { baseUrl: 'https://example.com/post/1' }).html;
+  const twice = sanitizeHtml(once, { baseUrl: 'https://example.com/post/1' }).html;
+  check('清洗是幂等的（洗两遍结果一致）', once === twice, `一次: ${once}\n        两次: ${twice}`);
+  check('二次清洗后锚点仍无 target', !/href="[^"]*#sec"[^>]*target=/.test(twice)
+    && !/target="[^"]*"[^>]*href="[^"]*#sec"/.test(twice), twice);
 }
 {
   const r = sanitizeHtml('<img src="data:image/png;base64,AAA">');

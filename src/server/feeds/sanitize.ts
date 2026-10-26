@@ -120,12 +120,39 @@ export function sanitizeHtml(input: string | null | undefined, opts: SanitizeOpt
         }
       }
 
+      // 正文链接一律新标签打开（PLAN §15.11）。
+      //
+      // 为什么必须在清洗层做，而不是靠 feed 自带：实测 3176 个正文链接里
+      // 只有 980 个（31%）自带 target，其余 2196 个点击后会在主框架导航 ——
+      // 单页应用的状态（当前筛选/已加载的列表/滚动位置）全部丢失，
+      // 用户得按浏览器后退才回得来。点一次就丢上下文，等于"链接不可点"。
+      //
+      // 两种例外：
+      //   - 页内锚点：同一文档内定位，新开标签等于把用户丢进一个只有
+      //     片段的新页（那个页面上没这个锚点，会直接跳顶部）。
+      //   - mailto:/tel:：交给系统处理，浏览器本来就不导航。
+      const rawHref = tag === 'a' ? (el.getAttribute('href') ?? '').trim() : '';
+      const sameDocAnchor = isSameDocAnchor(rawHref, base);
+
       // 链接与图片补全相对路径
       if (tag === 'a' && base) {
-        const href = el.getAttribute('href');
-        if (href) el.setAttribute('href', absolutize(href, base));
+        if (rawHref) el.setAttribute('href', absolutize(rawHref, base));
         // 站外链接加 rel，防 tabnabbing
         el.setAttribute('rel', 'noopener noreferrer');
+      }
+      if (tag === 'a' && rawHref) {
+        const lower = rawHref.toLowerCase();
+        const isSystem = lower.startsWith('mailto:') || lower.startsWith('tel:');
+        if (sameDocAnchor || isSystem) {
+          // 幂等：上一轮已经给它加过 target 的话要撤掉。
+          // 不清的话"读时再洗一次"会把第一次的判断结果固化下来 ——
+          // 首次 `#sec` 正确跳过，第二次它已经是绝对 URL，就会被误加。
+          el.removeAttribute('target');
+        } else {
+          el.setAttribute('target', '_blank');
+          // rel 已在上面的 base 分支设过；无 base 时（插件导入路径）也要有
+          if (!el.getAttribute('rel')) el.setAttribute('rel', 'noopener noreferrer');
+        }
       }
       if ((tag === 'img' || tag === 'source') && base) {
         const src = el.getAttribute(tag === 'img' ? 'src' : 'src');
@@ -165,6 +192,51 @@ function absolutize(href: string, base: string): string {
     return new URL(href, base).toString();
   } catch {
     return href;
+  }
+}
+
+/**
+ * 判断这个 href 是不是"指向同一篇文档内部的锚点"。
+ *
+ * 三条都要认，否则会把锚点误判成外链、给它加 target：
+ *   1. `#sec`        —— 原始写法
+ *   2. `post.html#x` —— 同路径（相对）
+ *   3. `https://site/post#x` —— 已经是绝对 URL（**第二次清洗时必然长这样**）
+ *
+ * 第 3 条是最容易漏的：`/entries/:id` 每次请求都会把库里存的 HTML 再洗一次
+ * （entries.ts 的注释写了原因：历史数据可能来自早期版本）。第一次洗把
+ * `#sec` 补全成 `https://site/post#sec` 存回库里之后，第二次洗看到的就
+ * 不再是 `#` 开头 —— 只判 startsWith('#') 的实现会在这里翻车。
+ *
+ * 整个函数不用 `new URL` 解析 base：linkedom 的 href 可能带不可见字符，
+ * 解析失败时静默退回"不是锚点"更安全（宁可新开标签，也不要错误地把外链
+ * 当成锚点、让它把阅读器整个跳走）。
+ */
+function isSameDocAnchor(rawHref: string, base: string | null): boolean {
+  if (!rawHref) return false;
+  if (rawHref.startsWith('#')) return true;
+
+  const hashAt = rawHref.indexOf('#');
+  // 没有 # 就一定不是锚点；`#` 出现在最前面已由上面处理
+  if (hashAt <= 0) return false;
+
+  const docPart = rawHref.slice(0, hashAt);
+  // 纯查询串（`?a=1#x`）在清洗后会被补成绝对 URL，走下面的比较
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(docPart) && !docPart.startsWith('/')) {
+    // 相对路径 + 锚点：只要 base 存在，补全后仍是同一文档
+    return Boolean(base);
+  }
+  if (!base) {
+    // 无 base 时无法判断，绝对 URL 只能按"不是锚点"处理
+    return false;
+  }
+  try {
+    const u = new URL(rawHref, base);
+    const b = new URL(base);
+    // 只去掉 hash 后比较：路径 + 查询串完全一致才算同一篇文档
+    return u.origin === b.origin && u.pathname === b.pathname && u.search === b.search;
+  } catch {
+    return false;
   }
 }
 

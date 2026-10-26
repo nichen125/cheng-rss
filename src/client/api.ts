@@ -72,6 +72,9 @@ export interface EntrySummary {
 export interface EntryDetail extends EntrySummary {
   contentHtml: string | null;
   contentMarkdown: string | null;
+  /** 源站首页（feed 的 site_url）。网页捕获条目没有源，为 null */
+  feedSiteUrl: string | null;
+  feedTitle: string | null;
   analysis: {
     summary: string;
     keyPoints: string[];
@@ -204,6 +207,18 @@ export const api = {
     }),
   toggleStar: (id: string) =>
     request<{ isStarred: boolean }>(`/entries/${id}/star`, { method: 'POST' }),
+  /** 已读回退（§15.11）。阅读历史字段不动，只把 is_read 置 0。 */
+  markUnread: (id: string) =>
+    request<{ ok: boolean; count: number }>('/entries/unread', {
+      method: 'POST',
+      body: JSON.stringify({ ids: [id] }),
+    }),
+  /** 阅读进度上报。只增不减，重复值后端直接返回 changed:false。 */
+  reportProgress: (id: string, progress: number) =>
+    request<{ ok: boolean; progress: number; changed: boolean }>(`/entries/${id}/progress`, {
+      method: 'POST',
+      body: JSON.stringify({ progress }),
+    }),
   stats: () => request<{
     entries: number;
     feeds: number;

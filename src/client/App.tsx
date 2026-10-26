@@ -3,10 +3,14 @@ import {
   api, ApiFailure, type EntryDetail, type EntrySummary, type FolderItem, type User,
 } from './api.ts';
 import {
-  IconArrowLeft, IconBookmark, IconChevronRight, IconCircle, IconClock,
+  IconArrowLeft, IconBookmark, IconCheck, IconChevronRight, IconCircle, IconClock,
   IconExternal, IconFolder, IconInbox, IconLogout, IconMenu, IconRss, IconSearch, IconSparkle, IconStar,
 } from './icons.tsx';
 import { FeedsPage } from './FeedsPage.tsx';
+import {
+  applyPrefs, DEFAULT_PREFS, FONT_SIZES, loadPrefs, savePrefs,
+  THEMES, WIDTHS, type ReaderPrefs,
+} from './reader-prefs.ts';
 
 // 主界面 = 三栏（PLAN §15.1/§15.2/§15.3）
 //
@@ -235,6 +239,16 @@ function Main(props: { user: User; onLogout: () => void }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [prefs, setPrefs] = useState<ReaderPrefs>(() => loadPrefs());
+  const readerRef = useRef<HTMLElement>(null);
+  const [prefsOpen, setPrefsOpen] = useState(false);
+
+  // 偏好变更 → 立刻写 CSS 变量 + 落盘。
+  // 放在 effect 里而不是 setPrefs 的调用处：刷新页面时初次挂载也要应用一次。
+  useEffect(() => {
+    applyPrefs(readerRef.current, prefs);
+    savePrefs(prefs);
+  }, [prefs]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), 240);
@@ -306,11 +320,54 @@ function Main(props: { user: User; onLogout: () => void }) {
     } catch { /* ignore */ }
   }, []);
 
-  // 键盘全覆盖（PLAN §15.5）：不用鼠标也能浏览
+  /**
+   * 切换已读 / 未读（§15.11，快捷键 m）。
+   *
+   * 两个容易漏的点：
+   * 1. 在「未读」视图下把当前篇标未读 → 它应该从列表消失。直接留在原处会
+   *    让用户以为没生效（页面上什么都没变）。消失后焦点落到下一条。
+   * 2. 标未读时**不清阅读历史** —— 后端接口也不清（见 entries.ts 注释）。
+   */
+  const toggleRead = useCallback(async (id: string) => {
+    const cur = detail?.id === id ? detail : items.find((x) => x.id === id);
+    if (!cur) return;
+    try {
+      if (cur.isRead) {
+        await api.markUnread(id);
+        setDetail((d) => (d && d.id === id ? { ...d, isRead: false } : d));
+        setItems((prev) => prev.map((x) => (x.id === id ? { ...x, isRead: false } : x)));
+        refreshStats();
+      } else {
+        await api.markRead(id);
+        setDetail((d) => (d && d.id === id ? { ...d, isRead: true } : d));
+        setItems((prev) => prev.map((x) => (x.id === id ? { ...x, isRead: true } : x)));
+        refreshStats();
+      }
+    } catch { /* ignore */ }
+    // 未读视图：标成未读后这条不该还在列表里
+    if (view === 'unread' && cur.isRead) {
+      setItems((prev) => prev.filter((x) => x.id !== id));
+      const idx = items.findIndex((x) => x.id === id);
+      const next = items[idx + 1];
+      if (next && next.id !== id) void open(next.id);
+      else { setOpenId(null); setDetail(null); }
+    }
+  }, [detail, items, view, open, refreshStats]);
+
+  /** 新标签打开原文（§15.11，快捷键 v）。没有 URL 时不打开空白页。 */
+  const openOriginal = useCallback((url?: string | null) => {
+    const target = url ?? detail?.url;
+    if (!target) return;
+    window.open(target, '_blank', 'noopener,noreferrer');
+  }, [detail]);
+
+  // 键盘全覆盖（PLAN §15.5 / §15.11）：不用鼠标也能浏览
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       const typing = t && /^(INPUT|TEXTAREA)$/.test(t.tagName);
+      // 快捷键只认无修饰键的裸字母，否则 Ctrl+V 会被当成"打开原文"
+      const bare = !e.metaKey && !e.ctrlKey && !e.altKey;
       if ((e.key === 'k' && (e.metaKey || e.ctrlKey)) || (e.key === '/' && !typing)) {
         e.preventDefault();
         searchRef.current?.focus();
@@ -335,11 +392,25 @@ function Main(props: { user: User; onLogout: () => void }) {
       } else if (e.key === 's' && openId) {
         e.preventDefault();
         void toggleStar(openId);
+      } else if (bare && e.key === 'v' && openId) {
+        e.preventDefault();
+        openOriginal();
+      } else if (bare && e.key === 'm' && openId) {
+        e.preventDefault();
+        void toggleRead(openId);
+      } else if (bare && e.key === 't') {
+        // 列表顶部。用 scrollIntoView 而不是 scrollTop=0：
+        // 列表可能有两列布局，scrollTop 只作用于右侧容器，保险起见交给浏览器算。
+        e.preventDefault();
+        document.querySelector('.list-scroll')?.scrollTo({ top: 0, behavior: 'smooth' });
+      } else if (bare && (e.key === 'o' || e.key === 'Enter') && !openId) {
+        const first = items[idx >= 0 ? idx : 0];
+        if (first) { e.preventDefault(); void open(first.id); }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [items, openId, open, toggleStar]);
+  }, [items, openId, open, toggleStar, toggleRead, openOriginal]);
 
   const current = useMemo(
     () => NAV.find((n) => n.key === view) ?? INBOX_NAV,
@@ -517,10 +588,22 @@ function Main(props: { user: User; onLogout: () => void }) {
           <ul className="entry-list">
             {items.map((it) => (
               <li key={it.id}>
-                <button
+                {/* 行元素从 <button> 改成 div[role=button]（§15.11）：
+                    <a> 不能嵌在 <button> 里（HTML 内容模型禁止交互元素嵌套），
+                    而"标题可中键/Ctrl+点击在新标签打开"必须是一个真 <a>。
+                    改完之后按钮语义要手工补：role + tabindex + Enter/Space。 */}
+                <div
+                  role="button"
+                  tabIndex={0}
                   className={`entry-item ${it.isRead ? 'read' : ''} ${openId === it.id ? 'active' : ''}`}
                   data-tier={it.tier ?? 'normal'}
                   onClick={() => void open(it.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      void open(it.id);
+                    }
+                  }}
                 >
                   <div className="entry-top">
                     {it.faviconUrl
@@ -537,13 +620,52 @@ function Main(props: { user: User; onLogout: () => void }) {
                     )}
                     {it.highlightCount > 0 && <span className="meta">{it.highlightCount} 高亮</span>}
                     <span className="grow" />
+                    {/* hover 才出现：收藏 / 新标签打开原文。
+                        不常驻是因为列表页的任务是"扫过去"（§15.2），
+                        常驻两个图标会让每行多 24px 的视觉噪声。 */}
+                    <span className="entry-ops">
+                      <button
+                        type="button"
+                        className={`icon-btn tiny ${it.isStarred ? 'on' : ''}`}
+                        title={it.isStarred ? '取消收藏' : '收藏'}
+                        onClick={(e) => { e.stopPropagation(); void toggleStar(it.id); }}
+                      >
+                        <IconStar size={13} filled={it.isStarred} />
+                      </button>
+                      <a
+                        className="icon-btn tiny"
+                        href={it.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="在新标签打开原文"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <IconExternal size={13} />
+                      </a>
+                    </span>
                     {it.isStarred && <IconStar size={13} filled className="star-mark" />}
                   </div>
-                  <h3 className="entry-title">{it.title}</h3>
+                  {/* 标题是真链接：左键拦截掉（走阅读区），中键与 Ctrl+点击交给浏览器 */}
+                  <a
+                    className="entry-title"
+                    href={it.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      // 只拦"普通左键"。中键、Ctrl/Cmd/Shift+左键都放行，
+                      // 由浏览器在新标签打开 —— 这正是用户要的行为。
+                      if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                        e.preventDefault();
+                        void open(it.id);
+                      }
+                    }}
+                  >
+                    {it.title}
+                  </a>
                   {(it.summary || it.excerpt) && (
                     <p className="entry-summary">{it.summary ?? it.excerpt}</p>
                   )}
-                </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -563,20 +685,26 @@ function Main(props: { user: User; onLogout: () => void }) {
       </section>
 
       {/* ── 阅读区 ───────────────────────────────────────── */}
-      <section className={`reader-pane ${openId ? 'open' : ''}`}>
+      <section className={`reader-pane ${openId ? 'open' : ''}`} ref={readerRef}>
         {!openId && (
           <div className="reader-placeholder">
             <div className="ph-art"><IconBookmark size={30} /></div>
             <h2>选一篇开始读</h2>
-            <p>用 <kbd>j</kbd> / <kbd>↓</kbd> 在列表里移动，<kbd>Esc</kbd> 返回，<kbd>/</kbd> 搜索。</p>
+            <p>用 <kbd>j</kbd> / <kbd>↓</kbd> 在列表里移动，<kbd>Esc</kbd> 返回，<kbd>/</kbd> 搜索，<kbd>v</kbd> 开原文。</p>
           </div>
         )}
         {openId && (
           <Reader
             loading={detailLoading}
             detail={detail}
+            prefs={prefs}
+            prefsOpen={prefsOpen}
+            onTogglePrefsOpen={() => setPrefsOpen((v) => !v)}
+            onPrefs={setPrefs}
             onBack={() => { setOpenId(null); setDetail(null); }}
             onStar={() => void toggleStar(openId)}
+            onToggleRead={() => void toggleRead(openId)}
+            onOpenOriginal={() => openOriginal()}
           />
         )}
       </section>
@@ -697,11 +825,57 @@ function EmptyState(props: {
 function Reader(props: {
   detail: EntryDetail | null;
   loading: boolean;
+  prefs: ReaderPrefs;
+  prefsOpen: boolean;
+  onTogglePrefsOpen: () => void;
+  onPrefs: (p: ReaderPrefs) => void;
   onBack: () => void;
   onStar: () => void;
+  onToggleRead: () => void;
+  onOpenOriginal: () => void;
 }) {
-  const { detail, loading } = props;
+  const { detail, loading, prefs } = props;
   const [aiOpen, setAiOpen] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [progress, setProgress] = useState(0);
+  const reportedRef = useRef(0);
+
+  // 阅读进度（§15.11）：滚动时节流上报，1 次 / 2s。
+  //
+  // 只在"真的往下读"时上报（>5%），打开即关不算读过。
+  // 进度条本身用本地 state 画 —— 等接口回来再画会卡顿。
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !detail) { setProgress(0); reportedRef.current = 0; return; }
+    setProgress(0);
+    reportedRef.current = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const onScroll = () => {
+      const max = el.scrollHeight - el.clientHeight;
+      const p = max <= 0 ? 0 : Math.min(1, Math.max(0, el.scrollTop / max));
+      setProgress(p);
+      if (p < 0.05) return;
+      if (timer) return;
+      // 节流：2s 内最多一次，且必须比上次上报值大（后端也只增不减）
+      timer = setTimeout(() => {
+        timer = null;
+        if (p > reportedRef.current + 0.01) {
+          reportedRef.current = p;
+          void api.reportProgress(detail.id, Number(p.toFixed(3))).catch(() => { /* 进度不是关键路径 */ });
+        }
+      }, 2000);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (timer) clearTimeout(timer);
+    };
+  }, [detail]);
+
+  // 换篇时重置 AI 卡展开状态 —— 否则上一篇折叠了，下一篇也是折叠的，
+  // 用户会以为"这篇没有摘要"
+  useEffect(() => { setAiOpen(true); }, [detail?.id]);
 
   if (loading || !detail) {
     return (
@@ -712,6 +886,7 @@ function Reader(props: {
   }
 
   const a = detail.analysis;
+  const hasSite = Boolean(detail.feedSiteUrl);
 
   return (
     <div className="reader-wrap">
@@ -720,23 +895,91 @@ function Reader(props: {
           <IconArrowLeft size={17} />
         </button>
         <div className="grow" />
-        <a className="icon-btn" href={detail.url} target="_blank" rel="noreferrer" title="打开原文">
+        {/* 去源站：站点首页，不是这篇文章（§15.11 双出口）。
+            没有 feed 的条目（网页捕获）不渲染，避免死链。 */}
+        {hasSite && (
+          <a
+            className="icon-btn reader-site"
+            href={detail.feedSiteUrl ?? undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`去源站：${detail.feedTitle ?? detail.siteName ?? ''}`}
+          >
+            <IconRss size={16} />
+          </a>
+        )}
+        <a
+          className="icon-btn"
+          href={detail.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="在新标签打开原文（v）"
+        >
           <IconExternal size={16} />
         </a>
         <button
+          className="icon-btn"
+          onClick={props.onTogglePrefsOpen}
+          title="阅读设置（字号 / 宽度 / 主题）"
+          aria-expanded={props.prefsOpen}
+        >
+          <IconMenu size={16} />
+        </button>
+        <button
+          className="icon-btn"
+          onClick={props.onToggleRead}
+          title={detail.isRead ? '标为未读（m）' : '标为已读（m）'}
+        >
+          {detail.isRead ? <IconCircle size={16} /> : <IconCheck size={16} />}
+        </button>
+        <button
           className={`icon-btn ${detail.isStarred ? 'on' : ''}`}
           onClick={props.onStar}
-          title={detail.isStarred ? '取消收藏' : '收藏'}
+          title={detail.isStarred ? '取消收藏' : '收藏（s）'}
         >
           <IconStar size={17} filled={detail.isStarred} />
         </button>
       </div>
 
-      <div className="reader-scroll">
+      {props.prefsOpen && (
+        <PrefsPanel prefs={prefs} onChange={props.onPrefs} onClose={props.onTogglePrefsOpen} />
+      )}
+
+      {/* 阅读进度条：2px，贴在阅读栏下沿。用 scaleX 而非 width —— width 会触发
+          layout，滚动时每帧重排。 */}
+      <div className="reader-progress" aria-hidden="true">
+        <span style={{ transform: `scaleX(${progress})` }} />
+      </div>
+
+      <div className="reader-scroll" ref={scrollRef}>
         <article className="reader">
-          <h1 className="reader-title">{detail.title}</h1>
+          {/* 标题可点：新标签打开原文。用户在阅读区看到标题想"这篇我要发给别人"
+              时，第一个动作是点标题。 */}
+          <h1 className="reader-title">
+            <a
+              href={detail.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="在新标签打开原文"
+            >
+              {detail.title}
+            </a>
+          </h1>
           <div className="reader-meta">
-            {detail.siteName && <span className="src">{detail.siteName}</span>}
+            {hasSite ? (
+              <a
+                className="src reader-site-link"
+                href={detail.feedSiteUrl ?? undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`去源站：${detail.feedTitle ?? ''}`}
+              >
+                {detail.siteName ?? detail.feedTitle}
+                <IconExternal size={11} className="site-arrow" />
+              </a>
+            ) : (
+              detail.siteName && <span className="src">{detail.siteName}</span>
+            )}
             {detail.author && <span>{detail.author}</span>}
             <span>{new Date(detail.publishedAt).toLocaleString('zh-CN', {
               year: 'numeric', month: '2-digit', day: '2-digit',
@@ -776,7 +1019,7 @@ function Reader(props: {
           {detail.contentHtml ? (
             <div
               className="article-body"
-              // 正文来自我们自己抓取并清洗的 HTML；M1 会加一层白名单清洗
+              // 正文来自我们自己抓取并清洗的 HTML（sanitize.ts 白名单 + 链接新标签）
               dangerouslySetInnerHTML={{ __html: detail.contentHtml }}
             />
           ) : (
@@ -785,8 +1028,80 @@ function Reader(props: {
               <a href={detail.url} target="_blank" rel="noreferrer">去原文阅读 ↗</a>
             </div>
           )}
+
+          {/* 文末出口：读完之后最常见的两个动作 */}
+          <div className="reader-foot">
+            <a className="btn" href={detail.url} target="_blank" rel="noopener noreferrer">
+              <IconExternal size={14} /> 打开原文
+            </a>
+            {hasSite && (
+              <a className="btn" href={detail.feedSiteUrl ?? undefined} target="_blank" rel="noopener noreferrer">
+                <IconRss size={14} /> 访问源站
+              </a>
+            )}
+          </div>
         </article>
       </div>
+    </div>
+  );
+}
+
+/** 阅读偏好面板（§15.11）。三个值都是"本设备生效"，不落服务端。 */
+function PrefsPanel(props: {
+  prefs: ReaderPrefs;
+  onChange: (p: ReaderPrefs) => void;
+  onClose: () => void;
+}) {
+  const { prefs } = props;
+  return (
+    <div className="prefs-panel">
+      <div className="prefs-row">
+        <span className="prefs-label">字号</span>
+        <div className="seg">
+          {FONT_SIZES.map((s) => (
+            <button
+              key={s}
+              className={`seg-btn ${prefs.fontSize === s ? 'on' : ''}`}
+              onClick={() => props.onChange({ ...prefs, fontSize: s })}
+              title={`${s}px`}
+            >
+              {s === 15 ? '小' : s === 16.5 ? '中' : s === 18 ? '大' : '特大'}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="prefs-row">
+        <span className="prefs-label">宽度</span>
+        <div className="seg">
+          {WIDTHS.map((w) => (
+            <button
+              key={w}
+              className={`seg-btn ${prefs.width === w ? 'on' : ''}`}
+              onClick={() => props.onChange({ ...prefs, width: w })}
+              title={`${w} 字符`}
+            >
+              {w}ch
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="prefs-row">
+        <span className="prefs-label">底色</span>
+        <div className="seg">
+          {THEMES.map((t) => (
+            <button
+              key={t.key}
+              className={`seg-btn ${prefs.theme === t.key ? 'on' : ''}`}
+              onClick={() => props.onChange({ ...prefs, theme: t.key })}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <button className="btn block prefs-reset" onClick={() => props.onChange({ ...DEFAULT_PREFS })}>
+        恢复默认
+      </button>
     </div>
   );
 }

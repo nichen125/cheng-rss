@@ -144,9 +144,11 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     const id = c.req.param('id');
 
     const row = ctx.dbh.db.prepare(`
-      SELECT e.*, a.summary, a.key_points, a.topics, a.importance, a.tier, a.reading_time
+      SELECT e.*, a.summary, a.key_points, a.topics, a.importance, a.tier, a.reading_time,
+             fd.site_url AS feed_site_url, fd.title AS feed_title
         FROM entries e
         LEFT JOIN entry_analysis a ON a.entry_id = e.id
+        LEFT JOIN feeds fd ON fd.id = e.feed_id
        WHERE e.id = ? AND e.user_id = ?
     `).get(id, uid) as Record<string, unknown> | undefined;
 
@@ -185,6 +187,10 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       tier: row.tier,
       summary: row.summary,
       siteName: row.site_name,
+      // 源站首页（feed 的 site_url），用于阅读页的"去源站"出口（§15.11）。
+      // 网页捕获的条目没有 feed，这里是 null，前端据此不渲染入口。
+      feedSiteUrl: row.feed_site_url ?? null,
+      feedTitle: row.feed_title ?? null,
       highlightCount: Number(row.highlight_count ?? 0),
       contentHtml: html,
       contentMarkdown: null,
@@ -223,6 +229,56 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       throw e;
     }
     return c.json({ ok: true, count: ids.length });
+  });
+
+  // ── 标记未读（§15.11：已读可回退）───────────────────────
+  //
+  // 为什么必须有反向操作：原来点开一篇就永久变已读，误点之后只能去库里改。
+  // 阅读历史字段（first_read_at/last_read_at/read_count）**不清零** ——
+  // "读过了"是事实，"不想让它算未读"是视图层的意图，两者不能互相污染。
+  // 否则 unread 一次就把阅读历史抹了，「历史」页会凭空少一条。
+  r.post('/entries/unread', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as { ids?: string[] };
+    const ids = Array.isArray(body.ids) ? body.ids : [];
+    if (ids.length === 0) throw badRequest('需要 ids');
+
+    const upd = ctx.dbh.db.prepare(
+      'UPDATE entries SET is_read = 0 WHERE id = ? AND user_id = ?',
+    );
+    let changed = 0;
+    ctx.dbh.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const id of ids) changed += Number(upd.run(id, uid).changes ?? 0);
+      ctx.dbh.db.exec('COMMIT');
+    } catch (e) {
+      ctx.dbh.db.exec('ROLLBACK');
+      throw e;
+    }
+    return c.json({ ok: true, count: changed });
+  });
+
+  // ── 阅读进度（§15.11）───────────────────────────────────
+  //
+  // 前端滚动时节流上报（1 次 / 2s），所以这里必须便宜：
+  // 一条 UPDATE、不走事务、不改 read_count。
+  // 进度只往大里更新（GREATEST 语义）：往回滚不该把"读到 80%"降回 30%。
+  r.post('/entries/:id/progress', async (c) => {
+    const uid = requireUserId(c);
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({})) as { progress?: number };
+    const raw = Number(body.progress);
+    if (!Number.isFinite(raw) || raw < 0 || raw > 1) {
+      throw badRequest('progress 必须在 0~1 之间');
+    }
+    const row = ctx.dbh.db.prepare('SELECT read_progress FROM entries WHERE id = ? AND user_id = ?')
+      .get(id, uid) as { read_progress: number | null } | undefined;
+    if (!row) throw notFound('条目不存在');
+    const prev = row.read_progress === null ? 0 : Number(row.read_progress);
+    if (raw <= prev) return c.json({ ok: true, progress: prev, changed: false });
+    ctx.dbh.db.prepare('UPDATE entries SET read_progress = ? WHERE id = ? AND user_id = ?')
+      .run(raw, id, uid);
+    return c.json({ ok: true, progress: raw, changed: true });
   });
 
   // ── 收藏切换 ────────────────────────────────────────────

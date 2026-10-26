@@ -103,6 +103,25 @@ button {
 button:hover:not(:disabled) { background: var(--bg-hover); }
 button:disabled { opacity: 0.45; cursor: default; }
 
+/* .btn 的基样式。
+   为什么需要它：原来 .btn 只当修饰类用在 <button> 上，靠元素选择器拿样式。
+   §15.11 的文末出口是 <a class="btn">（打开原文 / 访问源站都是导航），
+   <a> 拿不到 button 的样式，于是变成裸文字。这里给 .btn 一条基样式，
+   值与 button 元素选择器完全一致，<button class="btn"> 外观不变。 */
+.btn {
+  display: inline-block;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-elev2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 13px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 120ms, border-color 120ms;
+}
+.btn:hover { background: var(--bg-hover); text-decoration: none; }
+
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -417,8 +436,30 @@ input::placeholder { color: var(--fg-faint); }
   -webkit-box-orient: vertical;
   overflow: hidden;
   color: var(--fg);
+  /* 标题现在是真 <a>（§15.11）：不能有下划线、颜色跟正文一致 ——
+     否则每行都变成蓝字，整个列表会变成"蓝色标题墙" */
+  text-decoration: none;
 }
+.entry-title:hover { color: var(--accent); text-decoration: none; }
 .entry-item.read .entry-title { font-weight: 400; color: var(--fg-dim); }
+
+/* hover 才出现的行内操作（收藏 / 新标签打开原文）。
+   常驻会让每行多两个图标的视觉噪声，而列表页的任务是"扫过去"（§15.2）。 */
+.entry-ops {
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 90ms;
+}
+.entry-item:hover .entry-ops,
+.entry-item:focus-within .entry-ops { opacity: 1; }
+.icon-btn.tiny {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: var(--fg-faint);
+}
+.icon-btn.tiny:hover { color: var(--fg); }
 
 .meta { color: var(--fg-faint); }
 
@@ -498,12 +539,78 @@ input::placeholder { color: var(--fg-faint); }
      字号计算的，只有当「量宽度的字号」等于「正文的字号」时，
      72ch 才真的等于 72 个正文字符宽。
      content-box：让 72ch 约束的是文字宽度，padding 加到外面。
-     用默认的 border-box 会变成「含 padding 共 72ch」，文字少 8%。 */
+     用默认的 border-box 会变成「含 padding 共 72ch」，文字少 8%。
+
+     §15.11：字号与宽度改由 CSS 变量驱动（阅读偏好），默认值就是原来的
+     16.5px / 72ch —— 没设置过的用户看到的和之前完全一样。 */
   box-sizing: content-box;
-  font-size: 16.5px;
-  max-width: 72ch;
+  font-size: var(--reader-font, 16.5px);
+  max-width: calc(var(--reader-width, 72) * 1ch);
   margin: 0 auto;
   padding: 34px 28px 120px;
+  transition: font-size 120ms, max-width 120ms;
+}
+
+/* 阅读区主题（§15.11）：只作用于阅读区，不动全局主题 ——
+   白天用亮色、晚上躺着看用米色，这个选择与"整个应用什么颜色"是两件事。 */
+.reader-pane[data-reader-theme='light'] {
+  --bg: #ffffff;
+  --bg-elev: #f7f8fa;
+  --bg-hover: #eef1f5;
+  --fg: #12161d;
+  --fg-dim: #59616e;
+  --fg-faint: #8a93a1;
+  --border: #e3e7ed;
+  --border-soft: #eef1f5;
+  --accent: #2563eb;
+  color-scheme: light;
+}
+.reader-pane[data-reader-theme='sepia'] {
+  --bg: #f6efe1;
+  --bg-elev: #efe6d5;
+  --bg-hover: #e8dcc7;
+  --fg: #3b332a;
+  --fg-dim: #6b6052;
+  --fg-faint: #94897a;
+  --border: #ddd0ba;
+  --border-soft: #e8dcc7;
+  --accent: #a8622a;
+  color-scheme: light;
+  background: var(--bg);
+}
+.reader-pane[data-reader-theme='dark'] {
+  --bg: #0b0d11;
+  --bg-elev: #12151b;
+  --bg-hover: #1c212b;
+  --fg: #e7eaef;
+  --fg-dim: #a2acbb;
+  --fg-faint: #6d7686;
+  --border: #222834;
+  --border-soft: #1a1f28;
+  --accent: #5b9dff;
+  color-scheme: dark;
+}
+.reader-pane[data-reader-theme='light'],
+.reader-pane[data-reader-theme='dark'],
+.reader-pane[data-reader-theme='sepia'] { background: var(--bg); }
+
+/* 阅读进度条（§15.11）。2px 贴在阅读栏下沿，用 transform 而不是 width ——
+   width 每帧触发重排，滚动时整页都在动。 */
+.reader-progress {
+  height: 2px;
+  flex-shrink: 0;
+  background: transparent;
+  overflow: hidden;
+}
+.reader-progress > span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: var(--accent);
+  opacity: 0.75;
+  transition: transform 90ms linear;
 }
 
 .reader-title {
@@ -529,6 +636,75 @@ input::placeholder { color: var(--fg-faint); }
   margin-left: 12px;
   opacity: 0.45;
 }
+
+/* 标题与站点名都是链接（§15.11）：
+   标题改成 <a> 之后继承到的是全局蓝字 + 下划线，会很刺眼 ——
+   阅读区里标题应该是正文的强调，不是超链接。 */
+.reader-title a { color: inherit; text-decoration: none; }
+.reader-title a:hover { color: var(--accent); text-decoration: none; }
+.reader-site-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  text-decoration: none;
+}
+.reader-site-link:hover { text-decoration: underline; }
+.reader-site-link .site-arrow { opacity: 0.6; }
+
+/* 阅读偏好面板（§15.11） */
+.prefs-panel {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 10px 14px 12px;
+  background: var(--bg-elev);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prefs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.prefs-label { width: 34px; flex-shrink: 0; color: var(--fg-faint); }
+.seg {
+  display: flex;
+  gap: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+.seg-btn {
+  padding: 3px 9px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--fg-dim);
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.seg-btn:hover { background: var(--bg-hover); color: var(--fg); }
+.seg-btn.on { background: var(--accent-dim); color: var(--accent); font-weight: 500; }
+.prefs-reset { margin-top: 2px; font-size: 12px; padding: 5px; }
+
+/* 文末出口（§15.11）：读完之后的两个动作 */
+.reader-foot {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 34px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-soft);
+}
+.reader-foot .btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* 正文链接指针：清洗后全部带 target=_blank，hover 时给个视觉暗示 */
+.article-body a { cursor: pointer; }
+.article-body a:hover { text-decoration: underline; }
 
 /* AI 摘要卡 */
 .ai-card {

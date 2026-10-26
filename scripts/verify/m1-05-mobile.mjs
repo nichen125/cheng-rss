@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
+import { killTree, onExit } from '../lib/proc.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -26,7 +27,7 @@ const binName = process.platform === 'win32'
   : `ai-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
-group('1.10 移动端');
+group('1.5 移动端');
 
 const CANDIDATES = process.platform === 'win32'
   ? [
@@ -72,7 +73,7 @@ for (let i = 0; i < 80; i++) {
 }
 check('服务就绪', () => ok(ready, srvErr.slice(0, 300)));
 if (!ready) {
-  try { execFileSync('taskkill', ['/F', '/T', '/PID', String(srv.pid)], { stdio: 'ignore' }); } catch { /* ignore */ }
+  killTree(srv.pid);
   rmSync(tmp, { recursive: true, force: true });
   summary('m1-05-mobile');
   process.exit(1);
@@ -110,19 +111,12 @@ const proc = spawn(browser, [
 ], { stdio: 'ignore' });
 
 const cleanup = () => {
-  try {
-    if (process.platform === 'win32') {
-      execFileSync('taskkill', ['/F', '/T', '/PID', String(srv.pid)], { stdio: 'ignore' });
-      execFileSync('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { stdio: 'ignore' });
-    } else {
-      srv.kill('SIGKILL');
-      proc.kill('SIGKILL');
-    }
-  } catch { /* 已退出 */ }
+  killTree(srv.pid);
+  killTree(proc.pid);
   try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
   try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
 };
-process.on('exit', cleanup);
+onExit(cleanup);
 
 let target = null;
 for (let i = 0; i < 80; i++) {

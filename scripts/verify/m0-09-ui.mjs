@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, ok, eq, summary } from './harness.mjs';
+import { killTree, onExit } from '../lib/proc.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -68,15 +69,7 @@ const srv = spawn(binPath, ['serve', '--data', dataDir, '--port', String(port)],
 let srvErr = '';
 srv.stderr.on('data', (d) => { srvErr += String(d); });
 
-const stopServer = () => {
-  try {
-    if (process.platform === 'win32') {
-      execFileSync('taskkill', ['/F', '/T', '/PID', String(srv.pid)], { stdio: 'ignore' });
-    } else {
-      srv.kill('SIGKILL');
-    }
-  } catch { /* 已退出 */ }
-};
+const stopServer = () => killTree(srv.pid);
 
 let ready = false;
 for (let i = 0; i < 80; i++) {
@@ -133,13 +126,11 @@ const proc = spawn(browser, [
 
 const cleanup = () => {
   stopServer();
-  try {
-    execFileSync('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { stdio: 'ignore' });
-  } catch { try { proc.kill(); } catch { /* ignore */ } }
+  killTree(proc.pid);
   try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
   try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
 };
-process.on('exit', cleanup);
+onExit(cleanup);
 
 let target = null;
 for (let i = 0; i < 80; i++) {
@@ -153,6 +144,7 @@ for (let i = 0; i < 80; i++) {
 if (!target?.webSocketDebuggerUrl) {
   check('浏览器调试端口可用', () => ok(false, 'CDP 没起来'));
   summary('m0-09-ui');
+  cleanup();
   process.exit(1);
 }
 

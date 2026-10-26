@@ -17,12 +17,13 @@
 //   ④ 吸顶头部滚动后仍可见，且不盖住内容
 //   ⑤ 手机上行内操作至少 3 个可用（刷新/暂停/删除）
 //   ⑥ 桌面 + 手机都无横向溢出
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
+import { killTree, onExit } from '../lib/proc.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -76,13 +77,7 @@ for (let i = 0; i < 80; i++) {
 check('服务就绪', () => ok(ready, srvErr.slice(0, 300)));
 
 const cleanup = () => {
-  try {
-    if (process.platform === 'win32') {
-      execFileSync('taskkill', ['/F', '/T', '/PID', String(srv.pid)], { stdio: 'ignore' });
-    } else {
-      srv.kill('SIGKILL');
-    }
-  } catch { /* 已退出 */ }
+  killTree(srv.pid);
   try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
 };
 
@@ -159,16 +154,10 @@ const proc = spawn(browser, [
 ], { stdio: 'ignore' });
 
 const killBrowser = () => {
-  try {
-    if (process.platform === 'win32') {
-      execFileSync('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { stdio: 'ignore' });
-    } else {
-      proc.kill('SIGKILL');
-    }
-  } catch { /* 已退出 */ }
+  killTree(proc.pid);
   try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
 };
-process.on('exit', () => { killBrowser(); cleanup(); });
+onExit(() => { killBrowser(); cleanup(); });
 
 let target = null;
 for (let i = 0; i < 80; i++) {
@@ -317,9 +306,12 @@ check('长标题那行的「失效」徽标仍可见（状态不能被截掉）'
 check('所有行的操作按钮都在可视区内', () => {
   return ok(desk.opsOut.length === 0, `越界行数 ${desk.opsOut.length}`);
 });
-check('每行有 4 个操作（刷新/暂停/访问/删除）', () => {
-  return ok(desk.opsIcons.length === 4,
-    `实际 ${desk.opsIcons.length}: ${JSON.stringify(desk.opsIcons.map((o) => o.title))}`);
+check('每行都有编辑/刷新/暂停/访问/删除五个操作', () => {
+  const titles = desk.opsIcons.map((o) => o.title);
+  const want = ['编辑', '立即刷新', '暂停抓取', '访问网站', '取消订阅'];
+  const missing = want.filter((w) => !titles.includes(w));
+  return ok(missing.length === 0,
+    `缺 ${JSON.stringify(missing)}，实际 ${JSON.stringify(titles)}`);
 });
 check('操作按钮的 title 语义正确（不是星形冒充暂停）', () => {
   const titles = desk.opsIcons.map((o) => o.title);
@@ -439,9 +431,12 @@ check('手机上所有行高一致', () => {
 check('手机上无横向溢出', () => ok(mob.overflowX <= 1, `溢出 ${mob.overflowX}px`));
 
 // ⑤ 行内操作可用性——这是最容易写错的一条
-check('手机上每行仍有 3 个可用操作（刷新/暂停/删除）', () => {
-  return ok(mob.visibleOpTitles.length >= 3,
-    `只有 ${mob.visibleOpTitles.length} 个: ${JSON.stringify(mob.visibleOpTitles)}`);
+check('手机上每行仍有 4 个可用操作（编辑/刷新/暂停/删除）', () => {
+  const want = ['编辑', '立即刷新', '取消订阅'];
+  const missing = want.filter((w) => !mob.visibleOpTitles.includes(w));
+  const hasPause = mob.visibleOpTitles.some((t) => t.includes('暂停') || t.includes('恢复'));
+  return ok(missing.length === 0 && hasPause,
+    `缺 ${JSON.stringify(missing)}，暂停=${hasPause}，可见 ${JSON.stringify(mob.visibleOpTitles)}`);
 });
 check('手机上「立即刷新」可点（不是被 CSS 藏掉）', () => {
   return ok(mob.visibleOpTitles.includes('立即刷新'),

@@ -4,7 +4,7 @@
 >
 > 支持二进制 / 源码 / Docker 三种部署，单个数据目录即可备份迁移。
 >
-> 版本 **v1.3**｜状态：M0 完成，M1 进行中（1.1~1.6 已落地，16 个验收脚本全绿）｜22 章
+> 版本 **v1.5**｜状态：M0 完成，M1 进行中（1.1~1.7 已落地，17 个验收脚本全绿）｜22 章
 
 ---
 
@@ -1673,6 +1673,75 @@ Huntly 的导航有 10+ 项（Home / Recently Read / My List / Starred / Read La
 
 第 2、3 条是同一类错误的两次发作：**空转的断言比没有断言更危险**，它给出的是虚假的安全感。
 
+### 15.9 长跑验证的进程卫生（v1.5 修订：已随插件下架）
+
+一轮完整验证之后，系统里曾留下 **115 个 msedge 进程 / 6.9GB 内存**。
+表现是紧接着的 `build.sh --sea` 报：
+
+```
+Fatal process out of memory: Zone
+```
+
+这个报错完全看不出根因——它看起来像 node 自己内存不够，实际是系统内存
+被无头浏览器吃光了。
+
+### 当时为什么会漏（结论保留，代码已删）
+
+三个独立的原因，缺一层就会漏。这三条是平台事实，换任何项目都成立：
+
+| 层面 | 问题 |
+|---|---|
+| 信号 | 只挂 `process.on('exit')`；`timeout` 命令和 Ctrl+C 走 SIGTERM/SIGINT，`exit` **不触发** |
+| 平台 | **Windows 上 `child.kill('SIGTERM')` 走 TerminateProcess，不执行目标进程的信号处理器** |
+| 进程树 | `taskkill /T` 之后仍剩 42 个 msedge —— 浏览器的 GPU / utility / broker 子进程在父进程死后会被系统收养，脱离原进程树，按树杀追不到 |
+
+第二条最反直觉：写在 `process.on('SIGTERM')` 里的清理代码，在 Windows 上
+对于"被 timeout / 被任务管理器结束"这种最常见的场景**一次都不会执行**。
+所以"挂个信号处理器"这个直觉方案在这里是无效的。
+
+### v1.5 的决定：把浏览器交给插件
+
+上面三条的修法（`onCleanup` / `sweepStale` / `killByMarker` 三层、
+`scripts/lib/cleanup.mjs` + `m1-08-cleanup` + pid 登记目录）之所以存在，
+前提是**验证脚本自己起浏览器、自己攒残留**。
+
+浏览器插件接管自动化之后这个前提不成立了：插件跑在用户自己的浏览器里，
+生命周期由插件管理，脚本侧没有可泄漏的进程。于是整套基础设施按「不为
+已消失的问题付维护成本」的原则删掉：
+
+| 删除 | 原因 |
+|---|---|
+| `scripts/lib/cleanup.mjs`（205 行） | 只有自起浏览器才需要 |
+| `scripts/verify/m1-08-cleanup.mjs`（250 行） | 验的是已删除的机制 |
+| `scripts/shot-ui.mjs` / `scripts/shot-mobile.mjs` | 截图改由插件出 |
+| `.tmp/run/` pid 登记 | 不再登记任何进程 |
+
+现在只剩 `scripts/lib/proc.mjs`（`killTree` + `onExit`，约 40 行）：
+3 个布局验收脚本仍然要起一次无头浏览器量行高/截断/横向溢出——这些是
+纯布局数值，插件侧的截图判不了——正常退出时 `killTree` 杀掉即可。
+
+**代价要写清楚**：`onExit` 在 Windows 上被外部硬杀时同样跑不到。所以
+"长期反复跑 `verify-all`"这件事，要么接受每轮结束自己看一眼进程数，
+要么就少跑。这是已知的、明确接受的取舍，不是遗漏。
+
+### 现在的收尾（`scripts/lib/proc.mjs`）
+
+```
+killTree(pid)   杀整棵进程树（Windows 用 taskkill /F /T）
+onExit(fn)      正常退出 / SIGINT / 未捕获异常 → 跑一次 fn
+```
+
+没有 pid 登记、没有启动扫残留、没有标记匹配。三个布局脚本各自
+`onExit(cleanup)` 一次，正常退出时杀干净就够了。
+
+### 附带修掉的两个问题
+
+- `tsconfig.json` 一直 `exclude: ["src/client"]`，**前端 .tsx 从来没被
+  类型检查过**。Vite 的 esbuild 只擦类型不校验，写错变量名照样构建成功。
+  新增 `tsconfig.client.json`（moduleResolution: bundler + jsx: react-jsx），
+  第一次跑就抓出 `NAV[0]` 在 `noUncheckedIndexedAccess` 下是 undefined。
+- 前端检查进脚本：`npm run typecheck:client` / `typecheck:all`。
+
 ---
 
 ## 十六、CI 与发布
@@ -1881,7 +1950,9 @@ ai-rss/
 │  ├─ dev.sh  build.sh            # 统一用 .toolchain/node/bin/node 启动
 │  ├─ build-server.mjs            # esbuild → dist/server.js
 │  ├─ build-sea.mjs               # bundle + postject/--build-sea
-│  └─ pack-client-zip.mjs         # dist/client → dist/client.zip
+│  ├─ pack-client-zip.mjs         # dist/client → dist/client.zip
+│  ├─ lib/proc.mjs                # killTree / onExit（验收脚本的子进程收尾）
+│  └─ verify/                     # 每步一个验收脚本 + harness.mjs
 ├─ src/
 │  ├─ index.ts                    # 单一入口：serve|worker|migrate|doctor|version|mcp|export|import
 │  ├─ cli.ts                      # 子命令实现
@@ -1931,11 +2002,20 @@ data/
 
 ```
 # 订阅
-GET    /feeds                    列表（未读数、健康度）
+GET    /feeds?folderId=          列表（未读数、健康度、分组）
 POST   /feeds                    {url} → 自动发现 feed
-PATCH  /feeds/:id                间隔/文件夹/分析档位
+PUT    /feeds/:id                编辑：标题 / 分组 / 抓取间隔
+PATCH  /feeds/:id                间隔/文件夹/分析档位/状态
 DELETE /feeds/:id
-POST   /feeds/import  GET /feeds/export        OPML
+POST   /feeds/import  GET /feeds/export        OPML（含分组）
+
+# 分组（folders 一层扁平结构）
+GET    /folders                  列表（含 feedCount / unread）
+POST   /folders                  {name}
+PATCH  /folders/:id              {name}
+DELETE /folders/:id              组内订阅退回未分组，不删源
+POST   /folders/:id/feeds        {feedIds} 批量移入
+POST   /folders/unfile/feeds     {feedIds} 批量移出（注意：必须注册在 :id 之前）
 
 # RSSHub 搜索
 GET    /rsshub/search?q=&type=keyword|url
@@ -1943,7 +2023,7 @@ POST   /rsshub/preview           {route, params} → 最近 5 条
 POST   /rsshub/refresh           刷新路由库
 
 # 条目
-GET    /entries                  ?feed=&category=&tier=&unread=&view=&since=&cursor=
+GET    /entries                  ?feedId=&folderId=&view=&q=&tier=&since=&cursor=
 GET    /entries/:id              含正文 + AI 分析
 POST   /entries/read             {ids:[], progress?}
 POST   /entries/:id/analyze      手动重跑
@@ -2030,7 +2110,7 @@ FAIL  m0-02-schema      schema_migrations 应为 1 行，实际 0
 
 没有 Chromium 系浏览器的机器上 0.9 整节 SKIP（退出 0），不算失败 —— 环境缺失不是实现问题。但它 SKIP 时必须在汇总里看得见，不能静默通过。
 
-### 19.3 M1：阅读 + RSSHub（2~2.5 周，10 步）
+### 19.3 M1：阅读 + RSSHub（2.5~3 周，11 步）
 
 | # | 步骤 | 自验证 | 通过判据 |
 |---|---|---|---|
@@ -2040,12 +2120,18 @@ FAIL  m0-02-schema      schema_migrations 应为 1 行，实际 0
 | 1.4 | 订阅 CRUD + 自动发现 + 抓取 | `m1-04-feeds.mjs` | ① 贴首页能发现 feed ② 重复订阅幂等 ③ 条件请求 304 不重复入库 ④ 404 三次后 `broken` ⑤ 取消订阅保留已读/已收藏 |
 | 1.5 | 移动端 | `m1-05-mobile.mjs` | ① 侧栏换底部 tab bar ② 触摸目标 ≥44px ③ 输入框字号 ≥16px ④ 安全区 padding ⑤ 无横向溢出 ⑥ 横屏不出现侧栏 |
 | 1.6 | 订阅页界面 | `m1-06-feeds-ui.mjs` | ① 30+ 源行高一致 ② 长标题单行截断且徽标保留 ③ 操作按钮不越界 ④ 头部吸顶 ⑤ 手机上刷新/暂停/删除都可点 |
-| 1.7 | 正文提取（Readability 兜底） | `m1-07-extract.mjs` | ① 5 个真实站点正文 > 原文 60% ② 提取失败回退 feed 内 HTML，不丢条目 |
-| 1.8 | 去重（向量层） | `m1-08-dedupe.mjs` | ① 同 URL 不同 utm 参数判重 ② 余弦 >0.95 判重 ③ 混入 20 条重复，重复率 < 1% |
-| 1.9 | 列表/阅读/历史 API | `m1-09-ui-api.mjs` | ① 游标分页不重复不漏 ② `POST /read` 两次 → `read_count=2` ③ 历史按日期分组正确 |
-| 1.10 | RSSHub 搜索 | `m1-10-rsshub.mjs` | ① 关键词搜到路由 ② URL 反查到路由 ③ 预览拉到 ≥1 条 ④ 断网时用 7 天缓存仍能搜 |
+| 1.7 | 订阅分组与编辑 | `m1-07-folders.mjs` | ① 建/改名/删分组，重名拒绝 ② 按组过滤准确 ③ 删分组后订阅退回未分组且不丢条目 ④ 编辑标题/分组/间隔生效 ⑤ OPML 往返保留分组 |
+| 1.8 | 正文提取（Readability 兜底） | `m1-08-extract.mjs` | ① 5 个真实站点正文 > 原文 60% ② 提取失败回退 feed 内 HTML，不丢条目 |
+| 1.9 | 去重（向量层） | `m1-09-dedupe.mjs` | ① 同 URL 不同 utm 参数判重 ② 余弦 >0.95 判重 ③ 混入 20 条重复，重复率 < 1% |
+| 1.10 | 列表/阅读/历史 API | `m1-10-ui-api.mjs` | ① 游标分页不重复不漏 ② `POST /read` 两次 → `read_count=2` ③ 历史按日期分组正确 |
+| 1.11 | RSSHub 搜索 | `m1-11-rsshub.mjs` | ① 关键词搜到路由 ② URL 反查到路由 ③ 预览拉到 ≥1 条 ④ 断网时用 7 天缓存仍能搜 |
 
-**已完成**：1.1~1.6（含 0.9 三栏 UI、0.9 之后的移动端）。
+**已完成**：1.1~1.7（含 0.9 三栏 UI、移动端、订阅分组与编辑）。
+
+**原 1.8「进程清理」已下架**（v1.5）：浏览器自动化交给 DSH 浏览器插件后，
+"脚本自起浏览器 → 攒残留 → 三层清理"这条链的前提消失，`cleanup.mjs`、
+`m1-08-cleanup` 与两个截图脚本一并删除，只留 40 行的 `scripts/lib/proc.mjs`。
+详见 §15.9。因此 1.8~1.11 顺次前移为 1.8~1.11（原 1.9~1.12）。
 
 **M1 门禁**：`m1` 全绿 + **50 个真实源连跑 3 天无崩溃**（脚本跑不了，必须真跑）。
 
@@ -2507,6 +2593,8 @@ v2.0  需求范围变化（增删 §1.1 任一行）
 | v1.1 | 2026-10-25 | **规格层修订，非需求变更**：§15 布局改三栏、72ch 实现细节、§19.2 新增步骤 0.9「界面」 | ✅ 需求方要求「界面至少和 Huntly 基本界面差不多」，已在对话中确认 |
 | v1.2 | 2026-10-25 | **规格层修订 + 步骤拆分**：§15.7 新增移动端约束；§19.3 把 M1 从 6 步拆成 9 步（1.1~1.5 已完成） | ✅ 需求方要求「对移动端也进行优化」+「添加 RSS 订阅功能」，均已确认 |
 | v1.3 | 2026-10-25 | **规格层修订**：§15.8 新增列表型页面质量约束；§19.3 新增步骤 1.6「订阅页界面」 | ✅ 需求方指出「订阅界面显示有问题」，修复后补验收 |
+| v1.4 | 2026-10-26 | **规格层修订**：§15.9 新增长跑验证的进程卫生；§19.3 新增 1.7「订阅分组与编辑」、1.8「进程清理」 | ✅ 需求方要求「订阅的编辑和分组」+ 发现进程残留吃光内存 |
+| v1.5 | 2026-10-26 | **规格层回退（下架而非新增需求）**：浏览器自动化改用 DSH 浏览器插件，§15.9 改写为「三层清理为何存在、为何下架」，删除 `m1-08-cleanup` 与两个截图脚本；§19.3 步骤由 12 步回到 11 步（原 1.9~1.12 前移为 1.8~1.11） | ✅ 需求方说明「使用了新的浏览器插件，原来的清理方式不再必要」 |
 
 填写规则：
 
@@ -2551,6 +2639,7 @@ m0-02-schema: 4/4 PASS
 | 0.9 | 三栏布局而非两栏 | 阅读时列表常驻，"读完挑下一篇"是最高频动作；跳页式切换把它变成两次点击 | 若窄屏/移动端成为主要场景，回到两栏（那时列表本来就放不下） |
 | 0.9 | 不引 Tailwind/shadcn，手写 776 行 CSS + 13 个内联 SVG 图标 | 全站只用 8 个组件，组件库带来的配置与依赖成本超过手写成本 | 组件数超过 20 个时切回 shadcn（`§15.6` 已写明切换点） |
 | 0.9 | 用本机 Edge 无头 + 裸 CDP 做 UI 验收，不装 playwright | 零下载（Edge 就是 Chromium，系统自带）；playwright 要拉 300MB Chromium | 需要跨浏览器（Safari/Firefox）回归时换成 playwright |
+| 1.7 | ~~三层进程清理（pid 登记 + 启动扫残留 + 标记兜底）~~ **已被插件方案取代** | 前提是"脚本自己起浏览器、自己攒残留"；浏览器插件接管后脚本侧没有可泄漏的进程，因此 `cleanup.mjs` / `m1-08-cleanup` / 两个截图脚本全删，只留 40 行 `scripts/lib/proc.mjs` | 若哪天又出现脚本自起浏览器的需求（如 CI 里跑布局断言），需要把兜底层加回来 |
 | 0.9 | 验收脚本里注入 cookie 而非走表单登录 | UI 验收只关心 UI；登录流程已由 `m0-05-auth` 的 25 条断言覆盖 | 若出现"登录后 UI 状态错乱"类 bug，改为真实表单登录 |
 | 0.3 | `unpackText` 用 2 字节 gzip 魔数识别旧格式，同时保留 0x00/0x01 标记 | 早期数据是裸 gzip；魔数判定是确定性的，比"试 gunzip 失败当明文"可靠 | 若无历史裸 gzip 数据，可删掉魔数分支 |
 | 0.8 | `build-sea.mjs` 每次都重打 `client.zip`（原来"存在就跳过"） | zip 只 77KB，重打比维护依赖关系便宜；跳过曾导致"构建全绿但二进制里是旧 UI" | 前端构建时间变长到秒级时可加 mtime 判断 |

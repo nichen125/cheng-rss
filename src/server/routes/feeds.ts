@@ -6,6 +6,10 @@ import { log } from '../logger.ts';
 import { discoverFeed, fetchFeed, FetchError } from '../feeds/fetch.ts';
 import { parseFeed } from '../feeds/parse.ts';
 import { buildOpml, parseOpml } from '../feeds/opml.ts';
+import {
+  assignFeedsToFolder, createFolder, deleteFolder, ensureFolder, folderNameMap,
+  FolderError, getFolder, listFolders, renameFolder,
+} from '../feeds/folders.ts';
 import { sanitizeHtml } from '../feeds/sanitize.ts';
 import {
   createFeed, deleteFeed, dueFeeds, enqueueFetch, findFeedByUrl, getFeed,
@@ -26,18 +30,94 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   r.get('/feeds', (c) => {
     const uid = requireUserId(c);
     const rows = listFeeds(ctx.dbh.db, uid);
-    const items = rows.map(shapeFeed);
+    const folderNames = folderNameMap(ctx.dbh.db, uid);
+    const items = rows.map((f) => ({
+      ...shapeFeed(f),
+      folderId: f.folder_id,
+      folderName: f.folder_id ? (folderNames.get(f.folder_id) ?? null) : null,
+    }));
+    // 支持 ?folderId= 过滤（前端按组查看时用）
+    const folderId = c.req.query('folderId');
+    const filtered = folderId === undefined
+      ? items
+      : folderId === 'none'
+        ? items.filter((f) => !f.folderId)
+        : items.filter((f) => f.folderId === folderId);
+
     return c.json({
-      items,
-      total: items.length,
+      items: filtered,
+      total: filtered.length,
+      folders: listFolders(ctx.dbh.db, uid),
       /** 各状态的源数，供侧栏与空态使用 */
       counts: {
         active: items.filter((f) => f.status === 'active').length,
         broken: items.filter((f) => f.status === 'broken').length,
         paused: items.filter((f) => f.status === 'paused').length,
         unread: items.reduce((n, f) => n + f.unread, 0),
+        unfiled: items.filter((f) => !f.folderId).length,
       },
     });
+  });
+
+  // ── 分组 CRUD ───────────────────────────────────────────
+  r.get('/folders', (c) => {
+    const uid = requireUserId(c);
+    return c.json({ items: listFolders(ctx.dbh.db, uid) });
+  });
+
+  r.post('/folders', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as { name?: string };
+    try {
+      const folder = createFolder(ctx.dbh.db, uid, body.name ?? '');
+      return c.json({ folder }, 201);
+    } catch (e) {
+      throw toAppError(e);
+    }
+  });
+
+  r.patch('/folders/:id', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as { name?: string };
+    try {
+      const folder = renameFolder(ctx.dbh.db, uid, c.req.param('id'), body.name ?? '');
+      return c.json({ folder });
+    } catch (e) {
+      throw toAppError(e);
+    }
+  });
+
+  r.delete('/folders/:id', (c) => {
+    const uid = requireUserId(c);
+    const ok = deleteFolder(ctx.dbh.db, uid, c.req.param('id'));
+    if (!ok) throw notFound('分组不存在');
+    return c.json({ ok: true });
+  });
+
+  // ⚠️ 路由顺序：Hono 按注册顺序匹配，静态段必须排在参数段之前。
+  // 曾经把 /folders/:id/feeds 写在前面，导致 "unfile" 被当成分组 id，
+  // 移出分组的接口永远返回 404「分组不存在」。
+  r.post('/folders/unfile/feeds', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as { feedIds?: string[] };
+    const ids = Array.isArray(body.feedIds) ? body.feedIds : [];
+    if (ids.length === 0) throw badRequest('需要 feedIds');
+    const moved = assignFeedsToFolder(ctx.dbh.db, uid, ids, null);
+    return c.json({ ok: true, moved });
+  });
+
+  // 批量把订阅移进某个分组
+  r.post('/folders/:id/feeds', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as { feedIds?: string[] };
+    const ids = Array.isArray(body.feedIds) ? body.feedIds : [];
+    if (ids.length === 0) throw badRequest('需要 feedIds');
+    try {
+      const moved = assignFeedsToFolder(ctx.dbh.db, uid, ids, c.req.param('id'));
+      return c.json({ ok: true, moved });
+    } catch (e) {
+      throw toAppError(e);
+    }
   });
 
   // ── 发现（不落库）──────────────────────────────────────
@@ -190,6 +270,54 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     return c.json({ feed: shapeFeed({ ...updated, unread: 0, total: 0 }) });
   });
 
+  // ── 编辑（标题 / 分组 / 抓取间隔，一次改完）──────────────
+  //
+  // PATCH /feeds/:id 已经能改这些，为什么还要单独一个？
+  // 因为它接受的字段太宽（status 也在里面），而"编辑弹窗"只应该
+  // 改这三项。分开端点让前端的保存按钮语义明确，也让权限/审计
+  // 更细（将来多用户时"改订阅信息"与"暂停抓取"可能是不同角色）。
+  r.put('/feeds/:id', async (c) => {
+    const uid = requireUserId(c);
+    const id = c.req.param('id');
+    const cur = getFeed(ctx.dbh.db, uid, id);
+    if (!cur) throw notFound('订阅不存在');
+
+    const body = await c.req.json().catch(() => ({})) as {
+      title?: string | null;
+      folderId?: string | null;
+      fetchInterval?: number;
+    };
+
+    if (body.folderId !== undefined && body.folderId !== null) {
+      if (!getFolder(ctx.dbh.db, uid, body.folderId)) throw badRequest('分组不存在');
+    }
+
+    const patch: Parameters<typeof updateFeed>[3] = {};
+    if (body.title !== undefined) {
+      const t = (body.title ?? '').trim();
+      // 清空标题是合法的：列表会退回显示域名
+      patch.title = t || null;
+    }
+    if (body.folderId !== undefined) patch.folderId = body.folderId;
+    if (body.fetchInterval !== undefined) {
+      const n = Number(body.fetchInterval);
+      if (!Number.isFinite(n) || n < 300) throw badRequest('抓取间隔最小 300 秒');
+      if (n > 86400 * 7) throw badRequest('抓取间隔最大 7 天');
+      patch.fetchInterval = Math.round(n);
+    }
+
+    const updated = updateFeed(ctx.dbh.db, uid, id, patch);
+    if (!updated) throw notFound('订阅不存在');
+    const names = folderNameMap(ctx.dbh.db, uid);
+    return c.json({
+      feed: {
+        ...shapeFeed({ ...updated, unread: 0, total: 0 }),
+        folderId: updated.folder_id,
+        folderName: updated.folder_id ? (names.get(updated.folder_id) ?? null) : null,
+      },
+    });
+  });
+
   // ── 删除 ────────────────────────────────────────────────
   r.delete('/feeds/:id', (c) => {
     const uid = requireUserId(c);
@@ -216,11 +344,14 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   r.get('/feeds/export', (c) => {
     const uid = requireUserId(c);
     const rows = listFeeds(ctx.dbh.db, uid);
+    const names = folderNameMap(ctx.dbh.db, uid);
     const xml = buildOpml(rows.map((f) => ({
       url: f.url,
       title: f.title,
       siteUrl: f.site_url,
-      folder: null,
+      // 分组一起导出 —— 换到别的阅读器后分组还得在，
+      // 否则"搬家"等于把所有整理工作重做一遍。
+      folder: f.folder_id ? (names.get(f.folder_id) ?? null) : null,
     })));
     return c.body(xml, 200, {
       'content-type': 'text/x-opml; charset=utf-8',
@@ -274,12 +405,17 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
           skipped.push({ url: f.url, reason: '已订阅' });
           continue;
         }
+        // 分组：按名字复用，不存在就建。重名不报错 ——
+        // OPML 里两个文件夹同名是很常见的（不同导出工具的处理不同）。
+        const folderId = ensureFolder(ctx.dbh.db, uid, f.folder);
+
         const feed = createFeed(ctx.dbh.db, {
           userId: uid,
           url: res.finalUrl,
           title: pf.title ?? f.title,
           siteUrl: pf.siteUrl ?? f.siteUrl,
           iconUrl: pf.iconUrl,
+          folderId,
           sourceKind: 'opml',
         });
         ctx.dbh.db.prepare('UPDATE feeds SET etag = ?, last_modified = ? WHERE id = ?')
@@ -443,6 +579,20 @@ export function normalizeInputUrl(raw: string | undefined | null): string | null
   } catch {
     return null;
   }
+}
+
+/**
+ * FolderError → AppError。
+ *
+ * 必须做这层映射：直接 throw 会让 onError 走 500 分支，
+ * 而"分组重名"是用户能修正的输入问题，应该是 400。
+ */
+function toAppError(e: unknown): unknown {
+  if (e instanceof FolderError) {
+    if (e.code === 'NOT_FOUND') return notFound(e.message);
+    return badRequest(e.message);
+  }
+  return e;
 }
 
 void conflict;

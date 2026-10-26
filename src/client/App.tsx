@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiFailure, type EntryDetail, type EntrySummary, type User } from './api.ts';
+import {
+  api, ApiFailure, type EntryDetail, type EntrySummary, type FolderItem, type User,
+} from './api.ts';
 import {
   IconArrowLeft, IconBookmark, IconChevronRight, IconCircle, IconClock,
-  IconExternal, IconInbox, IconLogout, IconMenu, IconRss, IconSearch, IconSparkle, IconStar,
+  IconExternal, IconFolder, IconInbox, IconLogout, IconMenu, IconRss, IconSearch, IconSparkle, IconStar,
 } from './icons.tsx';
 import { FeedsPage } from './FeedsPage.tsx';
 
@@ -26,8 +28,13 @@ interface NavItem {
   count?: 'unread' | 'starred';
 }
 
+/** 默认视图。单独抽出来，避免 NAV[0] 在 noUncheckedIndexedAccess 下是 undefined */
+const INBOX_NAV: NavItem = {
+  key: 'inbox', label: '收件箱', icon: <IconInbox />, count: 'unread',
+};
+
 const NAV: NavItem[] = [
-  { key: 'inbox', label: '收件箱', icon: <IconInbox />, count: 'unread' },
+  INBOX_NAV,
   { key: 'unread', label: '未读', icon: <IconCircle />, count: 'unread' },
   { key: 'starred', label: '已收藏', icon: <IconStar />, count: 'starred' },
   { key: 'history', label: '历史', icon: <IconClock /> },
@@ -40,6 +47,18 @@ const SOON: { label: string; icon: React.ReactNode }[] = [
 
 /** 当前页：条目列表 or 订阅管理 */
 type Page = 'entries' | 'feeds';
+
+/**
+ * 条目的额外过滤（与 view 正交）。
+ *
+ * 为什么不把「某分组」做成新的 View 值：分组数量是用户数据，
+ * View 是代码常量。混在一起会让 View 的类型退化成 string，
+ * 也就失去了 switch 的穷尽性检查。
+ */
+interface Scope {
+  feedId?: string;
+  folderId?: string;
+}
 
 export function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -203,6 +222,8 @@ interface Stats { entries: number; feeds: number; unread: number; starred: numbe
 function Main(props: { user: User; onLogout: () => void }) {
   const [page, setPage] = useState<Page>('entries');
   const [view, setView] = useState<View>('inbox');
+  const [scope, setScope] = useState<Scope>({});
+  const [folders, setFolders] = useState<FolderItem[]>([]);
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [items, setItems] = useState<EntrySummary[]>([]);
@@ -229,6 +250,8 @@ function Main(props: { user: User; onLogout: () => void }) {
         q: debounced || undefined,
         cursor: reset ? null : cursor,
         limit: 30,
+        feedId: scope.feedId ?? null,
+        folderId: scope.folderId ?? null,
       });
       setItems((prev) => (reset ? r.items : [...prev, ...r.items]));
       setCursor(r.nextCursor);
@@ -237,9 +260,9 @@ function Main(props: { user: User; onLogout: () => void }) {
     } finally {
       setLoading(false);
     }
-  }, [view, debounced, cursor]);
+  }, [view, debounced, cursor, scope]);
 
-  useEffect(() => { void load(true); /* eslint-disable-next-line */ }, [view, debounced]);
+  useEffect(() => { void load(true); /* eslint-disable-next-line */ }, [view, debounced, scope]);
 
   const refreshStats = useCallback(() => {
     api.stats().then((s) => {
@@ -248,6 +271,14 @@ function Main(props: { user: User; onLogout: () => void }) {
   }, []);
 
   useEffect(() => { refreshStats(); }, [refreshStats, items]);
+
+  // 侧栏的分组列表：切到订阅页回来时要刷新（用户可能刚建了组）
+  useEffect(() => {
+    if (page !== 'entries') return;
+    api.listFolders()
+      .then((r) => setFolders(r.items))
+      .catch(() => { /* 分组是增强功能，取不到不影响主流程 */ });
+  }, [page]);
 
   const open = useCallback(async (id: string) => {
     setOpenId(id);
@@ -311,9 +342,16 @@ function Main(props: { user: User; onLogout: () => void }) {
   }, [items, openId, open, toggleStar]);
 
   const current = useMemo(
-    () => NAV.find((n) => n.key === view) ?? NAV[0],
+    () => NAV.find((n) => n.key === view) ?? INBOX_NAV,
     [view],
   );
+
+  /** 列表标题：有分组过滤时显示组名，让用户知道自己在看一个子集 */
+  const listTitle = useMemo(() => {
+    if (!scope.folderId) return current.label;
+    const f = folders.find((x) => x.id === scope.folderId);
+    return f ? f.name : current.label;
+  }, [scope.folderId, folders, current.label]);
 
   return (
     <div className={`app ${page === 'feeds' ? 'feeds-mode' : ''}`}>
@@ -332,8 +370,18 @@ function Main(props: { user: User; onLogout: () => void }) {
             return (
               <button
                 key={n.key}
-                className={`nav-item ${page === 'entries' && view === n.key ? 'active' : ''}`}
-                onClick={() => { setPage('entries'); setView(n.key); }}
+                className={`nav-item ${
+                  // 有分组筛选时固定视图不能高亮 —— 否则「收件箱」和
+                  // 分组项会同时亮着，看起来像点了两个地方。
+                  page === 'entries' && view === n.key && !scope.folderId ? 'active' : ''
+                }`}
+                onClick={() => {
+                  setPage('entries');
+                  setView(n.key);
+                  // 点固定视图等于"看全部"，必须清掉分组过滤，
+                  // 否则会出现"点了收件箱但还是只有 3 个源的内容"
+                  setScope({});
+                }}
                 title={n.label}
               >
                 <span className="nav-icon">{n.icon}</span>
@@ -350,7 +398,7 @@ function Main(props: { user: User; onLogout: () => void }) {
         <nav className="nav">
           <button
             className={`nav-item ${page === 'feeds' ? 'active' : ''}`}
-            onClick={() => setPage('feeds')}
+            onClick={() => { setPage('feeds'); }}
             title="订阅"
           >
             <span className="nav-icon"><IconRss /></span>
@@ -358,6 +406,37 @@ function Main(props: { user: User; onLogout: () => void }) {
             {stats && stats.feeds > 0 && <span className="badge">{stats.feeds}</span>}
           </button>
         </nav>
+
+        {/* 分组快捷筛选：点一下只看这个组。
+            放在侧栏而不是只放订阅页，是因为"按组分看文章"是
+            日常动作，每次都先跳订阅页再点太绕。 */}
+        {folders.length > 0 && (
+          <>
+            <div className="nav-section">分组</div>
+            <nav className="nav">
+              {folders.map((f) => (
+                <button
+                  key={f.id}
+                  className={`nav-item ${
+                    page === 'entries' && scope.folderId === f.id ? 'active' : ''
+                  }`}
+                  onClick={() => {
+                    setPage('entries');
+                    setView('inbox');
+                    setScope({ folderId: f.id });
+                  }}
+                  title={`只看「${f.name}」里的条目`}
+                >
+                  <span className="nav-icon"><IconFolder size={16} /></span>
+                  <span className="nav-label">{f.name}</span>
+                  {f.unread > 0 && (
+                    <span className="badge">{f.unread > 999 ? '999+' : f.unread}</span>
+                  )}
+                </button>
+              ))}
+            </nav>
+          </>
+        )}
 
         <div className="nav-section">即将支持</div>
         <nav className="nav">
@@ -391,10 +470,14 @@ function Main(props: { user: User; onLogout: () => void }) {
       <section className={`list-pane ${openId ? 'narrow' : ''}`}>
         <header className="pane-head">
           <div className="pane-title">
-            <h1>{current.label}</h1>
+            <h1>{listTitle}</h1>
             {stats && (
               <span className="pane-count">
-                {debounced ? `${items.length} 条结果` : `${stats.entries} 条`}
+                {/* 有分组筛选时不能显示全库条数 —— 截图里出现过
+                    「中文媒体」标题旁边写着 8 条，而该组实际 0 条。 */}
+                {debounced || scope.folderId
+                  ? `${items.length} 条${debounced ? '结果' : ''}`
+                  : `${stats.entries} 条`}
               </span>
             )}
           </div>
@@ -407,6 +490,15 @@ function Main(props: { user: User; onLogout: () => void }) {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
+          {scope.folderId && (
+            <button
+              className="scope-clear"
+              onClick={() => setScope({})}
+              title="清除分组筛选"
+            >
+              只看分组 · 清除
+            </button>
+          )}
         </header>
 
         <div className="list-scroll">
@@ -416,7 +508,9 @@ function Main(props: { user: User; onLogout: () => void }) {
             <EmptyState
               hasQuery={Boolean(debounced)}
               view={view}
+              scopeLabel={scope.folderId ? listTitle : null}
               onGoFeeds={() => setPage('feeds')}
+              onClearScope={scope.folderId ? () => setScope({}) : undefined}
             />
           )}
 
@@ -499,7 +593,12 @@ function Main(props: { user: User; onLogout: () => void }) {
             <button
               key={n.key}
               className={`tab ${page === 'entries' && view === n.key ? 'active' : ''}`}
-              onClick={() => { setPage('entries'); setView(n.key); setOpenId(null); }}
+              onClick={() => {
+                setPage('entries');
+                setView(n.key);
+                setScope({});
+                setOpenId(null);
+              }}
             >
               <span className="tab-icon">
                 {n.icon}
@@ -526,8 +625,32 @@ function Main(props: { user: User; onLogout: () => void }) {
 function EmptyState(props: {
   hasQuery: boolean;
   view: View;
+  /** 当前是否在按分组/源筛选；有值时空态文案要说明"是这个范围里没有" */
+  scopeLabel?: string | null;
   onGoFeeds?: () => void;
+  onClearScope?: () => void;
 }) {
+  // 分组内为空 ≠ 没有订阅。这两种情况的引导动作完全不同：
+  // 前者应该"看全部"，后者应该"去添加订阅"。
+  if (props.scopeLabel && !props.hasQuery) {
+    return (
+      <div className="empty">
+        <div className="ph-art"><IconFolder size={26} /></div>
+        <h2>「{props.scopeLabel}」里还没有条目</h2>
+        <p>
+          这个分组下的源暂时没有新内容，或者刚添加还没抓到。
+        </p>
+        <div className="empty-actions">
+          {props.onClearScope && (
+            <button className="btn" onClick={props.onClearScope}>看全部条目</button>
+          )}
+          {props.onGoFeeds && (
+            <button className="btn" onClick={props.onGoFeeds}>管理订阅</button>
+          )}
+        </div>
+      </div>
+    );
+  }
   if (props.hasQuery) {
     return (
       <div className="empty">

@@ -1,0 +1,209 @@
+/* 订阅分组 + 编辑弹窗的样式。
+ *
+ * 单独一个文件而不是塞进 mobile.css：mobile.css 的职责是"响应式"，
+ * 这里是"订阅页专有组件"。混在一起会让 mobile.css 变成垃圾桶。
+ * 命名仍沿用订阅页的 feed-* / folder-* 前缀，避免与全局样式撞名。
+ */
+
+/* ── 分组管理面板 ───────────────────────────────────────── */
+
+.folder-panel {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.folder-panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.folder-panel-head strong { font-size: 13.5px; font-weight: 600; }
+.folder-panel-head .muted { font-size: 12px; }
+
+.folder-manage-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.folder-manage-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.folder-manage-list li:hover { background: var(--bg-hover); }
+.folder-manage-list svg { color: var(--fg-faint); flex-shrink: 0; }
+.folder-manage-list .folder-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40ch;
+}
+.folder-manage-list .muted { font-size: 11.5px; }
+
+/* ── 分组筛选条 ─────────────────────────────────────────── */
+
+.folder-filter {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 0 14px;
+}
+
+.chip {
+  font-size: 12.5px;
+  padding: 4px 11px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.chip:hover { background: var(--bg-hover); }
+.chip.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: transparent;
+}
+.chip-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* ── 分组区块 ───────────────────────────────────────────── */
+
+.feed-group { margin-bottom: 18px; }
+
+.feed-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 2px 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-dim);
+}
+.feed-group-head svg { color: var(--fg-faint); }
+.feed-group-head .muted { font-size: 11.5px; font-weight: 400; }
+
+/* 分组内的行去掉圆角，视觉上连成一块 */
+.feed-group .feed-row { border-radius: 0; margin-bottom: 0; }
+.feed-group .feed-row:first-child {
+  border-top-left-radius: var(--radius-sm);
+  border-top-right-radius: var(--radius-sm);
+}
+.feed-group .feed-row:last-child {
+  border-bottom-left-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+/* 相邻行共用一条边，避免 2px 双线 */
+.feed-group .feed-row + .feed-row { margin-top: -1px; }
+
+/* ── 小号按钮 ───────────────────────────────────────────── */
+
+.btn.tiny {
+  padding: 3px 9px;
+  font-size: 11.5px;
+  border-radius: 6px;
+}
+.btn.danger { color: var(--must); }
+.btn.danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+/* ── 编辑弹窗 ───────────────────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  /* 弹窗打开时背景不该滚动 */
+  overscroll-behavior: contain;
+}
+
+.modal {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 22px 18px;
+  box-shadow: var(--shadow);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+}
+.modal h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.modal-sub {
+  font-size: 11.5px;
+  font-family: var(--mono);
+  margin: 0 0 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal .field { margin-bottom: 14px; }
+.modal .field label {
+  display: block;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  margin-bottom: 5px;
+}
+.modal select {
+  font: inherit;
+  color: inherit;
+  background: var(--bg-elev2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  outline: none;
+  width: 100%;
+}
+.modal select:focus { border-color: var(--accent); }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* 手机上弹窗贴底，更像原生 sheet */
+@media (max-width: 640px) {
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .modal {
+    max-width: none;
+    border-radius: 16px 16px 0 0;
+    padding: 20px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+    max-height: 88dvh;
+  }
+  .modal h2 { font-size: 17px; }
+  .folder-manage-list .folder-name { max-width: 24ch; }
+}

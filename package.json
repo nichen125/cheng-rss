@@ -11,6 +11,8 @@
     "dev": "node --watch --experimental-strip-types src/index.ts",
     "start": "node --experimental-strip-types src/index.ts serve",
     "typecheck": "tsc --noEmit",
+    "typecheck:client": "tsc -p tsconfig.client.json --noEmit",
+    "typecheck:all": "npm run typecheck && npm run typecheck:client",
     "test": "node --test --experimental-strip-types tests/**/*.test.ts",
     "db:generate": "drizzle-kit generate",
     "verify:m0-01": "node scripts/verify/m0-01-toolchain.mjs",

@@ -24,6 +24,11 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     const limit = Math.min(Number(c.req.query('limit') ?? 30) || 30, 100);
     const cursor = c.req.query('cursor') ?? null;
 
+    // 按订阅源 / 分组过滤（侧栏点分组时用）。
+    // 与 view 是并列条件：既能"只看这个组的未读"，也能"只看这个源的全部"。
+    const feedId = c.req.query('feedId');
+    const folderId = c.req.query('folderId');
+
     const where: string[] = ['e.user_id = ?'];
     const params: (string | number)[] = [uid];
 
@@ -31,6 +36,23 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     else if (view === 'starred') where.push('e.is_starred = 1');
     else if (view === 'history') where.push('e.last_read_at IS NOT NULL');
     else where.push('e.is_hidden = 0');
+
+    if (feedId) {
+      where.push('e.feed_id = ?');
+      params.push(feedId);
+    }
+    if (folderId === 'none') {
+      // 未分组 = feed 属于没有 folder 的源，或来自网页捕获（feed_id 为 NULL）
+      where.push(
+        '(e.feed_id IS NULL OR e.feed_id IN (SELECT id FROM feeds WHERE user_id = ? AND folder_id IS NULL))',
+      );
+      params.push(uid);
+    } else if (folderId) {
+      where.push(
+        'e.feed_id IN (SELECT id FROM feeds WHERE user_id = ? AND folder_id = ?)',
+      );
+      params.push(uid, folderId);
+    }
 
     // 关键词检索走 FTS，把命中的 id 列表作为过滤条件。
     // 这样分页与排序仍由 SQL 处理，不需要把整个结果集捞进内存。
@@ -65,9 +87,11 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
              e.published_at AS published_at, e.excerpt, e.is_read, e.is_starred,
              e.highlight_count, e.site_name, e.read_count, e.last_read_at,
              e.favicon_url, e.thumbnail_url, e.word_count,
+             e.feed_id AS feed_id, fd.title AS feed_title,
              a.summary AS summary, a.tier AS tier
         FROM entries e
         LEFT JOIN entry_analysis a ON a.entry_id = e.id
+        LEFT JOIN feeds fd ON fd.id = e.feed_id
        WHERE ${where.join(' AND ')}
        ORDER BY ${orderCol} DESC, e.id DESC
        LIMIT ?
@@ -93,6 +117,9 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       faviconUrl: row.favicon_url,
       thumbnailUrl: row.thumbnail_url,
       wordCount: row.word_count === null ? null : Number(row.word_count),
+      // 网页捕获的条目没有源，这两个字段为 null
+      feedId: row.feed_id ?? null,
+      feedTitle: row.feed_title ?? null,
     }));
 
     const last = page[page.length - 1];

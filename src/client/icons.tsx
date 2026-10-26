@@ -157,6 +157,23 @@ export function IconPlay({ size, className }: P) {
   );
 }
 
+export function IconFolder({ size, className }: P) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M3.5 7.5a2 2 0 0 1 2-2h3.4l1.6 2h7.9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+    </svg>
+  );
+}
+
+export function IconEdit({ size, className }: P) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M4 20h4l10-10a2.1 2.1 0 0 0-3-3L5 17z" />
+      <path d="M13.5 6.5l4 4" />
+    </svg>
+  );
+}
+
 export function IconTrash({ size, className }: P) {
   return (
     <svg {...base(size)} className={className}>

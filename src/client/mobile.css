@@ -330,8 +330,17 @@
   .article-body { font-size: 16px; line-height: 1.75; }
 
   /* 订阅页在手机上一行一个操作按钮会太挤 */
-  .feeds-head { flex-direction: column; align-items: stretch; }
-  .feeds-actions { justify-content: flex-start; }
+  /* 手机上不吸顶：4 个按钮换两行会吃掉 22% 屏高，而且吸顶后
+     这块空间永久占住。添加订阅改用右下角悬浮按钮。 */
+  .feeds-head {
+    flex-direction: column;
+    align-items: stretch;
+    position: static;
+    box-shadow: none;
+  }
+  .feeds-head .muted { font-size: 12px; }
+  .feeds-actions { justify-content: flex-start; gap: 6px; }
+  .feeds-actions .btn { padding: 7px 12px; font-size: 12.5px; }
   .add-row { flex-direction: column; align-items: stretch; }
   .add-row .search-box { min-width: 0; }
   /* 手机上只保留高频的三个：刷新、暂停、删除。
@@ -365,3 +374,5 @@
   .reader-meta { margin-bottom: 14px; }
   .ai-card { margin-bottom: 16px; }
 }
+
+

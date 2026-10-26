@@ -103,6 +103,14 @@ export interface HealthResponse {
   };
 }
 
+export interface FolderItem {
+  id: string;
+  name: string;
+  sort: number;
+  feedCount: number;
+  unread: number;
+}
+
 export interface FeedItem {
   id: string;
   url: string;
@@ -116,12 +124,21 @@ export interface FeedItem {
   errorCount: number;
   unread: number;
   total: number;
+  folderId: string | null;
+  folderName: string | null;
 }
 
 export interface FeedListResponse {
   items: FeedItem[];
   total: number;
-  counts: { active: number; broken: number; paused: number; unread: number };
+  folders: FolderItem[];
+  counts: {
+    active: number;
+    broken: number;
+    paused: number;
+    unread: number;
+    unfiled: number;
+  };
 }
 
 export interface DiscoverCandidate {
@@ -159,11 +176,15 @@ export const api = {
     q?: string;
     cursor?: string | null;
     limit?: number;
+    feedId?: string | null;
+    folderId?: string | null;
   }) => {
     const sp = new URLSearchParams();
     if (params.view) sp.set('view', params.view);
     if (params.q) sp.set('q', params.q);
     if (params.cursor) sp.set('cursor', params.cursor);
+    if (params.feedId) sp.set('feedId', params.feedId);
+    if (params.folderId) sp.set('folderId', params.folderId);
     sp.set('limit', String(params.limit ?? 30));
     return request<ListResponse>(`/entries?${sp}`);
   },
@@ -184,7 +205,49 @@ export const api = {
   }>('/stats'),
 
   // ── 订阅 ────────────────────────────────────────────────
-  listFeeds: () => request<FeedListResponse>('/feeds'),
+  listFeeds: (params: { folderId?: string | null } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.folderId !== undefined && params.folderId !== null) {
+      sp.set('folderId', params.folderId);
+    }
+    const qs = sp.toString();
+    return request<FeedListResponse>('/feeds' + (qs ? '?' + qs : ''));
+  },
+
+  /** 编辑订阅：标题 / 分组 / 抓取间隔 */
+  editFeed: (id: string, patch: {
+    title?: string | null;
+    folderId?: string | null;
+    fetchInterval?: number;
+  }) => request<{ feed: FeedItem }>('/feeds/' + id, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  }),
+
+  // ── 分组 ────────────────────────────────────────────────
+  listFolders: () => request<{ items: FolderItem[] }>('/folders'),
+  createFolder: (name: string) =>
+    request<{ folder: FolderItem }>('/folders', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  renameFolder: (id: string, name: string) =>
+    request<{ folder: FolderItem }>('/folders/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+  deleteFolder: (id: string) =>
+    request<{ ok: boolean }>('/folders/' + id, { method: 'DELETE' }),
+  moveFeedsToFolder: (folderId: string, feedIds: string[]) =>
+    request<{ ok: boolean; moved: number }>('/folders/' + folderId + '/feeds', {
+      method: 'POST',
+      body: JSON.stringify({ feedIds }),
+    }),
+  unfileFeeds: (feedIds: string[]) =>
+    request<{ ok: boolean; moved: number }>('/folders/unfile/feeds', {
+      method: 'POST',
+      body: JSON.stringify({ feedIds }),
+    }),
   discoverFeed: (url: string) =>
     request<DiscoverResponse>('/feeds/discover', {
       method: 'POST',

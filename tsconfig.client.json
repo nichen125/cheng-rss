@@ -1,0 +1,40 @@
+{
+  // 前端专用的类型检查配置。
+  //
+  // 为什么必须单独一份：根 tsconfig.json 明确 exclude 了 src/client
+  // （服务端用 NodeNext + strip-types，前端用 bundler 解析 + JSX，
+  // 两套 moduleResolution 无法共存一份配置）。
+  // 结果是前端 .tsx 一直没有被 tsc 检查过 —— Vite 的 esbuild 只擦类型
+  // 不校验，写错变量名照样构建成功，运行时才炸。
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+
+    // 前端允许省略扩展名（Vite 解析），但项目里写的是显式 .ts 后缀，
+    // 两种都放过，避免为迁就检查去动几十处 import。
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    // DOM 全局由 lib 提供；不引 @types/node，避免和浏览器环境混用
+    "types": []
+  },
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx", "src/shared/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

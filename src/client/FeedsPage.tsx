@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiFailure, type DiscoverCandidate, type FeedItem } from './api.ts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  IconChevronRight, IconExternal, IconPause, IconPlay, IconRefresh, IconRss,
-  IconSearch, IconTrash,
+  api, ApiFailure, type DiscoverCandidate, type FeedItem, type FolderItem,
+} from './api.ts';
+import {
+  IconChevronRight, IconEdit, IconExternal, IconFolder, IconPause, IconPlay,
+  IconRefresh, IconRss, IconSearch, IconTrash,
 } from './icons.tsx';
 
 // 订阅管理（PLAN §10、§18）。
@@ -14,9 +16,22 @@ import {
 //   · 一段带 URL 的文字  → 抠出第一个 URL
 //
 // "发现到多个 feed" 时让用户选，而不是替他挑 —— 主站和评论区分开的站点不少。
+//
+// 分组用一层扁平结构（folders 表没有 parent_id）。理由见 feeds/folders.ts。
+
+/** 未分组用的伪 id，避免和真实 folder id 混淆 */
+const UNFILED = 'none';
+
+interface EditState {
+  feed: FeedItem;
+  title: string;
+  folderId: string;
+  intervalMin: number;
+}
 
 export function FeedsPage(props: { onOpenInbox: () => void }) {
   const [feeds, setFeeds] = useState<FeedItem[]>([]);
+  const [folders, setFolders] = useState<FolderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [adding, setAdding] = useState(false);
@@ -25,6 +40,13 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
   const [notice, setNotice] = useState('');
   const [candidates, setCandidates] = useState<DiscoverCandidate[] | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
+  /** 当前筛选的分组：null=全部，UNFILED=未分组，其他=分组 id */
+  const [filter, setFilter] = useState<string | null>(null);
+  /** 正在编辑的订阅；null 表示弹窗关闭 */
+  const [editing, setEditing] = useState<EditState | null>(null);
+  /** 分组管理面板是否展开 */
+  const [managingFolders, setManagingFolders] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   /** 加载失败的图标 id，回退成占位图标而不是留空方块 */
@@ -34,8 +56,11 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
     setLoading(true);
     setErr('');
     try {
+      // 一次拿全量：源数量在几十到几百量级，前端自己分组比
+      // "切一次分组打一次请求"更跟手，也不会出现切组时闪白。
       const r = await api.listFeeds();
       setFeeds(r.items);
+      setFolders(r.folders);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
     } finally {
@@ -108,7 +133,6 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
     try {
       await api.refreshFeed(id);
       setNotice('已加入抓取队列，稍后刷新');
-      // 抓取是异步的，1.5s 后再拉一次列表让用户看到变化
       setTimeout(() => void load(), 1500);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '刷新失败');
@@ -182,6 +206,112 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
     }
   };
 
+  // ── 编辑 ────────────────────────────────────────────────
+  const startEdit = (f: FeedItem) => {
+    setEditing({
+      feed: f,
+      title: f.title ?? '',
+      folderId: f.folderId ?? UNFILED,
+      intervalMin: Math.round(f.fetchInterval / 60),
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await api.editFeed(editing.feed.id, {
+        title: editing.title.trim() || null,
+        folderId: editing.folderId === UNFILED ? null : editing.folderId,
+        fetchInterval: Math.max(5, Math.round(editing.intervalMin)) * 60,
+      });
+      setNotice(`已保存「${editing.title.trim() || editing.feed.url}」`);
+      setEditing(null);
+      await load();
+    } catch (e) {
+      setErr(e instanceof ApiFailure ? e.message : '保存失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ── 分组管理 ────────────────────────────────────────────
+  const addFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await api.createFolder(name);
+      setNewFolderName('');
+      await load();
+    } catch (e) {
+      setErr(e instanceof ApiFailure ? e.message : '新建分组失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const renameFolder = async (f: FolderItem) => {
+    const name = window.prompt('新的分组名', f.name);
+    if (name === null) return;
+    if (!name.trim()) return;
+    try {
+      await api.renameFolder(f.id, name.trim());
+      await load();
+    } catch (e) {
+      setErr(e instanceof ApiFailure ? e.message : '重命名失败');
+    }
+  };
+
+  const removeFolder = async (f: FolderItem) => {
+    const ok = window.confirm(
+      `删除分组「${f.name}」？\n\n`
+      + `里面的 ${f.feedCount} 个订阅不会被删，会退回「未分组」。`,
+    );
+    if (!ok) return;
+    try {
+      await api.deleteFolder(f.id);
+      if (filter === f.id) setFilter(null);
+      setNotice('分组已删除，里面的订阅退回未分组');
+      await load();
+    } catch (e) {
+      setErr(e instanceof ApiFailure ? e.message : '删除失败');
+    }
+  };
+
+  // ── 分组后的数据 ────────────────────────────────────────
+  const visible = useMemo(() => {
+    if (filter === null) return feeds;
+    if (filter === UNFILED) return feeds.filter((f) => !f.folderId);
+    return feeds.filter((f) => f.folderId === filter);
+  }, [feeds, filter]);
+
+  /** 按分组归拢，未分组放最后。组内保持 listFeeds 的排序（失效源已排后） */
+  const grouped = useMemo(() => {
+    const map = new Map<string, { name: string | null; items: FeedItem[] }>();
+    for (const f of visible) {
+      const key = f.folderId ?? UNFILED;
+      const cur = map.get(key) ?? { name: f.folderName ?? null, items: [] };
+      cur.items.push(f);
+      map.set(key, cur);
+    }
+    // 有分组的按 folders 的 sort 排，未分组永远最后
+    const ordered = [...map.entries()]
+      .filter(([k]) => k !== UNFILED)
+      .sort(([a], [b]) => {
+        const ia = folders.findIndex((x) => x.id === a);
+        const ib = folders.findIndex((x) => x.id === b);
+        return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+      });
+    if (map.has(UNFILED)) ordered.push([UNFILED, map.get(UNFILED)!]);
+    return ordered;
+  }, [visible, folders]);
+
+  const unfiledCount = feeds.filter((f) => !f.folderId).length;
+  const totalUnread = feeds.reduce((n, f) => n + f.unread, 0);
+
   return (
     <div className="feeds-page">
       <header className="feeds-head">
@@ -189,11 +319,15 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
           <h1>订阅</h1>
           <p className="muted">
             {feeds.length > 0
-              ? `${feeds.length} 个源 · ${feeds.reduce((n, f) => n + f.unread, 0)} 条未读`
+              ? `${feeds.length} 个源 · ${totalUnread} 条未读`
+                + (folders.length > 0 ? ` · ${folders.length} 个分组` : '')
               : '还没有订阅任何源'}
           </p>
         </div>
         <div className="feeds-actions">
+          <button className="btn" onClick={() => setManagingFolders((v) => !v)}>
+            分组
+          </button>
           <button className="btn" onClick={() => void exportOpml()} disabled={feeds.length === 0}>
             导出 OPML
           </button>
@@ -216,6 +350,78 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
 
       {err && <div className="alert error inset">{err}</div>}
       {notice && <div className="alert ok inset">{notice}</div>}
+
+      {/* ── 分组管理面板 ─────────────────────────────────── */}
+      {managingFolders && (
+        <div className="folder-panel">
+          <div className="folder-panel-head">
+            <strong>分组</strong>
+            <span className="muted">用来把几十个源归拢，侧栏也能按组看</span>
+          </div>
+
+          <div className="add-row">
+            <div className="search-box grow">
+              <IconFolder size={15} className="search-icon" />
+              <input
+                placeholder="新分组名，例如「科技」「财经」"
+                value={newFolderName}
+                disabled={busy}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void addFolder(); }}
+              />
+            </div>
+            <button className="btn primary" onClick={() => void addFolder()} disabled={busy || !newFolderName.trim()}>
+              新建
+            </button>
+          </div>
+
+          {folders.length === 0 ? (
+            <p className="hint">还没有分组。建一个之后，可以从订阅行的「编辑」里放进去。</p>
+          ) : (
+            <ul className="folder-manage-list">
+              {folders.map((f) => (
+                <li key={f.id}>
+                  <IconFolder size={14} />
+                  <span className="folder-name">{f.name}</span>
+                  <span className="muted">{f.feedCount} 个源</span>
+                  <div className="grow" />
+                  <button className="btn tiny" onClick={() => void renameFolder(f)}>重命名</button>
+                  <button className="btn tiny danger" onClick={() => void removeFolder(f)}>删除</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* ── 筛选条 ───────────────────────────────────────── */}
+      {feeds.length > 0 && (folders.length > 0 || filter !== null) && (
+        <div className="folder-filter">
+          <button
+            className={`chip ${filter === null ? 'active' : ''}`}
+            onClick={() => setFilter(null)}
+          >
+            全部 <span className="chip-count">{feeds.length}</span>
+          </button>
+          {folders.map((f) => (
+            <button
+              key={f.id}
+              className={`chip ${filter === f.id ? 'active' : ''}`}
+              onClick={() => setFilter(f.id)}
+            >
+              {f.name} <span className="chip-count">{f.feedCount}</span>
+            </button>
+          ))}
+          {unfiledCount > 0 && (
+            <button
+              className={`chip ${filter === UNFILED ? 'active' : ''}`}
+              onClick={() => setFilter(UNFILED)}
+            >
+              未分组 <span className="chip-count">{unfiledCount}</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {adding && (
         <div className="add-panel">
@@ -294,65 +500,91 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
         </div>
       )}
 
-      {feeds.length > 0 && (
-        <ul className="feed-list">
-          {feeds.map((f) => (
-            <li key={f.id} className={`feed-row ${f.status}`}>
-              <div className="feed-icon">
-                {/* 占位图标始终渲染在底下，favicon 叠在上面。
-                    这样"正在加载"和"加载失败"两种情况都不会出现空方块 ——
-                    只在 onError 时才换成占位图标的话，DNS 卡住的那几秒
-                    依然是个空格子（实测就长这样）。 */}
-                <IconRss size={16} className="feed-icon-fallback" />
-                {f.iconUrl && !iconFailed.has(f.id) && (
-                  <img
-                    src={f.iconUrl} alt="" loading="lazy"
-                    onError={() => setIconFailed((prev) => new Set(prev).add(f.id))}
-                  />
-                )}
-              </div>
-              <div className="feed-main">
-                <div className="feed-title">
-                  <span className="feed-title-text">{f.title ?? hostOf(f.url) ?? f.url}</span>
-                  {f.status === 'broken' && <span className="tag bad">失效</span>}
-                  {f.status === 'paused' && <span className="tag">已暂停</span>}
-                </div>
-                <div className="feed-meta">
-                  <span>{f.total > 0 ? `共 ${f.total} 条` : '还没有条目'}</span>
-                  {f.lastFetchedAt && (
-                    <>
-                      <span>·</span>
-                      <span>{timeAgo(f.lastFetchedAt)}抓取</span>
-                    </>
-                  )}
-                  {f.errorCount > 0 && f.status !== 'broken' && (
-                    <>
-                      <span>·</span>
-                      <span className="warn">{f.errorCount} 次失败</span>
-                    </>
+      {visible.length > 0 && grouped.map(([key, g]) => (
+        <section key={key} className="feed-group">
+          <div className="feed-group-head">
+            <IconFolder size={13} />
+            <span>{g.name ?? '未分组'}</span>
+            <span className="muted">{g.items.length} 个源</span>
+            <div className="grow" />
+            <span className="muted">
+              {g.items.reduce((n, f) => n + f.unread, 0)} 未读
+            </span>
+          </div>
+
+          <ul className="feed-list">
+            {g.items.map((f) => (
+              <li key={f.id} className={`feed-row ${f.status}`}>
+                <div className="feed-icon">
+                  {/* 占位图标始终渲染在底下，favicon 叠在上面。
+                      这样"正在加载"和"加载失败"两种情况都不会出现空方块 ——
+                      只在 onError 时才换成占位图标的话，DNS 卡住的那几秒
+                      依然是个空格子（实测就长这样）。 */}
+                  <IconRss size={16} className="feed-icon-fallback" />
+                  {f.iconUrl && !iconFailed.has(f.id) && (
+                    <img
+                      src={f.iconUrl} alt="" loading="lazy"
+                      onError={() => setIconFailed((prev) => new Set(prev).add(f.id))}
+                    />
                   )}
                 </div>
-              </div>
-              <div className="feed-ops">
-                {f.unread > 0 && <span className="feed-unread">{f.unread}</span>}
-                <button className="icon-btn" title="立即刷新" onClick={() => void refreshOne(f.id)}>
-                  <IconRefresh size={15} />
-                </button>
-                <button className="icon-btn" title={f.status === 'paused' ? '恢复抓取' : '暂停抓取'} onClick={() => void togglePause(f)}>
-                  {f.status === 'paused' ? <IconPlay size={15} /> : <IconPause size={15} />}
-                </button>
-                {f.siteUrl && (
-                  <a className="icon-btn" href={f.siteUrl} target="_blank" rel="noreferrer" title="访问网站">
-                    <IconExternal size={15} />
-                  </a>
-                )}
-                <button className="icon-btn danger" title="取消订阅" onClick={() => void remove(f)}>
-                  <IconTrash size={15} />
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+                <div className="feed-main">
+                  <div className="feed-title">
+                    <span className="feed-title-text">{f.title ?? hostOf(f.url) ?? f.url}</span>
+                    {f.status === 'broken' && <span className="tag bad">失效</span>}
+                    {f.status === 'paused' && <span className="tag">已暂停</span>}
+                  </div>
+                  <div className="feed-meta">
+                    <span>{f.total > 0 ? `共 ${f.total} 条` : '还没有条目'}</span>
+                    {f.lastFetchedAt && (
+                      <>
+                        <span>·</span>
+                        <span>{timeAgo(f.lastFetchedAt)}抓取</span>
+                      </>
+                    )}
+                    {f.errorCount > 0 && f.status !== 'broken' && (
+                      <>
+                        <span>·</span>
+                        <span className="warn">{f.errorCount} 次失败</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="feed-ops">
+                  {f.unread > 0 && <span className="feed-unread">{f.unread}</span>}
+                  <button className="icon-btn" title="编辑" onClick={() => startEdit(f)}>
+                    <IconEdit size={15} />
+                  </button>
+                  <button className="icon-btn" title="立即刷新" onClick={() => void refreshOne(f.id)}>
+                    <IconRefresh size={15} />
+                  </button>
+                  <button className="icon-btn" title={f.status === 'paused' ? '恢复抓取' : '暂停抓取'} onClick={() => void togglePause(f)}>
+                    {f.status === 'paused' ? <IconPlay size={15} /> : <IconPause size={15} />}
+                  </button>
+                  {f.siteUrl && (
+                    <a className="icon-btn" href={f.siteUrl} target="_blank" rel="noreferrer" title="访问网站">
+                      <IconExternal size={15} />
+                    </a>
+                  )}
+                  <button className="icon-btn danger" title="取消订阅" onClick={() => void remove(f)}>
+                    <IconTrash size={15} />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+
+      {feeds.length > 0 && visible.length === 0 && (
+        <div className="empty">
+          <div className="ph-art"><IconFolder size={26} /></div>
+          <h2>这个分组里还没有订阅</h2>
+          <p>从其它分组里编辑订阅、把它移到这里，或者直接添加新的源。</p>
+          <div className="empty-actions">
+            <button className="btn" onClick={() => setFilter(null)}>看全部订阅</button>
+          </div>
+        </div>
       )}
 
       {feeds.length > 0 && (
@@ -361,6 +593,65 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
             刷新全部
           </button>
           <button className="btn" onClick={props.onOpenInbox}>去看条目</button>
+        </div>
+      )}
+
+      {/* ── 编辑弹窗 ─────────────────────────────────────── */}
+      {editing && (
+        <div className="modal-backdrop" onClick={() => setEditing(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>编辑订阅</h2>
+            <p className="hint modal-sub">{editing.feed.url}</p>
+
+            <div className="field">
+              <label htmlFor="ed-title">标题</label>
+              <input
+                id="ed-title" autoFocus
+                value={editing.title}
+                placeholder="留空则显示域名"
+                onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(); }}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="ed-folder">分组</label>
+              <select
+                id="ed-folder"
+                value={editing.folderId}
+                onChange={(e) => setEditing({ ...editing, folderId: e.target.value })}
+              >
+                <option value={UNFILED}>未分组</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+              {folders.length === 0 && (
+                <p className="hint" style={{ marginTop: 6 }}>
+                  还没有分组，先在「分组」里建一个。
+                </p>
+              )}
+            </div>
+
+            <div className="field">
+              <label htmlFor="ed-int">抓取间隔（分钟）</label>
+              <input
+                id="ed-int" type="number" min={5} max={10080}
+                value={editing.intervalMin}
+                onChange={(e) => setEditing({ ...editing, intervalMin: Number(e.target.value) })}
+              />
+              <p className="hint" style={{ marginTop: 6 }}>
+                最小 5 分钟，最大 7 天。频繁更新用 30，周更博客用 1440。
+              </p>
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setEditing(null)} disabled={busy}>取消</button>
+              <button className="btn primary" onClick={() => void saveEdit()} disabled={busy}>
+                {busy ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -131,7 +131,7 @@
   inset: 6px;
   width: 18px; height: 18px;
   object-fit: contain;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .feed-main { flex: 1; min-width: 0; }
@@ -164,15 +164,29 @@
   white-space: nowrap;
 }
 .feed-meta > span { flex-shrink: 0; }
-/* 只有"共 N 条 / 抓取时间"这类可以截断，失败次数是告警不能丢 */
-.feed-meta > span:not(.warn):first-child { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .feed-meta .warn { color: var(--warn); }
+
+/* 窄屏下"共 N 条"和"多久前抓取"抢同一行的空间。
+ *
+ * 让谁缩？让"多久前抓取"缩 —— 它是相对的，截成「2 分钟前…」仍然可读；
+ * 而「共 24 条」被截成「共…」就什么信息都没了（实测过：22px 宽）。
+ *
+ * 第一版写的是"第一个 span 可缩"，正好选错了那个 —— 截图里每一行
+ * 都成了「共… · 28 分钟前抓取」，条数永远看不见。那条规则已被
+ * 下面两条替换，不要再加回来；m1-06 有两条断言专门盯着它。 */
+.feed-meta .feed-total { flex-shrink: 0; }
+.feed-meta .feed-when {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .unread-dot { color: var(--accent); font-weight: 500; }
 
 .tag {
   font-size: 10px;
   padding: 0 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   line-height: 15px;
   background: var(--bg-active);
   color: var(--fg-faint);
@@ -189,7 +203,7 @@
   height: 18px;
   line-height: 18px;
   padding: 0 6px;
-  border-radius: 9px;
+  border-radius: var(--radius-pill);
   background: var(--accent-dim);
   color: var(--accent);
   text-align: center;
@@ -248,7 +262,7 @@
   top: -5px; right: -9px;
   min-width: 15px; height: 15px;
   padding: 0 3px;
-  border-radius: 8px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
   color: #fff;
   font-size: 9px;
@@ -340,14 +354,29 @@
   }
   .feeds-head .muted { font-size: 12px; }
   .feeds-actions { justify-content: flex-start; gap: 6px; }
-  .feeds-actions .btn { padding: 7px 12px; font-size: 12.5px; }
+  /* v1.8：.btn 有了显式 height，手机上要同时抬高度和收字号，
+     只写 padding 会把 32px 的桌面高度直接带上手机（§15.12）。
+
+     36px 不是随手写的：m1-05 的红线是「手机上可点按钮 ≥ 36px」，
+     第一版写的 34px 直接被它拦下来 —— 桌面收紧尺度的时候，
+     手机的触摸目标不能跟着一起缩。
+
+     空态的那两个按钮（添加订阅 / 导入 OPML）是另一组 DOM
+     （.empty-actions），只改 .feeds-actions 的话它们还是 32px。 */
+  .feeds-actions .btn,
+  .empty-actions .btn { height: 36px; padding: 0 11px; font-size: 12.5px; }
   .add-row { flex-direction: column; align-items: stretch; }
   .add-row .search-box { min-width: 0; }
   /* 手机上只保留高频的三个：刷新、暂停、删除。
      "访问网站"是低频次要操作，藏起来换空间。
-     第一版写成 .icon-btn:not(.danger) 全藏，结果刷新和暂停都点不到。 */
+     第一版写成 .icon-btn:not(.danger) 全藏，结果刷新和暂停都点不到。
+
+     v1.8：宽度从 40 收到 36（m1-06 的红线是「可见操作按钮宽度 ≥ 36」）。
+     原来 4 个 40px + gap 占 194px，在 365px 的行里只剩 91px 给标题 ——
+     实测标题被截成「晚点Lat…」，「共 24 条」被压到 5px（等于没显示）。
+     收到 36 之后让出 16px，先保证标题和条数能看清。 */
   .feed-ops .icon-btn[href] { display: none; }
-  .feed-ops .icon-btn { width: 40px; height: 40px; }
+  .feed-ops .icon-btn { width: 36px; height: 40px; }
   .feed-unread { margin-right: 2px; }
 }
 

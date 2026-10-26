@@ -139,15 +139,35 @@ if (!targetName.startsWith('win')) chmodSync(outPath, 0o755);
 const postject = join(root, 'node_modules', '.bin', platform === 'win32' ? 'postject.cmd' : 'postject');
 const FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
 
-if (existsSync(postject)) {
-  // 优先用本地 postject（项目内依赖，不联网）
-  const args = [outPath, 'NODE_SEA_BLOB', blobPath, '--sentinel-fuse', FUSE];
-  try {
-    execFileSync(postject, args, { cwd: root, stdio: 'pipe' });
-  } catch (e) {
-    // Windows 上 postject.cmd 需要 shell
-    execFileSync(postject, args, { cwd: root, stdio: 'pipe', shell: platform === 'win32' });
-  }
+// 为什么要在 postject 前加 --liftoff-only：
+//
+// postject 的注入器是 Emscripten 编译成 wasm 的（`node_modules/postject/dist/api.js`
+// 里有一个 4.8MB 的 wasm 模块）。Windows 上它有两个失败模式：
+//
+//   1. `Fatal process out of memory: Zone` —— V8 的 TurboFan 在给这个巨型
+//      函数做类型推导时把 Zone 撑爆了。这是**编译期**内存耗尽，跟物理内存
+//      还剩多少无关（本机空闲 2.4GB 照样炸），所以调 --max-old-space-size
+//      完全无效，只有关掉 tier-up 才绕过。
+//   2. `Aborted()` —— 同一个 wasm 在 tier-up 里二次编译时的断言失败。
+//
+// `--liftoff-only` 让它只用 Liftoff 基线编译器，不尝试优化编译。
+// 注入一次要跑 3~5 秒，慢一点无所谓；不能生成二进制才是问题。
+// 这个标记非 Windows 上加了也无害，所以统一加，不给平台分叉。
+const NODE_FLAGS = ['--liftoff-only'];
+
+// 不走 postject.cmd：那个 .cmd 会按 PATH 找 node，于是实际用的是系统 node
+// 而不是项目内工具链（§1.2 要求全局零依赖）。这里直接用项目内的 node
+// 跑 cli.js，解释器是确定的。
+const postjectCli = join(root, 'node_modules', 'postject', 'dist', 'cli.js');
+const args = [postjectCli, outPath, 'NODE_SEA_BLOB', blobPath, '--sentinel-fuse', FUSE];
+
+if (existsSync(postjectCli)) {
+  execFileSync(nodeBin, [...NODE_FLAGS, ...args], { cwd: root, stdio: 'pipe' });
+} else if (existsSync(postject)) {
+  // 兜底：cli.js 不在（打包方式变了），退回 npm 的 .bin 入口
+  execFileSync(postject, args.slice(1), {
+    cwd: root, stdio: 'pipe', shell: platform === 'win32',
+  });
 } else {
   console.log('未找到本地 postject，尝试 npx');
   execFileSync('npx', ['--yes', 'postject', outPath, 'NODE_SEA_BLOB', blobPath,

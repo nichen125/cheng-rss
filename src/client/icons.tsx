@@ -184,6 +184,17 @@ export function IconTrash({ size, className }: P) {
   );
 }
 
+/** 关闭 / 清除筛选。用于标题旁的小「×」，与 IconTrash 区分开：
+ *  前者是"取消视图过滤"，后者是"删除真的数据"，不能共用一个图标。 */
+export function IconClose({ size, className }: P) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M6.5 6.5l11 11" />
+      <path d="M17.5 6.5l-11 11" />
+    </svg>
+  );
+}
+
 /** 勾选框：批量管理模式下每行左边那个。checked 时实心 + 对勾 */
 export function IconCheck({ size, className, checked }: P & { checked?: boolean }) {
   return (

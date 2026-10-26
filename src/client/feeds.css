@@ -64,7 +64,7 @@
 .chip {
   font-size: 12.5px;
   padding: 4px 11px;
-  border-radius: 14px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: none;
   color: var(--fg-dim);
@@ -117,10 +117,16 @@
 
 /* ── 小号按钮 ───────────────────────────────────────────── */
 
+/* v1.8（§15.12）：.btn 基样式现在有显式 height: 32px，
+   所以这里必须显式覆盖 height，否则 .btn.tiny 会被撑回 32px，
+   和它的 11.5px 字号完全不匹配。
+   圆角保持 --radius-sm（26px 高于 24px 的 xs 档），
+   只是把三档高度收敛成 26/32 两档。 */
 .btn.tiny {
-  padding: 3px 9px;
+  height: 26px;
+  padding: 0 9px;
   font-size: 11.5px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .btn.danger { color: var(--must); }
 .btn.danger:hover:not(:disabled) {
@@ -148,7 +154,7 @@
   max-width: 420px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 22px 22px 18px;
   box-shadow: var(--shadow);
   max-height: calc(100dvh - 40px);
@@ -200,7 +206,7 @@
   .modal-backdrop { align-items: flex-end; padding: 0; }
   .modal {
     max-width: none;
-    border-radius: 16px 16px 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     padding: 20px 18px calc(18px + env(safe-area-inset-bottom, 0px));
     max-height: 88dvh;
   }
@@ -243,7 +249,7 @@
   color: var(--fg);
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   padding: 4px 8px;
   outline: none;
   max-width: 150px;
@@ -266,7 +272,7 @@
   background: none;
   color: var(--fg-faint);
   cursor: pointer;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
 }
 .bulk-check:hover { background: var(--bg-hover); color: var(--fg-dim); }
 .bulk-check svg.checked { color: var(--accent); }

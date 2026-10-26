@@ -457,6 +457,46 @@ check('手机上操作按钮不越出屏幕右边', () => {
   return ok(mob.allInView === true, JSON.stringify(mob.ops.filter((o) => o.visible)));
 });
 
+// ⑦ 手机上行内元信息不能被压没
+//
+// 这一条来自一张截图：操作按钮收到 4 个 40px 之后，365px 的行里
+// 留给文字的只有 91px，于是每一行都渲染成「共… · 28 分钟前抓取」——
+// 「共 24 条」被 flex 压成 22px 宽，等于没显示。
+//
+// 为什么只能量不能看：字符串确实在 DOM 里，`textContent.includes('共')`
+// 恒真；但它被 overflow:hidden + 22px 宽裁成了一串省略号。
+// 判据用 scrollWidth <= clientWidth + 1 —— 这才是"完整可见"。
+const metaFit = await evaluate(`(() => {
+  const out = [...document.querySelectorAll('.feed-row')].map((r) => {
+    const total = r.querySelector('.feed-total');
+    const title = r.querySelector('.feed-title-text');
+    return {
+      total: total ? {
+        text: (total.textContent || '').trim(),
+        w: Math.round(total.getBoundingClientRect().width),
+        need: total.scrollWidth,
+        fits: total.scrollWidth <= total.clientWidth + 1,
+      } : null,
+      titleW: title ? Math.round(title.getBoundingClientRect().width) : null,
+    };
+  }).filter((x) => x.total);
+  return {
+    count: out.length,
+    truncated: out.filter((x) => !x.total.fits),
+    minTotalW: out.length ? Math.min(...out.map((x) => x.total.w)) : 0,
+    sample: out[0],
+  };
+})()`);
+check('手机上每条源的「共 N 条」都完整显示（没被压成省略号）', () => {
+  if (metaFit.count === 0) return ok(false, '没有一行带 .feed-total，断言空转');
+  return ok(metaFit.truncated.length === 0,
+    `${metaFit.truncated.length}/${metaFit.count} 行被截断：`
+    + JSON.stringify(metaFit.truncated.slice(0, 3)));
+});
+check('手机上「共 N 条」的宽度够放下文字（≥ 28px）', () => {
+  return ok(metaFit.minTotalW >= 28, `最窄 ${metaFit.minTotalW}px，样例 ${JSON.stringify(metaFit.sample)}`);
+});
+
 ws.close();
 summary('m1-06-feeds-ui');
 killBrowser();

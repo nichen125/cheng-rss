@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  api, ApiFailure, type EntryDetail, type EntrySummary, type FolderItem, type User,
+  api, ApiFailure, type EntryDetail, type EntrySummary, type FeedItem, type FolderItem, type User,
 } from './api.ts';
 import {
-  IconArrowLeft, IconBookmark, IconCheck, IconChevronRight, IconCircle, IconClock,
+  IconArrowLeft, IconBookmark, IconCheck, IconChevronRight, IconCircle, IconClock, IconClose,
   IconExternal, IconFolder, IconInbox, IconLogout, IconMenu, IconRss, IconSearch, IconSparkle, IconStar,
 } from './icons.tsx';
 import { FeedsPage } from './FeedsPage.tsx';
@@ -231,6 +231,7 @@ function Main(props: { user: User; onLogout: () => void }) {
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [items, setItems] = useState<EntrySummary[]>([]);
+  const [total, setTotal] = useState<number | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
@@ -242,6 +243,10 @@ function Main(props: { user: User; onLogout: () => void }) {
   const [prefs, setPrefs] = useState<ReaderPrefs>(() => loadPrefs());
   const readerRef = useRef<HTMLElement>(null);
   const [prefsOpen, setPrefsOpen] = useState(false);
+  /** 当前分组内的订阅源（§15.13）。空数组 = 没有分组筛选，或组里没有源 */
+  const [folderFeeds, setFolderFeeds] = useState<FeedItem[]>([]);
+  /** 上面这份源列表是为哪个分组加载的；用于区分"加载完是空的"和"还没加载" */
+  const [feedsLoadedFor, setFeedsLoadedFor] = useState<string | null>(null);
 
   // 偏好变更 → 立刻写 CSS 变量 + 落盘。
   // 放在 effect 里而不是 setPrefs 的调用处：刷新页面时初次挂载也要应用一次。
@@ -268,6 +273,9 @@ function Main(props: { user: User; onLogout: () => void }) {
         folderId: scope.folderId ?? null,
       });
       setItems((prev) => (reset ? r.items : [...prev, ...r.items]));
+      // total 是后端算的命中总数，不是本页条数 —— 分页后
+      // items.length 会一直涨到 30/60/90，用它当"多少条"会骗人。
+      setTotal(typeof r.total === 'number' ? r.total : null);
       setCursor(r.nextCursor);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
@@ -293,6 +301,50 @@ function Main(props: { user: User; onLogout: () => void }) {
       .then((r) => setFolders(r.items))
       .catch(() => { /* 分组是增强功能，取不到不影响主流程 */ });
   }, [page]);
+
+  // 分组内的订阅源（§15.13）：选中分组时把组里的源取回来，渲染成筛选行。
+  //
+  // 为什么复用 GET /feeds?folderId= 而不是新开一个读接口：那个接口已经返回
+  // unread / total / status / folderName，渲染 chip 需要的就是这几项；
+  // /folders/:id/feeds 存在但语义是"批量移入"（写接口），不能当读接口用。
+  useEffect(() => {
+    const fid = scope.folderId;
+    if (!fid) { setFolderFeeds([]); setFeedsLoadedFor(null); return; }
+    let alive = true;
+    setFeedsLoadedFor(null);
+    api.listFeeds({ folderId: fid })
+      .then((r) => {
+        if (!alive) return;
+        setFolderFeeds(r.items);
+        setFeedsLoadedFor(fid);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setFolderFeeds([]);
+        setFeedsLoadedFor(fid);
+      });
+    return () => { alive = false; };
+  }, [scope.folderId, page]);
+
+  // 源筛选的自愈：当前筛的源已不在这个组里（被移出 / 被删），退回整组。
+  //
+  // 不自愈的话会出现"顶部还挂着一个源 chip，列表却永远是空的" ——
+  // 请求带的是 {folderId: 新组, feedId: 旧组的源}，交集必然为空，
+  // 用户看到的是"这个组里没有文章"，而不是"你的筛选失效了"。
+  //
+  // 判据用「源列表是否已对当前分组加载过」，不能用「列表是否为空」：
+  // 组里的源被删光时列表也是空的，而那时恰恰最需要退回整组。
+  useEffect(() => {
+    if (!scope.feedId) return;
+    if (feedsLoadedFor !== scope.folderId) return; // 还在加载，不能据此判定
+    if (!folderFeeds.some((f) => f.id === scope.feedId)) {
+      // 只丢源、保留分组 —— 顺手把 folderId 也清掉会让用户以为自己
+      // 被弹出了分组（chip 行消失、标题变回收件箱）。m1-11 的
+      // 「自愈只丢源、不丢分组」那条就是专门抓这个的。
+      setScope((s) => ({ folderId: s.folderId }));
+    }
+  }, [folderFeeds, feedsLoadedFor, scope.feedId, scope.folderId]);
+
 
   const open = useCallback(async (id: string) => {
     setOpenId(id);
@@ -421,8 +473,25 @@ function Main(props: { user: User; onLogout: () => void }) {
   const listTitle = useMemo(() => {
     if (!scope.folderId) return current.label;
     const f = folders.find((x) => x.id === scope.folderId);
-    return f ? f.name : current.label;
-  }, [scope.folderId, folders, current.label]);
+    const base = f ? f.name : current.label;
+    // 再叠一层源筛选时，标题要同时说清"哪个组 + 哪个源"（§15.13），
+    // 否则标题还写「科技IT」，而列表只剩一个源的内容，看起来像丢数据。
+    if (!scope.feedId) return base;
+    const feed = folderFeeds.find((x) => x.id === scope.feedId);
+    return feed ? `${base} · ${feed.title ?? hostOf(feed.url) ?? '该源'}` : base;
+  }, [scope.folderId, scope.feedId, folders, folderFeeds, current.label]);
+
+  /** 当前分组信息（用于筛选行的显隐判断与"未分组"命名） */
+  const activeFolder = useMemo(
+    () => (scope.folderId ? folders.find((x) => x.id === scope.folderId) ?? null : null),
+    [scope.folderId, folders],
+  );
+
+  /** 组内未读总数（chip 行里「全部」上的数字，与各个源 chip 同一口径） */
+  const folderUnread = useMemo(
+    () => folderFeeds.reduce((n, f) => n + (f.unread ?? 0), 0),
+    [folderFeeds],
+  );
 
   return (
     <div className={`app ${page === 'feeds' ? 'feeds-mode' : ''}`}>
@@ -544,12 +613,27 @@ function Main(props: { user: User; onLogout: () => void }) {
             <h1>{listTitle}</h1>
             {stats && (
               <span className="pane-count">
-                {/* 有分组筛选时不能显示全库条数 —— 截图里出现过
-                    「中文媒体」标题旁边写着 8 条，而该组实际 0 条。 */}
+                {/* 有筛选时显示的是**命中总数**，不是本页已加载的条数。
+                    第一版用 items.length，截图里就出现过「科技IT 30 条」
+                    而该组真实 40 条 —— 因为首页只取 30 条，滚到底才补齐。
+                    total 由后端返回（GROUP BY 之外的 COUNT），分页不影响它。 */}
                 {debounced || scope.folderId
-                  ? `${items.length} 条${debounced ? '结果' : ''}`
+                  ? `${total ?? items.length} 条${debounced ? '结果' : ''}`
                   : `${stats.entries} 条`}
               </span>
+            )}
+            {/* 清除筛选：从一整块实心按钮改成标题行里的小 ×（§15.12）。
+                原来的 129×40 实心块夹在搜索框和列表之间，视觉重量和
+                "取消一个筛选"这件小事完全不匹配 —— 它只是按钮基样式的副作用。 */}
+            {(scope.folderId || scope.feedId) && (
+              <button
+                className="scope-clear"
+                onClick={() => setScope({})}
+                title="清除分组与源筛选"
+                aria-label="清除筛选"
+              >
+                <IconClose size={13} />
+              </button>
             )}
           </div>
           <div className="search-box">
@@ -561,14 +645,36 @@ function Main(props: { user: User; onLogout: () => void }) {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          {scope.folderId && (
-            <button
-              className="scope-clear"
-              onClick={() => setScope({})}
-              title="清除分组筛选"
-            >
-              只看分组 · 清除
-            </button>
+          {/* 分组内的源筛选行（§15.13）：点一下只看这个源，再点回整组。
+              组内只有 1 个源时不渲染 —— 一行 chip 只为过滤到一个源没有意义。 */}
+          {scope.folderId && folderFeeds.length > 1 && (
+            <div className="feed-chips" role="group" aria-label="按订阅源筛选">
+              <button
+                className={`chip ${scope.feedId ? '' : 'active'}`}
+                onClick={() => setScope({ folderId: scope.folderId })}
+                title={`看「${activeFolder?.name ?? '这个分组'}」的全部条目`}
+              >
+                全部
+                <span className="chip-count">{folderUnread}</span>
+              </button>
+              {folderFeeds.map((f) => (
+                <button
+                  key={f.id}
+                  className={`chip ${scope.feedId === f.id ? 'active' : ''}`}
+                  onClick={() => setScope(
+                    scope.feedId === f.id
+                      ? { folderId: scope.folderId }
+                      : { folderId: scope.folderId, feedId: f.id },
+                  )}
+                  title={f.title ?? hostOf(f.url) ?? f.url}
+                >
+                  {f.title ?? hostOf(f.url) ?? '未命名源'}
+                  {/* 0 也要显示：「这个源没新内容」本身是用户想知道的信息，
+                      隐藏之后无法区分"0 未读"和"没取到未读数"。 */}
+                  <span className="chip-count">{f.unread}</span>
+                </button>
+              ))}
+            </div>
           )}
         </header>
 

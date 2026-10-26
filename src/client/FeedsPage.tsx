@@ -713,11 +713,11 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
                     {f.status === 'paused' && <span className="tag">已暂停</span>}
                   </div>
                   <div className="feed-meta">
-                    <span>{f.total > 0 ? `共 ${f.total} 条` : '还没有条目'}</span>
+                    <span className="feed-total">{f.total > 0 ? `共 ${f.total} 条` : '还没有条目'}</span>
                     {f.lastFetchedAt && (
                       <>
                         <span>·</span>
-                        <span>{timeAgo(f.lastFetchedAt)}抓取</span>
+                        <span className="feed-when">{timeAgo(f.lastFetchedAt)}抓取</span>
                       </>
                     )}
                     {f.errorCount > 0 && f.status !== 'broken' && (

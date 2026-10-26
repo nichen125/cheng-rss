@@ -370,27 +370,49 @@ check('测试数据里真的存在待加载的 favicon（否则降级路径是�
 // ④ 吸顶头部
 check('订阅页头部是 sticky', () => ok(desk.headSticky === 'sticky', String(desk.headSticky)));
 
-await evaluate(`(() => { const fp = document.querySelector('.feeds-page'); if (fp) fp.scrollTop = 400; })()`);
+// 滚动容器在 v1.9 变了（§15.15）：订阅页从独立整页搬进了配置弹窗，
+// 现在的滚动者是 .settings-body，不再是 .feeds-page。
+// 断言因此不能写死 `.feeds-page.scrollTop = 400` —— 那在 overflow:visible
+// 的元素上是个静默的空操作，头部当然"一直可见"，等于断言恒绿。
+// 改成"自己往上找第一个真正能滚的祖先"，这样无论页面怎么搬家都有效。
+await evaluate(`(() => {
+  let el = document.querySelector('.feeds-page');
+  while (el) {
+    if (el.scrollHeight > el.clientHeight + 8) { el.scrollTop = 400; return el.className; }
+    el = el.parentElement;
+  }
+  return null;
+})()`);
 await sleep(500);
 const afterScroll = await evaluate(`(() => {
   const head = document.querySelector('.feeds-head');
   const hr = head?.getBoundingClientRect();
-  const fp = document.querySelector('.feeds-page');
-  const fpTop = fp?.getBoundingClientRect().top ?? 0;
+  // 滚动容器 = 头部所在的最近可滚动祖先
+  let sc = head?.parentElement;
+  while (sc) {
+    if (sc.scrollHeight > sc.clientHeight + 8) break;
+    sc = sc.parentElement;
+  }
+  const scTop = sc ? sc.getBoundingClientRect().top : 0;
   const addBtn = [...document.querySelectorAll('.feeds-actions button')]
     .find((b) => b.textContent.includes('添加订阅'));
   const ab = addBtn?.getBoundingClientRect();
   return {
+    scrolled: sc ? Math.round(sc.scrollTop) : 0,
+    scClass: sc?.className ?? null,
     headTop: hr ? Math.round(hr.top) : null,
-    fpTop: Math.round(fpTop),
-    headVisible: hr ? hr.bottom > fpTop : false,
-    addClickable: ab ? (ab.top >= fpTop - 1 && ab.bottom <= window.innerHeight + 1) : false,
-    scrollTop: fp?.scrollTop ?? 0,
+    scTop: Math.round(scTop),
+    headVisible: hr ? hr.bottom > scTop : false,
+    addClickable: ab ? (ab.top >= scTop - 1 && ab.bottom <= window.innerHeight + 1) : false,
   };
 })()`);
+check('（前置）列表确实滚动了 400px（否则下面两条是空转）', () => {
+  return ok(afterScroll.scrolled >= 380,
+    `scrollTop=${afterScroll.scrolled}（滚动容器 ${afterScroll.scClass}）`);
+});
 check('滚动 400px 后头部仍可见', () => {
   return ok(afterScroll.headVisible === true,
-    `headTop=${afterScroll.headTop} fpTop=${afterScroll.fpTop}`);
+    `headTop=${afterScroll.headTop} scTop=${afterScroll.scTop}`);
 });
 check('滚动后「添加订阅」按钮仍在可视区（不被滚走）', () => {
   return ok(afterScroll.addClickable === true, JSON.stringify(afterScroll));

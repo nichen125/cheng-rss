@@ -296,3 +296,278 @@
   .bulk-on .feed-title-text { max-width: none; }
 }
 
+
+/* ═══ 配置弹窗（§15.15）══════════════════════════════════════
+ *
+ * 结构照 Huntly 的 SettingModal：左侧固定分类栏 + 右侧内容区。
+ * 为什么是弹窗不是第四栏写在 SettingsModal.tsx 的头注释里。
+ *
+ * 尺寸约束（都在 720px 高以下能放下，笔记本 1366×768 是常见下界）：
+ *   弹窗 860×min(86vh, 720)；分类栏 190px；内容区可滚动。
+ * 手机上弹窗铺满，分类栏变成顶部横向滚动条 —— 竖排 6 个分类
+ * 会把内容区挤成一条缝。
+ */
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(4, 6, 10, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  /* 遮罩出现用短淡入，不做滑入 —— 弹窗是"切换上下文"，不是"抽屉" */
+  animation: fade-in 110ms ease-out;
+}
+.settings-modal {
+  display: flex;
+  width: 860px;
+  max-width: 100%;
+  height: min(86vh, 720px);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+/* ── 左侧分类栏 ─────────────────────────────────────────── */
+.settings-nav {
+  width: 190px;
+  flex-shrink: 0;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+  overflow-y: auto;
+}
+.settings-nav-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.settings-nav nav { display: flex; flex-direction: column; gap: 2px; }
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 9px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+.settings-nav-item:hover { background: var(--bg-hover); color: var(--fg); }
+.settings-nav-item.active { background: var(--bg-active); color: var(--fg); font-weight: 500; }
+.settings-nav-icon { display: inline-flex; flex-shrink: 0; color: var(--fg-faint); }
+.settings-nav-item.active .settings-nav-icon { color: var(--accent); }
+.settings-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 右侧内容区 ─────────────────────────────────────────── */
+.settings-body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  /* 订阅分类自己带 .feeds-page 的内边距约定，这里不能重复加 ——
+     否则订阅列表会比其它分类多缩进一层。左右内边距由 .feeds-page
+     与 .settings-section 各自提供，body 只管滚动。 */
+  padding: 0;
+}
+.settings-section { padding: 22px 26px 32px; max-width: 720px; }
+.settings-sec-head { margin-bottom: 18px; }
+.settings-sec-head h2 {
+  font-size: 17px;
+  font-weight: 620;
+  margin: 0 0 5px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.settings-sec-head .muted { margin: 0; font-size: 12.5px; line-height: 1.55; }
+
+.settings-actions { display: flex; gap: 8px; margin: 18px 0 14px; flex-wrap: wrap; }
+
+/* 占位分类里的清单：一行一个"将来会有什么" */
+.soon-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.soon-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.soon-list svg { color: var(--fg-faint); flex-shrink: 0; margin-top: 2px; }
+/* 占位清单前的小圆点。不用 svg 对勾：对勾在空方框里看起来像复选框，
+   而这一页明确写着不能改（§15.15）。 */
+.soon-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--fg-faint);
+  flex-shrink: 0;
+  margin-top: 8px;
+}
+.soon-tag-inline { font-weight: 400; }
+
+/* 账户卡片 */
+.account-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.avatar.lg {
+  width: 44px;
+  height: 44px;
+  font-size: 18px;
+  border-radius: var(--radius-pill);
+}
+.account-main { min-width: 0; }
+.account-name { font-size: 14px; font-weight: 550; }
+.account-mail {
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-role { font-size: 11.5px; color: var(--fg-faint); margin-top: 3px; }
+
+/* ── 订阅页在弹窗里：不再有独立的整页内边距 ─────────────── */
+.settings-body .feeds-page {
+  padding: 0 26px 32px;
+  max-width: none;
+  overflow: visible;
+}
+/* 弹窗里头部仍然吸顶，吸的是**弹窗自己的滚动容器**（.settings-body），
+   不是整页。34 个源的列表往下滚之后「添加订阅」必须还能点到 ——
+   这是 m1-06 ⑤ 的原始要求，不能因为换了容器就丢掉。
+   只去掉 box-shadow：弹窗已经有面板边框，再叠一条阴影会显得脏。
+   背景要显式给 --bg-elev（弹窗底色），不能继承 --bg：
+   否则吸顶块和弹窗底色差一层，滚动时能看见一条色带。 */
+.settings-body .feeds-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 22px 0 14px;
+  background: var(--bg-elev);
+  box-shadow: none;
+}
+.settings-body .modal-inset { position: fixed; }
+
+/* ── 分组下拉栏（§15.15：≥3 个分组时替换 chip 行）─────────── */
+.folder-filter.select-mode {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 0 16px;
+  flex-wrap: wrap;
+}
+.folder-label { font-size: 12.5px; color: var(--fg-faint); }
+.folder-select {
+  /* 与 .chip 同高（30px = 4px 内衬 ×2 + 20px 行高 + 1px 边框 ×2），
+     换过形态但这一行的高度不变，列表不会因为切形态而上下跳。 */
+  height: 30px;
+  font-size: 12.5px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  max-width: 260px;
+}
+.folder-filter.select-mode .muted { font-size: 12px; }
+
+/* 添加订阅时顺手选分组的下拉：与输入框同高，不抢主按钮的视觉重量 */
+.add-folder {
+  height: 38px;
+  font-size: 13px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  max-width: 170px;
+}
+
+/* ── 手机：弹窗铺满，分类栏变顶部横条 ───────────────────── */
+@media (max-width: 640px) {
+  .settings-backdrop { padding: 0; align-items: stretch; }
+  .settings-modal {
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    border-radius: 0;
+    border: none;
+    flex-direction: column;
+  }
+  .settings-nav {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    flex-shrink: 0;
+  }
+  .settings-nav::-webkit-scrollbar { display: none; }
+  .settings-nav-head {
+    padding: 0 10px 0 2px;
+    flex-shrink: 0;
+    font-size: 12.5px;
+  }
+  /* 顶部横条里标题文字没必要占位置，留个 × 就够 */
+  .settings-nav-head > span { display: none; }
+  .settings-nav nav { flex-direction: row; gap: 4px; }
+  .settings-nav-item {
+    width: auto;
+    flex-shrink: 0;
+    padding: 7px 10px;
+    font-size: 12.5px;
+    min-height: 36px;
+  }
+  .settings-nav-label { flex: none; }
+  .settings-nav-item .soon-tag { display: none; }
+
+  .settings-body .feeds-page { padding: 0 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .settings-body .feeds-head { padding: 14px 0 12px; }
+  .settings-section { padding: 16px 14px 28px; }
+  /* 手机上添加面板一行放不下四个控件，让输入框独占一行 */
+  .add-folder { max-width: none; flex: 1; min-width: 120px; }
+}
+
+/* 分类面板的显示切换（§15.15 ③）。
+ * 用 hidden 属性而不是条件渲染：切分类不卸载组件，表单里填了一半的内容
+ * 不会丢。hidden 的默认 display:none 会被任何 display 声明覆盖，
+ * 所以这里用属性选择器显式兜一层 —— 订阅分类的 .feeds-page 是 flex 子项，
+ * 一旦有别的规则给了它 display，hidden 就会失效，六个面板会同时出现。 */
+.settings-pane[hidden] { display: none !important; }

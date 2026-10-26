@@ -4,9 +4,10 @@ import {
 } from './api.ts';
 import {
   IconArrowLeft, IconBookmark, IconCheck, IconChevronRight, IconCircle, IconClock, IconClose,
-  IconExternal, IconFolder, IconInbox, IconLogout, IconMenu, IconRss, IconSearch, IconSparkle, IconStar,
+  IconExternal, IconFolder, IconInbox, IconMenu, IconRefresh, IconRss, IconSearch,
+  IconSettings, IconSparkle, IconStar,
 } from './icons.tsx';
-import { FeedsPage } from './FeedsPage.tsx';
+import { SettingsModal, type SettingsSection } from './settings/SettingsModal.tsx';
 import {
   applyPrefs, DEFAULT_PREFS, FONT_SIZES, loadPrefs, savePrefs,
   THEMES, WIDTHS, type ReaderPrefs,
@@ -48,9 +49,6 @@ const NAV: NavItem[] = [
 const SOON: { label: string; icon: React.ReactNode }[] = [
   { label: '简报', icon: <IconSparkle /> },
 ];
-
-/** 当前页：条目列表 or 订阅管理 */
-type Page = 'entries' | 'feeds';
 
 /**
  * 条目的额外过滤（与 view 正交）。
@@ -224,7 +222,8 @@ function SetupPage(props: { onDone: (u: User) => void }) {
 interface Stats { entries: number; feeds: number; unread: number; starred: number }
 
 function Main(props: { user: User; onLogout: () => void }) {
-  const [page, setPage] = useState<Page>('entries');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('feeds');
   const [view, setView] = useState<View>('inbox');
   const [scope, setScope] = useState<Scope>({});
   const [folders, setFolders] = useState<FolderItem[]>([]);
@@ -247,6 +246,10 @@ function Main(props: { user: User; onLogout: () => void }) {
   const [folderFeeds, setFolderFeeds] = useState<FeedItem[]>([]);
   /** 上面这份源列表是为哪个分组加载的；用于区分"加载完是空的"和"还没加载" */
   const [feedsLoadedFor, setFeedsLoadedFor] = useState<string | null>(null);
+  /** 手动刷新中（§15.14）：只驱动按钮旋转态，不参与列表渲染 */
+  const [refreshing, setRefreshing] = useState(false);
+  /** 自增后让分组内源列表（chip 上的未读数）也重取一次 */
+  const [reloadTick, setReloadTick] = useState(0);
 
   // 偏好变更 → 立刻写 CSS 变量 + 落盘。
   // 放在 effect 里而不是 setPrefs 的调用处：刷新页面时初次挂载也要应用一次。
@@ -294,13 +297,53 @@ function Main(props: { user: User; onLogout: () => void }) {
 
   useEffect(() => { refreshStats(); }, [refreshStats, items]);
 
-  // 侧栏的分组列表：切到订阅页回来时要刷新（用户可能刚建了组）
-  useEffect(() => {
-    if (page !== 'entries') return;
+  /**
+   * 手动刷新（§15.14）。
+   *
+   * 只做"重新拉一遍当前视图"，不重置任何筛选 —— 用户刚点了「科技IT」+「未读」
+   * 再点刷新，结果还是那个范围。这也是它和"切视图"的本质区别：
+   * 切视图是换条件，刷新是同一条件重新取数。
+   *
+   * 三条约束：
+   * 1. **不清空列表**。load(true) 在响应回来之后才 setItems，中途 items
+   *    保持旧值，所以不会闪白 —— 但这条必须由断言守住，因为"清空再填"
+   *    是将来最容易顺手写出来的实现。
+   * 2. 同时重算侧栏角标与分组内未读数（refreshStats + reloadTick），
+   *    否则刷新完列表变了、侧栏数字还是旧的。
+   * 3. refreshing 只驱动按钮的旋转态，不参与列表渲染判断 ——
+   *    否则又变成"刷新时列表消失"。
+   */
+  const refresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await load(true);
+      refreshStats();
+      setReloadTick((n) => n + 1);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, load, refreshStats]);
+
+  // 侧栏的分组列表：配置弹窗里可能刚建/删了组，关弹窗要刷新。
+  //
+  // `refreshShell` 同时被两处调用：弹窗关闭时，以及 FeedsProvider 每
+  // 次 reload 之后（onChanged）。后者是必要的 —— 在配置里把源移出组后，
+  // 即使还没关弹窗，侧栏的分组未读数就应该是新的。
+  //
+  // 还要顺带 bump `reloadTick`，让**分组内的源列表**（§15.13 的 chip 行）
+  // 也重取一次。少了这一下会有一个具体的坏结果：在配置里把当前筛中的源
+  // 移出分组 → 关弹窗 → 顶部还挂着那个源的 chip，列表却是空的，
+  // 而"自动退回整组"的自愈永远等不到新的源列表。m1-11 ⑥ 就是抓这个的。
+  const refreshShell = useCallback(() => {
     api.listFolders()
       .then((r) => setFolders(r.items))
       .catch(() => { /* 分组是增强功能，取不到不影响主流程 */ });
-  }, [page]);
+    refreshStats();
+    setReloadTick((n) => n + 1);
+  }, [refreshStats]);
+
+  useEffect(() => { refreshShell(); }, [refreshShell]);
 
   // 分组内的订阅源（§15.13）：选中分组时把组里的源取回来，渲染成筛选行。
   //
@@ -324,7 +367,7 @@ function Main(props: { user: User; onLogout: () => void }) {
         setFeedsLoadedFor(fid);
       });
     return () => { alive = false; };
-  }, [scope.folderId, page]);
+  }, [scope.folderId, reloadTick]);
 
   // 源筛选的自愈：当前筛的源已不在这个组里（被移出 / 被删），退回整组。
   //
@@ -494,7 +537,7 @@ function Main(props: { user: User; onLogout: () => void }) {
   );
 
   return (
-    <div className={`app ${page === 'feeds' ? 'feeds-mode' : ''}`}>
+    <div className="app">
       {/* ── 侧栏 ─────────────────────────────────────────── */}
       <aside className="sidebar">
         <div className="brand">
@@ -513,10 +556,9 @@ function Main(props: { user: User; onLogout: () => void }) {
                 className={`nav-item ${
                   // 有分组筛选时固定视图不能高亮 —— 否则「收件箱」和
                   // 分组项会同时亮着，看起来像点了两个地方。
-                  page === 'entries' && view === n.key && !scope.folderId ? 'active' : ''
+                  view === n.key && !scope.folderId ? 'active' : ''
                 }`}
                 onClick={() => {
-                  setPage('entries');
                   setView(n.key);
                   // 点固定视图等于"看全部"，必须清掉分组过滤，
                   // 否则会出现"点了收件箱但还是只有 3 个源的内容"
@@ -536,10 +578,13 @@ function Main(props: { user: User; onLogout: () => void }) {
 
         <div className="nav-section">订阅源</div>
         <nav className="nav">
+          {/* 保留在侧栏，但语义变成"打开配置并停在订阅分类"（§15.15）。
+              删除它会让"我想加个源"多一步（先进配置再选分类）；
+              而它不再切换主界面，读与配置的层级关系是清楚的。 */}
           <button
-            className={`nav-item ${page === 'feeds' ? 'active' : ''}`}
-            onClick={() => { setPage('feeds'); }}
-            title="订阅"
+            className={`nav-item ${settingsOpen && settingsSection === 'feeds' ? 'active' : ''}`}
+            onClick={() => { setSettingsSection('feeds'); setSettingsOpen(true); }}
+            title="管理订阅（打开配置）"
           >
             <span className="nav-icon"><IconRss /></span>
             <span className="nav-label">订阅</span>
@@ -558,10 +603,9 @@ function Main(props: { user: User; onLogout: () => void }) {
                 <button
                   key={f.id}
                   className={`nav-item ${
-                    page === 'entries' && scope.folderId === f.id ? 'active' : ''
+                    scope.folderId === f.id ? 'active' : ''
                   }`}
                   onClick={() => {
-                    setPage('entries');
                     setView('inbox');
                     setScope({ folderId: f.id });
                   }}
@@ -590,36 +634,66 @@ function Main(props: { user: User; onLogout: () => void }) {
         </nav>
 
         <div className="sidebar-foot">
-          <div className="avatar">{(props.user.name ?? props.user.email ?? '?').slice(0, 1).toUpperCase()}</div>
+          {/* 侧栏底部只留一个齿轮（§15.15）：账户信息与订阅/分组管理
+              全部收进配置弹窗。原来这里挂着"头像 + 邮箱 + 退出"三样，
+              而订阅管理又是同级的一页 —— 一块区域同时说两件事。
+              齿轮旁边保留头像，是为了保持"这是我"的方位感，
+              但它不再是按钮，点了没反应就不该长得像按钮。 */}
+          <div className="avatar" title={props.user.email ?? props.user.name ?? ''}>
+            {(props.user.name ?? props.user.email ?? '?').slice(0, 1).toUpperCase()}
+          </div>
           <div className="who">
             <div className="who-name">{props.user.name ?? 'Owner'}</div>
             <div className="who-mail">{props.user.email}</div>
           </div>
-          <button className="icon-btn" onClick={props.onLogout} title="退出登录">
-            <IconLogout size={16} />
+          <button
+            className="icon-btn"
+            onClick={() => { setSettingsSection('feeds'); setSettingsOpen(true); }}
+            title="配置（订阅 / 分组 / 账户）"
+            aria-label="打开配置"
+          >
+            <IconSettings size={16} />
           </button>
         </div>
       </aside>
 
-      {/* ── 订阅页：跨后两栏 ─────────────────────────────── */}
-      {page === 'feeds' ? (
-        <FeedsPage onOpenInbox={() => setPage('entries')} />
-      ) : (
-        <>
+      {/* ── 配置弹窗（§15.15）：订阅 / 分组 / 账户 + M2~M6 占位 ── */}
+      {settingsOpen && (
+        <SettingsModal
+          user={props.user}
+          section={settingsSection}
+          onSection={setSettingsSection}
+          onClose={() => { setSettingsOpen(false); refreshShell(); }}
+          onLogout={props.onLogout}
+          onChanged={refreshShell}
+        />
+      )}
+
+      {/* 列表与阅读区。
+          订阅不再是独立页 —— 它已经在配置弹窗里（§15.15），
+          所以这里不再有 "page === feeds" 的分支。 */}
+      <>
       {/* ── 列表栏 ───────────────────────────────────────── */}
       <section className={`list-pane ${openId ? 'narrow' : ''}`}>
         <header className="pane-head">
           <div className="pane-title">
             <h1>{listTitle}</h1>
-            {stats && (
+            {/* 计数不再挂在 stats 上：数字来自 listEntries 的 total，
+                stats 只是侧栏角标的来源。让两者脱钩之后，即使 /stats
+                慢一拍或失败，列表自己的条数照常显示。 */}
+            {(total !== null || items.length > 0) && (
               <span className="pane-count">
-                {/* 有筛选时显示的是**命中总数**，不是本页已加载的条数。
+                {/* 数字统一来自后端的 `total`（命中总数），不是 items.length。
                     第一版用 items.length，截图里就出现过「科技IT 30 条」
-                    而该组真实 40 条 —— 因为首页只取 30 条，滚到底才补齐。
-                    total 由后端返回（GROUP BY 之外的 COUNT），分页不影响它。 */}
-                {debounced || scope.folderId
-                  ? `${total ?? items.length} 条${debounced ? '结果' : ''}`
-                  : `${stats.entries} 条`}
+                    而该组真实 40 条 —— 首页只取 30，滚到底才补齐。
+
+                    v1.9 又收窄了一层：原来只在「有搜索词 / 有分组」时才用
+                    total，其余情况用 stats.entries。加了「未读」分段之后，
+                    这个条件就是错的 —— 切到「未读」时既没有搜索词也没有分组，
+                    于是标题仍显示全库条数，而列表只有未读那几条。一律用
+                    total 之后，「当前这个视图有多少条」天然成立，
+                    不需要为每个新筛选再补一个分支。 */}
+                {`${total ?? items.length} 条${debounced ? '结果' : ''}`}
               </span>
             )}
             {/* 清除筛选：从一整块实心按钮改成标题行里的小 ×（§15.12）。
@@ -635,6 +709,44 @@ function Main(props: { user: User; onLogout: () => void }) {
                 <IconClose size={13} />
               </button>
             )}
+
+            {/* 全部 / 未读 分段控件 + 刷新（§15.14）。
+                放进已经存在的标题行，垂直成本为 0 —— 单独占一行要吃掉
+                约 34px，按 §15.2 每屏 8~10 条的预算，那等于每屏少一条。
+
+                分段控件只在"条目列表"里有意义：收藏/历史本身已经是
+                另一种筛选，在它们上面再叠一层"只没读的收藏"会把
+                两个正交条件混成一个控件。所以非 inbox/unread 视图隐藏。 */}
+            {(view === 'inbox' || view === 'unread') && (
+              <div className="seg pane-seg" role="group" aria-label="阅读范围">
+                <button
+                  className={`seg-btn sm ${view === 'inbox' ? 'on' : ''}`}
+                  aria-pressed={view === 'inbox'}
+                  onClick={() => { if (view !== 'inbox') { setView('inbox'); setOpenId(null); } }}
+                  title="显示全部条目（已读的也在）"
+                >
+                  全部
+                </button>
+                <button
+                  className={`seg-btn sm ${view === 'unread' ? 'on' : ''}`}
+                  aria-pressed={view === 'unread'}
+                  onClick={() => { if (view !== 'unread') { setView('unread'); setOpenId(null); } }}
+                  title="只显示未读"
+                >
+                  未读
+                </button>
+              </div>
+            )}
+            <button
+              className={`icon-btn tiny refresh-btn ${refreshing ? 'spinning' : ''}`}
+              onClick={() => void refresh()}
+              disabled={refreshing}
+              title="刷新当前列表"
+              aria-label="刷新当前列表"
+              data-refreshing={refreshing ? '1' : '0'}
+            >
+              <IconRefresh size={14} />
+            </button>
           </div>
           <div className="search-box">
             <IconSearch size={15} className="search-icon" />
@@ -686,7 +798,7 @@ function Main(props: { user: User; onLogout: () => void }) {
               hasQuery={Boolean(debounced)}
               view={view}
               scopeLabel={scope.folderId ? listTitle : null}
-              onGoFeeds={() => setPage('feeds')}
+              onGoFeeds={() => { setSettingsSection('feeds'); setSettingsOpen(true); }}
               onClearScope={scope.folderId ? () => setScope({}) : undefined}
             />
           )}
@@ -728,12 +840,18 @@ function Main(props: { user: User; onLogout: () => void }) {
                     <span className="grow" />
                     {/* hover 才出现：收藏 / 新标签打开原文。
                         不常驻是因为列表页的任务是"扫过去"（§15.2），
-                        常驻两个图标会让每行多 24px 的视觉噪声。 */}
+                        常驻两个图标会让每行多 24px 的视觉噪声。
+
+                        收藏状态**只由这颗星表达**（`filled` 就是它的状态）。
+                        v1.9 之前这里还额外渲染了一个 `star-mark` 装饰星，
+                        结果是"点完收藏出现两颗星"（§15.14）。同一个信息
+                        说两遍不是冗余，是让人怀疑自己点错了。 */}
                     <span className="entry-ops">
                       <button
                         type="button"
                         className={`icon-btn tiny ${it.isStarred ? 'on' : ''}`}
                         title={it.isStarred ? '取消收藏' : '收藏'}
+                        aria-pressed={it.isStarred}
                         onClick={(e) => { e.stopPropagation(); void toggleStar(it.id); }}
                       >
                         <IconStar size={13} filled={it.isStarred} />
@@ -749,7 +867,6 @@ function Main(props: { user: User; onLogout: () => void }) {
                         <IconExternal size={13} />
                       </a>
                     </span>
-                    {it.isStarred && <IconStar size={13} filled className="star-mark" />}
                   </div>
                   {/* 标题是真链接：左键拦截掉（走阅读区），中键与 Ctrl+点击交给浏览器 */}
                   <a
@@ -815,7 +932,6 @@ function Main(props: { user: User; onLogout: () => void }) {
         )}
       </section>
         </>
-      )}
 
       {/* ── 移动端底部导航（≤640px 才显示，见 styles.css）───────── */}
       <nav className="tabbar">
@@ -826,9 +942,8 @@ function Main(props: { user: User; onLogout: () => void }) {
           return (
             <button
               key={n.key}
-              className={`tab ${page === 'entries' && view === n.key ? 'active' : ''}`}
+              className={`tab ${view === n.key ? 'active' : ''}`}
               onClick={() => {
-                setPage('entries');
                 setView(n.key);
                 setScope({});
                 setOpenId(null);
@@ -844,9 +959,11 @@ function Main(props: { user: User; onLogout: () => void }) {
             </button>
           );
         })}
+        {/* 订阅入口改成"打开配置并停在订阅分类"（§15.15）：位置不变，
+            但它现在打开的是弹窗，不再切换主界面 —— 读和配置分开了。 */}
         <button
-          className={`tab ${page === 'feeds' ? 'active' : ''}`}
-          onClick={() => { setPage('feeds'); setOpenId(null); }}
+          className={`tab ${settingsOpen && settingsSection === 'feeds' ? 'active' : ''}`}
+          onClick={() => { setSettingsSection('feeds'); setSettingsOpen(true); setOpenId(null); }}
         >
           <span className="tab-icon"><IconRss size={18} /></span>
           <span className="tab-label">订阅</span>

@@ -347,6 +347,47 @@ input::placeholder { color: var(--fg-faint); }
   flex-shrink: 0;
 }
 
+/* 标题行右侧的「全部 / 未读」+ 刷新（§15.14）。
+
+   .pane-title 是 align-items: baseline —— 分段控件的基线取的是它内部
+   第一行文字的基线，直接放进来会整体往下掉。两个元素各自 align-self:
+   center 就回到视觉中线，不动父容器的对齐方式（改了会把 h1 和「N 条」
+   的基线一起带歪）。
+
+   两者都压到 22px 高，与标题行 h1 的行高相同：控件高过它就会撑高
+   .pane-head，把列表往下推 —— 而"不额外占高度"正是把它们放进标题行
+   而不是单开一行的全部理由。刷新按钮直接用 .icon-btn.tiny（22×22）；
+   分段控件靠 `.seg-btn.sm` 把行高收到 16px，加上 .seg 自己的
+   1px 边框 ×2 + 2px 内衬 ×2 = 22px，**容器一个数都不用改**。
+
+   所以内圆角仍是 calc(7 − 2) = 5，与偏好面板里那个分段控件一致 ——
+   §15.12 和 m1-10 认的就是这个 5。要是为了凑高度去动 .seg 的内衬，
+   内圆角就变成 6：既不在尺度里，也是"内圆角只比外圆角小 1px"的错位
+   （那正是 §15.12 记的第四个缺陷）。
+
+   为什么不写成 `.pane-seg .seg-btn`：那样 DOM 上它和偏好面板里的
+   分段按钮是同一个 `seg-btn`，m1-10 的「同一 class 高度唯一」会把
+   16px 和 23px 判成缺陷 —— 那条断言是对的。紧凑版本来就是显式的
+   尺寸变体，跟 .icon-btn / .icon-btn.tiny 用同一套办法表达。 */
+.pane-seg {
+  align-self: center;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.seg-btn.sm {
+  padding: 0 7px;
+  font-size: 11.5px;
+  line-height: 16px;
+}
+.refresh-btn {
+  align-self: center;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+/* 刷新中：图标转起来，按钮保持原位（尺寸不发散、周围不重排） */
+.refresh-btn.spinning svg { animation: spin 700ms linear infinite; }
+.refresh-btn:disabled { opacity: 0.6; }
+
 /* 清除筛选的 ×（§15.12）。
    原来是「只看分组 · 清除」一整块实心按钮，宽 129 高 40，原因是它命中了
    全局 button 规则（padding 7px 13px + background + border）。
@@ -491,7 +532,7 @@ input::placeholder { color: var(--fg-faint); }
   white-space: nowrap;
 }
 .dot { opacity: 0.5; }
-.star-mark { color: var(--worth); margin-left: auto; flex-shrink: 0; }
+
 
 .entry-title {
   font-size: 14px;

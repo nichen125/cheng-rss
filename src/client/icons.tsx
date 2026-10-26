@@ -213,3 +213,30 @@ export function IconCheck({ size, className, checked }: P & { checked?: boolean 
     </svg>
   );
 }
+
+/** 设置 / 配置中心（§15.15）。齿轮：一个圆 + 内圆 + 八向齿线。
+ *  不用「三个圆点」那种"更多"，因为它是"配置"不是"更多菜单" ——
+ *  两者在同一个侧栏里出现时，圆点会被理解成"展开更多导航"。 */
+export function IconSettings({ size, className }: P) {
+  return (
+    <svg {...base(size)} className={className}>
+      <circle cx="12" cy="12" r="3.1" />
+      <circle cx="12" cy="12" r="7.6" opacity="0.45" />
+      <path d="M12 2.9v1.9M12 19.2v1.9M3.4 12h1.9M18.7 12h1.9" />
+      <path d="M5.9 5.9l1.35 1.35M16.75 16.75l1.35 1.35M18.1 5.9l-1.35 1.35M7.25 16.75L5.9 18.1" />
+    </svg>
+  );
+}
+
+/** 数据库 / 备份迁移（§15.15 的占位分类）。
+ *  三个叠起来的数据层，比"软盘"更贴合"SQLite + 附件目录"这件事，
+ *  也比"下载箭头"更中性 —— 那一页既含导出也含恢复。 */
+export function IconDatabase({ size, className }: P) {
+  return (
+    <svg {...base(size)} className={className}>
+      <ellipse cx="12" cy="6.2" rx="7.4" ry="2.9" />
+      <path d="M4.6 6.2v11.6c0 1.6 3.3 2.9 7.4 2.9s7.4-1.3 7.4-2.9V6.2" />
+      <path d="M4.6 12c0 1.6 3.3 2.9 7.4 2.9s7.4-1.3 7.4-2.9" />
+    </svg>
+  );
+}

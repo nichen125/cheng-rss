@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  api, ApiFailure, type DiscoverCandidate, type FeedItem, type FolderItem,
-} from './api.ts';
-import {
-  IconCheck, IconChevronRight, IconEdit, IconExternal, IconFolder, IconPause, IconPlay,
-  IconRefresh, IconRss, IconSearch, IconTrash,
-} from './icons.tsx';
-
-// 订阅管理（PLAN §10、§18）。
+// 配置中心的「订阅」分类（PLAN §15.15）。
+//
+// 从原来的 FeedsPage 整体迁入，改动只有三处：
+//   ① 数据（feeds/folders/filter/err/notice）来自 FeedsProvider，
+//      不再自己 load —— 因为「分组」分类页要能改动同一批数据。
+//   ② 分组筛选从一排会换行的 chip 改成下拉栏（分组 ≥3 时），
+//      分组很少时仍是 chip（§15.15 的 threshold 规则）。
+//   ③ 新增订阅时可以顺手选分组 —— 原来必须先订、再去行里编辑。
 //
 // 一个输入框解决 90% 的用法：贴什么都能订阅。
 //   · 完整 feed URL      → 直接用
@@ -16,11 +14,13 @@ import {
 //   · 一段带 URL 的文字  → 抠出第一个 URL
 //
 // "发现到多个 feed" 时让用户选，而不是替他挑 —— 主站和评论区分开的站点不少。
-//
-// 分组用一层扁平结构（folders 表没有 parent_id）。理由见 feeds/folders.ts。
-
-/** 未分组用的伪 id，避免和真实 folder id 混淆 */
-const UNFILED = 'none';
+import { useRef, useState } from 'react';
+import { api, ApiFailure, type DiscoverCandidate, type FeedItem } from '../api.ts';
+import {
+  IconCheck, IconChevronRight, IconEdit, IconExternal, IconFolder, IconPause, IconPlay,
+  IconRefresh, IconRss, IconSearch, IconTrash,
+} from '../icons.tsx';
+import { FOLDER_DROPDOWN_THRESHOLD, UNFILED, useFeeds } from './store.tsx';
 
 interface EditState {
   feed: FeedItem;
@@ -29,24 +29,20 @@ interface EditState {
   intervalMin: number;
 }
 
-export function FeedsPage(props: { onOpenInbox: () => void }) {
-  const [feeds, setFeeds] = useState<FeedItem[]>([]);
-  const [folders, setFolders] = useState<FolderItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState('');
+export function FeedsSection(props: { onClose: () => void }) {
+  const {
+    feeds, folders, loading, err, notice, busy, filter,
+    setFilter, setErr, setNotice, setBusy, reload, fail,
+    visible, grouped, unfiledCount, totalUnread,
+  } = useFeeds();
+
   const [adding, setAdding] = useState(false);
   const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState('');
+  /** 添加时顺手选的归属分组；UNFILED = 未分组，空串表示跟随当前筛选 */
+  const [addFolder, setAddFolder] = useState('');
   const [candidates, setCandidates] = useState<DiscoverCandidate[] | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
-  /** 当前筛选的分组：null=全部，UNFILED=未分组，其他=分组 id */
-  const [filter, setFilter] = useState<string | null>(null);
-  /** 正在编辑的订阅；null 表示弹窗关闭 */
   const [editing, setEditing] = useState<EditState | null>(null);
-  /** 分组管理面板是否展开 */
-  const [managingFolders, setManagingFolders] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   /** 加载失败的图标 id，回退成占位图标而不是留空方块 */
@@ -55,31 +51,19 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
   const [bulkMode, setBulkMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr('');
-    try {
-      // 一次拿全量：源数量在几十到几百量级，前端自己分组比
-      // "切一次分组打一次请求"更跟手，也不会出现切组时闪白。
-      const r = await api.listFeeds();
-      setFeeds(r.items);
-      setFolders(r.folders);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '加载失败');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-
   const resetAdd = () => {
     setAdding(false);
     setInput('');
+    setAddFolder('');
     setCandidates(null);
     setNotes([]);
-    setNotice('');
-    setErr('');
+  };
+
+  /** 添加面板打开时的默认归属：跟随当前筛选，避免"在 A 组里加源却落到未分组" */
+  const openAdd = () => {
+    setAdding(true);
+    setAddFolder(filter === null || filter === UNFILED ? (filter ?? '') : filter);
+    setTimeout(() => inputRef.current?.focus(), 50);
   };
 
   /** 先发现；只找到一个就直接订阅，多个让用户选 */
@@ -105,7 +89,7 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
         setNotes(r.notes);
       }
     } catch (e) {
-      setErr(e instanceof ApiFailure ? e.message : '发现失败');
+      fail(e, '发现失败');
     } finally {
       setBusy(false);
     }
@@ -115,7 +99,7 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
     setBusy(true);
     setErr('');
     try {
-      const r = await api.addFeed(url);
+      const r = await api.addFeed(url, addFolder === '' || addFolder === UNFILED ? null : addFolder);
       setNotice(
         r.created
           ? `已订阅「${r.feed.title ?? url}」，导入 ${r.imported ?? 0} 条`
@@ -124,9 +108,9 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
       setCandidates(null);
       setInput('');
       setAdding(false);
-      await load();
+      await reload();
     } catch (e) {
-      setErr(e instanceof ApiFailure ? e.message : '订阅失败');
+      fail(e, '订阅失败');
     } finally {
       setBusy(false);
     }
@@ -136,9 +120,9 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
     try {
       await api.refreshFeed(id);
       setNotice('已加入抓取队列，稍后刷新');
-      setTimeout(() => void load(), 1500);
+      setTimeout(() => void reload(), 1500);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '刷新失败');
+      fail(e, '刷新失败');
     }
   };
 
@@ -147,35 +131,35 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
     try {
       const r = await api.refreshAllFeeds();
       setNotice(`已把 ${r.queued} 个源加入抓取队列`);
-      setTimeout(() => void load(), 2000);
+      setTimeout(() => void reload(), 2000);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '刷新失败');
+      fail(e, '刷新失败');
     } finally {
       setBusy(false);
     }
   };
 
   const remove = async (f: FeedItem) => {
-    const ok = window.confirm(
+    const yes = window.confirm(
       `取消订阅「${f.title ?? f.url}」？\n\n`
       + `未读的 ${f.unread} 条会一起删除；已读和已收藏的条目会保留在列表里。`,
     );
-    if (!ok) return;
+    if (!yes) return;
     try {
       await api.deleteFeed(f.id);
       setNotice('已取消订阅');
-      await load();
+      await reload();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '删除失败');
+      fail(e, '删除失败');
     }
   };
 
   const togglePause = async (f: FeedItem) => {
     try {
       await api.updateFeed(f.id, { status: f.status === 'paused' ? 'active' : 'paused' });
-      await load();
+      await reload();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '操作失败');
+      fail(e, '操作失败');
     }
   };
 
@@ -189,7 +173,7 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '导出失败');
+      fail(e, '导出失败');
     }
   };
 
@@ -200,9 +184,9 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
       const text = await file.text();
       const r = await api.importOpml(text);
       setNotice(`导入 ${r.created} 个订阅${r.skipped ? `，跳过 ${r.skipped} 个` : ''}`);
-      await load();
+      await reload();
     } catch (e) {
-      setErr(e instanceof ApiFailure ? e.message : '导入失败');
+      fail(e, '导入失败');
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -231,56 +215,11 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
       });
       setNotice(`已保存「${editing.title.trim() || editing.feed.url}」`);
       setEditing(null);
-      await load();
+      await reload();
     } catch (e) {
-      setErr(e instanceof ApiFailure ? e.message : '保存失败');
+      fail(e, '保存失败');
     } finally {
       setBusy(false);
-    }
-  };
-
-  // ── 分组管理 ────────────────────────────────────────────
-  const addFolder = async () => {
-    const name = newFolderName.trim();
-    if (!name) return;
-    setBusy(true);
-    setErr('');
-    try {
-      await api.createFolder(name);
-      setNewFolderName('');
-      await load();
-    } catch (e) {
-      setErr(e instanceof ApiFailure ? e.message : '新建分组失败');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const renameFolder = async (f: FolderItem) => {
-    const name = window.prompt('新的分组名', f.name);
-    if (name === null) return;
-    if (!name.trim()) return;
-    try {
-      await api.renameFolder(f.id, name.trim());
-      await load();
-    } catch (e) {
-      setErr(e instanceof ApiFailure ? e.message : '重命名失败');
-    }
-  };
-
-  const removeFolder = async (f: FolderItem) => {
-    const ok = window.confirm(
-      `删除分组「${f.name}」？\n\n`
-      + `里面的 ${f.feedCount} 个订阅不会被删，会退回「未分组」。`,
-    );
-    if (!ok) return;
-    try {
-      await api.deleteFolder(f.id);
-      if (filter === f.id) setFilter(null);
-      setNotice('分组已删除，里面的订阅退回未分组');
-      await load();
-    } catch (e) {
-      setErr(e instanceof ApiFailure ? e.message : '删除失败');
     }
   };
 
@@ -311,7 +250,6 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
   const enterBulk = () => {
     setBulkMode(true);
     setSelected(new Set());
-    setManagingFolders(false);
   };
   const exitBulk = () => {
     setBulkMode(false);
@@ -335,9 +273,9 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
       if (r.missing.length) bits.push(`${r.missing.length} 个已不存在`);
       setNotice(bits.join('，'));
       setSelected(new Set());
-      await load();
+      await reload();
     } catch (e) {
-      setErr(e instanceof ApiFailure ? e.message : `${label}失败`);
+      fail(e, `${label}失败`);
     } finally {
       setBusy(false);
     }
@@ -365,45 +303,17 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
     const unread = feeds
       .filter((f) => ids.includes(f.id))
       .reduce((n, f) => n + f.unread, 0);
-    const ok = window.confirm(
+    const yes = window.confirm(
       `取消订阅这 ${ids.length} 个源？\n\n`
       + `未读的 ${unread} 条会一起删除；已读和已收藏的条目会保留。\n`
       + `这个操作不能撤销。`,
     );
-    if (!ok) return;
+    if (!yes) return;
     await runBulk('取消订阅', (x) => api.bulkDelete(x));
   };
 
-  // ── 分组后的数据 ────────────────────────────────────────
-  const visible = useMemo(() => {
-    if (filter === null) return feeds;
-    if (filter === UNFILED) return feeds.filter((f) => !f.folderId);
-    return feeds.filter((f) => f.folderId === filter);
-  }, [feeds, filter]);
-
-  /** 按分组归拢，未分组放最后。组内保持 listFeeds 的排序（失效源已排后） */
-  const grouped = useMemo(() => {
-    const map = new Map<string, { name: string | null; items: FeedItem[] }>();
-    for (const f of visible) {
-      const key = f.folderId ?? UNFILED;
-      const cur = map.get(key) ?? { name: f.folderName ?? null, items: [] };
-      cur.items.push(f);
-      map.set(key, cur);
-    }
-    // 有分组的按 folders 的 sort 排，未分组永远最后
-    const ordered = [...map.entries()]
-      .filter(([k]) => k !== UNFILED)
-      .sort(([a], [b]) => {
-        const ia = folders.findIndex((x) => x.id === a);
-        const ib = folders.findIndex((x) => x.id === b);
-        return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
-      });
-    if (map.has(UNFILED)) ordered.push([UNFILED, map.get(UNFILED)!]);
-    return ordered;
-  }, [visible, folders]);
-
-  const unfiledCount = feeds.filter((f) => !f.folderId).length;
-  const totalUnread = feeds.reduce((n, f) => n + f.unread, 0);
+  // 分组少时 chip 够用（一次点击直达），多了才换下拉 —— 见 §15.15
+  const useDropdown = folders.length >= FOLDER_DROPDOWN_THRESHOLD;
 
   return (
     <div className={`feeds-page ${bulkMode ? 'bulk-on' : ''}`}>
@@ -425,9 +335,6 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
           >
             {bulkMode ? '退出管理' : '管理'}
           </button>
-          <button className="btn" onClick={() => setManagingFolders((v) => !v)}>
-            分组
-          </button>
           <button className="btn" onClick={() => void exportOpml()} disabled={feeds.length === 0}>
             导出 OPML
           </button>
@@ -442,7 +349,7 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
               if (f) void importOpml(f);
             }}
           />
-          <button className="btn primary" onClick={() => { setAdding(true); setTimeout(() => inputRef.current?.focus(), 50); }}>
+          <button className="btn primary" onClick={openAdd}>
             + 添加订阅
           </button>
         </div>
@@ -505,76 +412,54 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
         </div>
       )}
 
-      {/* ── 分组管理面板 ─────────────────────────────────── */}
-      {managingFolders && (
-        <div className="folder-panel">
-          <div className="folder-panel-head">
-            <strong>分组</strong>
-            <span className="muted">用来把几十个源归拢，侧栏也能按组看</span>
-          </div>
-
-          <div className="add-row">
-            <div className="search-box grow">
-              <IconFolder size={15} className="search-icon" />
-              <input
-                placeholder="新分组名，例如「科技」「财经」"
-                value={newFolderName}
-                disabled={busy}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') void addFolder(); }}
-              />
-            </div>
-            <button className="btn primary" onClick={() => void addFolder()} disabled={busy || !newFolderName.trim()}>
-              新建
-            </button>
-          </div>
-
-          {folders.length === 0 ? (
-            <p className="hint">还没有分组。建一个之后，可以从订阅行的「编辑」里放进去。</p>
-          ) : (
-            <ul className="folder-manage-list">
-              {folders.map((f) => (
-                <li key={f.id}>
-                  <IconFolder size={14} />
-                  <span className="folder-name">{f.name}</span>
-                  <span className="muted">{f.feedCount} 个源</span>
-                  <div className="grow" />
-                  <button className="btn tiny" onClick={() => void renameFolder(f)}>重命名</button>
-                  <button className="btn tiny danger" onClick={() => void removeFolder(f)}>删除</button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {/* ── 筛选条 ───────────────────────────────────────── */}
+      {/* ── 分组筛选（§15.15：≥3 个分组换下拉，否则 chip）──── */}
       {feeds.length > 0 && (folders.length > 0 || filter !== null) && (
-        <div className="folder-filter">
-          <button
-            className={`chip ${filter === null ? 'active' : ''}`}
-            onClick={() => setFilter(null)}
-          >
-            全部 <span className="chip-count">{feeds.length}</span>
-          </button>
-          {folders.map((f) => (
-            <button
-              key={f.id}
-              className={`chip ${filter === f.id ? 'active' : ''}`}
-              onClick={() => setFilter(f.id)}
+        useDropdown ? (
+          <div className="folder-filter select-mode">
+            <label className="folder-label" htmlFor="folder-filter-select">分组</label>
+            <select
+              id="folder-filter-select"
+              className="folder-select"
+              value={filter ?? ''}
+              onChange={(e) => setFilter(e.target.value === '' ? null : e.target.value)}
             >
-              {f.name} <span className="chip-count">{f.feedCount}</span>
-            </button>
-          ))}
-          {unfiledCount > 0 && (
+              <option value="">全部（{feeds.length} 个源）</option>
+              {unfiledCount > 0 && <option value={UNFILED}>未分组（{unfiledCount} 个源）</option>}
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}（{f.feedCount} 个源）</option>
+              ))}
+            </select>
+            <span className="muted">
+              共 {visible.length} 个源
+            </span>
+          </div>
+        ) : (
+          <div className="folder-filter">
             <button
-              className={`chip ${filter === UNFILED ? 'active' : ''}`}
-              onClick={() => setFilter(UNFILED)}
+              className={`chip ${filter === null ? 'active' : ''}`}
+              onClick={() => setFilter(null)}
             >
-              未分组 <span className="chip-count">{unfiledCount}</span>
+              全部 <span className="chip-count">{feeds.length}</span>
             </button>
-          )}
-        </div>
+            {folders.map((f) => (
+              <button
+                key={f.id}
+                className={`chip ${filter === f.id ? 'active' : ''}`}
+                onClick={() => setFilter(f.id)}
+              >
+                {f.name} <span className="chip-count">{f.feedCount}</span>
+              </button>
+            ))}
+            {unfiledCount > 0 && (
+              <button
+                className={`chip ${filter === UNFILED ? 'active' : ''}`}
+                onClick={() => setFilter(UNFILED)}
+              >
+                未分组 <span className="chip-count">{unfiledCount}</span>
+              </button>
+            )}
+          </div>
+        )
       )}
 
       {adding && (
@@ -594,6 +479,19 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
                 }}
               />
             </div>
+            {/* 添加时就选分组：原来必须先订、再回行里编辑，两步才能归组 */}
+            <select
+              className="add-folder"
+              value={addFolder}
+              disabled={busy}
+              onChange={(e) => setAddFolder(e.target.value)}
+              title="新订阅放进哪个分组"
+            >
+              <option value="">不分组</option>
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
             <button className="btn primary" onClick={() => void discover()} disabled={busy || !input.trim()}>
               {busy ? '查找中…' : '查找并订阅'}
             </button>
@@ -646,9 +544,7 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
           <h2>还没有订阅</h2>
           <p>添加第一个 RSS 源，或从别的阅读器导入 OPML。没有源的话也可以直接用 Huntly 插件保存网页。</p>
           <div className="empty-actions">
-            <button className="btn primary" onClick={() => { setAdding(true); setTimeout(() => inputRef.current?.focus(), 50); }}>
-              添加订阅
-            </button>
+            <button className="btn primary" onClick={openAdd}>添加订阅</button>
             <button className="btn" onClick={() => fileRef.current?.click()}>导入 OPML</button>
           </div>
         </div>
@@ -770,13 +666,16 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
           <button className="btn" onClick={() => void refreshAll()} disabled={busy}>
             刷新全部
           </button>
-          <button className="btn" onClick={props.onOpenInbox}>去看条目</button>
+          {/* 「去看条目」只关弹窗，**不碰 scope**（§15.13 的自愈回程就靠这条）：
+              如果这里顺手把分组/源筛选也清了，源被移出组之后
+              "自动退回整组"那段逻辑一次都不会执行，验收会假绿。 */}
+          <button className="btn" onClick={props.onClose}>去看条目</button>
         </div>
       )}
 
       {/* ── 编辑弹窗 ─────────────────────────────────────── */}
       {editing && (
-        <div className="modal-backdrop" onClick={() => setEditing(null)}>
+        <div className="modal-backdrop modal-inset" onClick={() => setEditing(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>编辑订阅</h2>
             <p className="hint modal-sub">{editing.feed.url}</p>
@@ -806,7 +705,7 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
               </select>
               {folders.length === 0 && (
                 <p className="hint" style={{ marginTop: 6 }}>
-                  还没有分组，先在「分组」里建一个。
+                  还没有分组，先去左边的「分组」里建一个。
                 </p>
               )}
             </div>

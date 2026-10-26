@@ -301,10 +301,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ url }),
     }),
-  addFeed: (url: string) =>
+  /**
+   * 订阅一个源。
+   *
+   * `folderId` 是 v1.9 才用上的（§15.15）：后端 POST /feeds 一直支持这个字段，
+   * 只是原来前端没传，于是"在某个分组里添加订阅"总是落到未分组，
+   * 用户得再回行里编辑一次才能归组。
+   */
+  addFeed: (url: string, folderId?: string | null) =>
     request<{ created: boolean; feed: FeedItem; imported?: number }>('/feeds', {
       method: 'POST',
-      body: JSON.stringify({ url }),
+      body: JSON.stringify(folderId ? { url, folderId } : { url }),
     }),
   refreshFeed: (id: string) =>
     request<{ ok: boolean; queued: boolean }>(`/feeds/${id}/refresh`, { method: 'POST' }),

@@ -207,3 +207,86 @@
   .modal h2 { font-size: 17px; }
   .folder-manage-list .folder-name { max-width: 24ch; }
 }
+
+/* ── 批量管理（§15.10）───────────────────────────────────── */
+
+/* 吸顶的批量栏。和 .feeds-head 分开是因为头部在手机上不吸顶，
+ * 而批量栏必须一直可见 —— 否则滚到第 20 行就点不到「删除」了。 */
+.bulk-bar {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 9px 11px;
+  margin-bottom: 12px;
+  background: var(--bg-elev2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  /* 列表从下面滚过去时要有分隔感，纯色块会看成"渲染错位" */
+  box-shadow: 0 1px 0 var(--border-soft);
+}
+
+.bulk-count {
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.bulk-count strong { color: var(--fg); font-weight: 600; }
+
+.bulk-select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 4px 8px;
+  outline: none;
+  max-width: 150px;
+}
+.bulk-select:focus { border-color: var(--accent); }
+.bulk-select:disabled { opacity: 0.45; }
+
+/* 勾选框。放在行/组头最左侧，24px 见方保证点得中（§15.7 的 44px
+ * 规则针对整行触摸目标，这里的按钮本身 28px 高 + 行高 66px 的外层
+ * 点击区域实际足够）。 */
+.bulk-check {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  border-radius: 7px;
+}
+.bulk-check:hover { background: var(--bg-hover); color: var(--fg-dim); }
+.bulk-check svg.checked { color: var(--accent); }
+
+/* 选中的行要有明显底色 —— 只靠左侧勾选框，长列表上分不清选没选 */
+.feed-row.picked {
+  background: var(--accent-dim);
+  border-color: rgba(91, 157, 255, 0.28);
+}
+.feed-group .feed-row.picked + .feed-row { margin-top: -1px; }
+
+/* 管理模式下右侧的编辑/刷新等单条按钮会挤，让它们让位 */
+@media (max-width: 640px) {
+  .bulk-bar { gap: 5px; padding: 8px 9px; }
+  .bulk-select { max-width: 108px; }
+
+  /* 手机上一行要塞下 勾选框 + 图标 + 标题 + 徽标 + 4 个按钮，
+   * 标题被压成「奇客S…」。管理模式下行内单条按钮本来就是
+   * 次要的（用户此刻要批量操作），藏起来把空间让给标题。 */
+  .bulk-on .feed-ops { display: none; }
+  .bulk-on .feed-title-text { max-width: none; }
+}
+

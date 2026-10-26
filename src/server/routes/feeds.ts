@@ -12,6 +12,9 @@ import {
 } from '../feeds/folders.ts';
 import { sanitizeHtml } from '../feeds/sanitize.ts';
 import {
+  BULK_MAX, bulkDelete, bulkMoveToFolder, bulkSetStatus, normalizeIds, splitExisting,
+} from '../feeds/bulk.ts';
+import {
   createFeed, deleteFeed, dueFeeds, enqueueFetch, findFeedByUrl, getFeed,
   listFeeds, updateFeed, upsertItems, recordFetchError, scheduleNextFetch,
   type FeedRow, type FeedStatus,
@@ -118,6 +121,72 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     } catch (e) {
       throw toAppError(e);
     }
+  });
+
+  // ── 批量操作（§15.10）──────────────────────────────────
+  //
+  // ⚠️ 路由顺序：`POST /feeds/bulk/refresh` 与 `POST /feeds/:id/refresh`
+  // 都是两段路径，注册顺序反了的话 "bulk" 会被当成 feed id，
+  // 批量刷新永远返回「订阅不存在」。和之前 `/folders/unfile/feeds`
+  // 那个 bug 是同一类 —— 静态段必须排在参数段之前。
+  // ⚠️ 请求体只能读一次。所以这个 helper 收的是**已经解析好的 body**，
+  // 而不是 Hono 的 context —— 第一版在 helper 里又读了一次 json()，
+  // 第二次拿到的是空对象，`folderId` 永远是 null（全部移出分组）。
+  const bulkIds = (body: { feedIds?: unknown }): string[] => {
+    const ids = normalizeIds(body.feedIds);
+    if (ids === null) throw badRequest('需要 feedIds 数组');
+    if (ids.length === 0) throw badRequest('feedIds 不能为空');
+    if (ids.length > BULK_MAX) throw badRequest(`一次最多 ${BULK_MAX} 个`);
+    return ids;
+  };
+
+  r.post('/feeds/bulk/folder', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as {
+      feedIds?: unknown; folderId?: string | null;
+    };
+    const ids = bulkIds(body);
+    const folderId = body.folderId ?? null;
+    if (folderId !== null && !getFolder(ctx.dbh.db, uid, folderId)) {
+      throw badRequest('分组不存在');
+    }
+    return c.json(bulkMoveToFolder(ctx.dbh.db, uid, ids, folderId));
+  });
+
+  r.post('/feeds/bulk/status', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as {
+      feedIds?: unknown; status?: string;
+    };
+    const ids = bulkIds(body);
+    const status = body.status;
+    if (status !== 'active' && status !== 'paused') {
+      throw badRequest('status 只能是 active 或 paused');
+    }
+    return c.json(bulkSetStatus(ctx.dbh.db, uid, ids, status));
+  });
+
+  r.post('/feeds/bulk/delete', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as { feedIds?: unknown };
+    return c.json(bulkDelete(ctx.dbh.db, uid, bulkIds(body)));
+  });
+
+  r.post('/feeds/bulk/refresh', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as { feedIds?: unknown };
+    const ids = bulkIds(body);
+    const { existing, missing } = splitExisting(ctx.dbh.db, uid, ids);
+    let done = 0;
+    let skipped = 0;
+    for (const id of existing) {
+      const f = getFeed(ctx.dbh.db, uid, id);
+      // 暂停的源刷新会立刻又被 scheduleNextFetch 推远，等于假装刷了
+      if (!f || f.status === 'paused') { skipped++; continue; }
+      if (enqueueFetch(ctx.dbh.db, id, 100) !== null) done++;
+      else skipped++;
+    }
+    return c.json({ requested: ids.length, done, skipped, missing });
   });
 
   // ── 发现（不落库）──────────────────────────────────────

@@ -183,3 +183,22 @@ export function IconTrash({ size, className }: P) {
     </svg>
   );
 }
+
+/** 勾选框：批量管理模式下每行左边那个。checked 时实心 + 对勾 */
+export function IconCheck({ size, className, checked }: P & { checked?: boolean }) {
+  return (
+    <svg {...base(size)} className={className}>
+      <rect
+        x="3.5" y="3.5" width="17" height="17" rx="5"
+        fill={checked ? 'currentColor' : 'none'}
+      />
+      {checked && (
+        <path
+          d="M8 12.3l2.6 2.6L16 9.5"
+          stroke="var(--bg-elev)" strokeWidth="2"
+          fill="none" strokeLinecap="round" strokeLinejoin="round"
+        />
+      )}
+    </svg>
+  );
+}

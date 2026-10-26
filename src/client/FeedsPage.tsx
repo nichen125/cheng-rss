@@ -3,7 +3,7 @@ import {
   api, ApiFailure, type DiscoverCandidate, type FeedItem, type FolderItem,
 } from './api.ts';
 import {
-  IconChevronRight, IconEdit, IconExternal, IconFolder, IconPause, IconPlay,
+  IconCheck, IconChevronRight, IconEdit, IconExternal, IconFolder, IconPause, IconPlay,
   IconRefresh, IconRss, IconSearch, IconTrash,
 } from './icons.tsx';
 
@@ -51,6 +51,9 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   /** 加载失败的图标 id，回退成占位图标而不是留空方块 */
   const [iconFailed, setIconFailed] = useState<Set<string>>(new Set());
+  /** 批量管理模式。进入后每行左侧出勾选框，顶部出批量操作栏 */
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -281,6 +284,96 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
     }
   };
 
+  // ── 批量管理（§15.10）──────────────────────────────────
+  //
+  // 状态只存 id 的 Set。为什么不存"选中对象"：批量操作期间列表可能
+  // 因为后台抓取而重载，持有对象会指向旧快照；id 永远有效。
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  /** 组头的框：本组全选 / 全不选（不影响其它组） */
+  const toggleGroup = (items: FeedItem[]) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allIn = items.every((f) => next.has(f.id));
+      for (const f of items) {
+        if (allIn) next.delete(f.id); else next.add(f.id);
+      }
+      return next;
+    });
+  };
+
+  const enterBulk = () => {
+    setBulkMode(true);
+    setSelected(new Set());
+    setManagingFolders(false);
+  };
+  const exitBulk = () => {
+    setBulkMode(false);
+    setSelected(new Set());
+  };
+
+  /** 所有批量操作共用的执行器：跑完清空选择、重载、写 notice */
+  const runBulk = async (
+    label: string,
+    fn: (ids: string[]) => Promise<{ done: number; skipped: number; missing: string[] }>,
+  ) => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const r = await fn(ids);
+      const bits = [`${label} ${r.done} 个`];
+      if (r.skipped) bits.push(`跳过 ${r.skipped} 个`);
+      // missing 单独说：它意味着数据已经不是我们看到的样子了
+      if (r.missing.length) bits.push(`${r.missing.length} 个已不存在`);
+      setNotice(bits.join('，'));
+      setSelected(new Set());
+      await load();
+    } catch (e) {
+      setErr(e instanceof ApiFailure ? e.message : `${label}失败`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const bulkMove = async (folderId: string | null) => {
+    const name = folderId === null
+      ? '未分组'
+      : (folders.find((f) => f.id === folderId)?.name ?? '分组');
+    await runBulk(`移入「${name}」`, (ids) => api.bulkMoveToFolder(ids, folderId));
+  };
+
+  const bulkPause = async (status: 'active' | 'paused') => {
+    await runBulk(status === 'paused' ? '暂停' : '恢复', (ids) => api.bulkSetStatus(ids, status));
+  };
+
+  const bulkRefresh = async () => {
+    await runBulk('加入抓取队列', (ids) => api.bulkRefresh(ids));
+  };
+
+  const bulkRemove = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    // 这条必须确认：是唯一不可撤销的批量操作
+    const unread = feeds
+      .filter((f) => ids.includes(f.id))
+      .reduce((n, f) => n + f.unread, 0);
+    const ok = window.confirm(
+      `取消订阅这 ${ids.length} 个源？\n\n`
+      + `未读的 ${unread} 条会一起删除；已读和已收藏的条目会保留。\n`
+      + `这个操作不能撤销。`,
+    );
+    if (!ok) return;
+    await runBulk('取消订阅', (x) => api.bulkDelete(x));
+  };
+
   // ── 分组后的数据 ────────────────────────────────────────
   const visible = useMemo(() => {
     if (filter === null) return feeds;
@@ -313,7 +406,7 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
   const totalUnread = feeds.reduce((n, f) => n + f.unread, 0);
 
   return (
-    <div className="feeds-page">
+    <div className={`feeds-page ${bulkMode ? 'bulk-on' : ''}`}>
       <header className="feeds-head">
         <div>
           <h1>订阅</h1>
@@ -325,6 +418,13 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
           </p>
         </div>
         <div className="feeds-actions">
+          <button
+            className={`btn ${bulkMode ? 'active' : ''}`}
+            onClick={() => (bulkMode ? exitBulk() : enterBulk())}
+            disabled={feeds.length === 0}
+          >
+            {bulkMode ? '退出管理' : '管理'}
+          </button>
           <button className="btn" onClick={() => setManagingFolders((v) => !v)}>
             分组
           </button>
@@ -350,6 +450,60 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
 
       {err && <div className="alert error inset">{err}</div>}
       {notice && <div className="alert ok inset">{notice}</div>}
+
+      {/* ── 批量操作栏 ───────────────────────────────────── */}
+      {bulkMode && (
+        <div className="bulk-bar">
+          <div className="bulk-count">
+            已选 <strong>{selected.size}</strong> / {visible.length}
+          </div>
+          <button
+            className="btn tiny"
+            onClick={() => setSelected(new Set(visible.map((f) => f.id)))}
+            disabled={busy || selected.size === visible.length}
+          >
+            全选
+          </button>
+          <button
+            className="btn tiny"
+            onClick={() => setSelected(new Set())}
+            disabled={busy || selected.size === 0}
+          >
+            清空
+          </button>
+          <div className="grow" />
+
+          <select
+            className="bulk-select"
+            value=""
+            disabled={busy || selected.size === 0}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v) void bulkMove(v === UNFILED ? null : v);
+              e.target.value = '';
+            }}
+          >
+            <option value="">移到分组…</option>
+            <option value={UNFILED}>未分组</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
+
+          <button className="btn tiny" onClick={() => void bulkPause('active')} disabled={busy || selected.size === 0}>
+            恢复
+          </button>
+          <button className="btn tiny" onClick={() => void bulkPause('paused')} disabled={busy || selected.size === 0}>
+            暂停
+          </button>
+          <button className="btn tiny" onClick={() => void bulkRefresh()} disabled={busy || selected.size === 0}>
+            刷新
+          </button>
+          <button className="btn tiny danger" onClick={() => void bulkRemove()} disabled={busy || selected.size === 0}>
+            删除
+          </button>
+        </div>
+      )}
 
       {/* ── 分组管理面板 ─────────────────────────────────── */}
       {managingFolders && (
@@ -503,6 +657,21 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
       {visible.length > 0 && grouped.map(([key, g]) => (
         <section key={key} className="feed-group">
           <div className="feed-group-head">
+            {bulkMode && (
+              <button
+                className="bulk-check"
+                title={g.items.every((f) => selected.has(f.id)) ? '取消本组' : '选中本组'}
+                onClick={() => toggleGroup(g.items)}
+              >
+                <IconCheck
+                  size={16} checked={g.items.length > 0 && g.items.every((f) => selected.has(f.id))}
+                  className={
+                    g.items.length > 0 && g.items.every((f) => selected.has(f.id))
+                      ? 'checked' : ''
+                  }
+                />
+              </button>
+            )}
             <IconFolder size={13} />
             <span>{g.name ?? '未分组'}</span>
             <span className="muted">{g.items.length} 个源</span>
@@ -514,7 +683,16 @@ export function FeedsPage(props: { onOpenInbox: () => void }) {
 
           <ul className="feed-list">
             {g.items.map((f) => (
-              <li key={f.id} className={`feed-row ${f.status}`}>
+              <li key={f.id} className={`feed-row ${f.status} ${selected.has(f.id) ? 'picked' : ''}`}>
+                {bulkMode && (
+                  <button
+                    className="bulk-check"
+                    title={selected.has(f.id) ? '取消选择' : '选择'}
+                    onClick={() => toggleSelect(f.id)}
+                  >
+                    <IconCheck size={16} checked={selected.has(f.id)} className={selected.has(f.id) ? 'checked' : ''} />
+                  </button>
+                )}
                 <div className="feed-icon">
                   {/* 占位图标始终渲染在底下，favicon 叠在上面。
                       这样"正在加载"和"加载失败"两种情况都不会出现空方块 ——

@@ -19,6 +19,12 @@ export function check(desc, fn) {
   let detail = '';
   try {
     const r = fn();
+    // 回调写成 async 的话拿到的是 Promise，Boolean(r.ok) 恒为 false，
+    // 报出来却是"断言失败"，很容易被当成实现坏了去查业务代码。
+    // 这里明确挡掉，让人一眼看出是写法问题。
+    if (r && typeof r.then === 'function') {
+      throw new Error('check() 的回调不能是 async：先把 await 的结果取出来，再在回调里断言');
+    }
     if (r === true || r === undefined) {
       ok = true;
     } else if (r && typeof r === 'object') {

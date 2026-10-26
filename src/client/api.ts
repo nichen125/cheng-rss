@@ -149,6 +149,14 @@ export interface DiscoverCandidate {
   itemCount: number;
 }
 
+/** 批量操作的结果。skipped 是业务跳过，missing 是库里已经没有的 id */
+export interface BulkResult {
+  requested: number;
+  done: number;
+  skipped: number;
+  missing: string[];
+}
+
 export interface DiscoverResponse {
   found: boolean;
   candidates: DiscoverCandidate[];
@@ -245,6 +253,31 @@ export const api = {
     }),
   unfileFeeds: (feedIds: string[]) =>
     request<{ ok: boolean; moved: number }>('/folders/unfile/feeds', {
+      method: 'POST',
+      body: JSON.stringify({ feedIds }),
+    }),
+
+  // ── 批量操作（§15.10）────────────────────────────────────
+  //
+  // 四个端点都是「一次事务做完」，不是前端循环调单条接口。
+  // 理由写在 src/server/feeds/bulk.ts 的头注释里。
+  bulkMoveToFolder: (feedIds: string[], folderId: string | null) =>
+    request<BulkResult>('/feeds/bulk/folder', {
+      method: 'POST',
+      body: JSON.stringify({ feedIds, folderId }),
+    }),
+  bulkSetStatus: (feedIds: string[], status: 'active' | 'paused') =>
+    request<BulkResult>('/feeds/bulk/status', {
+      method: 'POST',
+      body: JSON.stringify({ feedIds, status }),
+    }),
+  bulkDelete: (feedIds: string[]) =>
+    request<BulkResult>('/feeds/bulk/delete', {
+      method: 'POST',
+      body: JSON.stringify({ feedIds }),
+    }),
+  bulkRefresh: (feedIds: string[]) =>
+    request<BulkResult>('/feeds/bulk/refresh', {
       method: 'POST',
       body: JSON.stringify({ feedIds }),
     }),

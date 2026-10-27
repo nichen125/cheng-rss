@@ -107,7 +107,7 @@ export async function fetchFeed(
 }
 
 /** 流式读取并限制上限，避免一个异常大的响应把内存撑爆 */
-async function readCapped(res: Response): Promise<Uint8Array> {
+async function readCapped(res: Response, maxBytes = MAX_BYTES): Promise<Uint8Array> {
   if (!res.body) return new Uint8Array(await res.arrayBuffer());
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -117,9 +117,9 @@ async function readCapped(res: Response): Promise<Uint8Array> {
     if (done) break;
     if (!value) continue;
     total += value.byteLength;
-    if (total > MAX_BYTES) {
+    if (total > maxBytes) {
       try { await reader.cancel(); } catch { /* ignore */ }
-      throw new FetchError(`响应超过 ${MAX_BYTES / 1024 / 1024}MB 上限`, { retryable: false });
+      throw new FetchError(`响应超过 ${maxBytes / 1024 / 1024}MB 上限`, { retryable: false });
     }
     chunks.push(value);
   }
@@ -127,6 +127,77 @@ async function readCapped(res: Response): Promise<Uint8Array> {
   let off = 0;
   for (const c of chunks) { out.set(c, off); off += c.byteLength; }
   return out;
+}
+
+// ── 原文抓取（正文提取用，PLAN §7.5）──────────────────────
+
+/** 原文上限 4MB。实测正文页 20~700KB，超过的基本是错误页或整站导出 */
+const PAGE_MAX_BYTES = 4 * 1024 * 1024;
+
+/** 原文超时比 feed 短：抓失败只是"这次没提到全文"，不值得占 30s */
+const PAGE_TIMEOUT_MS = 20_000;
+
+/**
+ * 抓原文用的 UA。
+ *
+ * 与 feed 抓取不同，这里**必须**像一个浏览器：大量站点的反爬规则是
+ * "非浏览器 UA → 403 或降级为摘要页"。实测 danluu.com / arstechnica
+ * 对 ai-rss/0.1 直接返回验证页。代价是站长在日志里看到的不是我们的
+ * 产品名 —— 取舍见 §21 风险表的「源反爬」一行。
+ */
+const PAGE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+  + '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+export interface PageResult {
+  body: string;
+  contentType: string | null;
+  finalUrl: string;
+  status: number;
+}
+
+/**
+ * 抓一篇原文页面。
+ *
+ * 只服务正文提取，因此与 fetchFeed 有三处刻意不同：
+ *   · 不传条件请求头（正文只要一次，不做增量）
+ *   · 上限 4MB / 超时 20s（比 feed 更保守）
+ *   · 非 2xx 直接抛（正文提取没有"304 等价物"，失败就该回退）
+ */
+export async function fetchPage(url: string): Promise<PageResult> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), PAGE_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: {
+        'user-agent': PAGE_UA,
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept-language': 'en-US,en;q=0.9,zh-CN;q=0.8',
+      },
+      signal: ac.signal,
+      redirect: 'follow',
+    });
+  } catch (e) {
+    const msg = (e as Error).name === 'AbortError'
+      ? `原文请求超时（${PAGE_TIMEOUT_MS / 1000}s）`
+      : `原文网络错误: ${(e as Error).message}`;
+    throw new FetchError(msg, { retryable: true });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    // 4xx 是永久性的，但这里不区分 —— 正文提取不重试（§7.5）
+    throw new FetchError(`原文 HTTP ${res.status}`, { retryable: false, status: res.status });
+  }
+
+  const buf = await readCapped(res, PAGE_MAX_BYTES);
+  return {
+    body: decodeBody(buf, res.headers.get('content-type')),
+    contentType: res.headers.get('content-type'),
+    finalUrl: res.url || url,
+    status: res.status,
+  };
 }
 
 /**
@@ -308,6 +379,8 @@ export interface UpsertStats {
   skipped: number;
   /** 没有可用 URL，无法入库 */
   invalid: number;
+  /** feed 正文够长、不需要抓原文的条数（PLAN §7.5 的收益计数） */
+  extractSkipped: number;
 }
 
 /**

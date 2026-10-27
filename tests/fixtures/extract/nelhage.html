@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<!--[if IEMobile 7 ]><html class="no-js iem7"><![endif]-->
+<!--[if lt IE 9]><html class="no-js lte-ie8"><![endif]-->
+<!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <title>Reflections on software performance - Made of Bugs</title>
+  <meta name="author" content="Nelson Elhage">
+
+  
+  <meta name="HandheldFriendly" content="True">
+  <meta name="MobileOptimized" content="320">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta property="og:url" content="https://blog.nelhage.com/post/reflections-on-performance/">
+  <meta property="og:site_name" content="Made of Bugs">
+  <meta property="og:title" content="Reflections on software performance">
+  <meta property="og:description" content="At this point in my career, I’ve worked on at least three projects where performance was a defining characteristic: Livegrep, Taktician, and Sorbet (I discussed sorbet in particular last time, and livegrep in an earlier post). I’ve also done a lot of other performance work on the tools I use, some of which ended up on my other blog, Accidentally Quadratic.
+In this post, I want to reflect on some of the lessons I’ve learned while writing performant software, and working with rather a lot more not-so-performant software.">
+  <meta property="og:locale" content="en_us">
+  <meta property="og:type" content="article">
+    <meta property="article:section" content="post">
+    <meta property="article:published_time" content="2020-02-02T17:00:00-08:00">
+    <meta property="article:modified_time" content="2020-02-02T17:00:00-08:00">
+
+
+  <meta name="generator" content="Hugo 0.127.0">
+
+  <link rel="canonical" href="https://blog.nelhage.com/post/reflections-on-performance/">
+  <link href="/favicon.png" rel="icon">
+  <link rel='stylesheet' href="/css/screen.cd5012c69afc96649a0c400877b7ca57102913923b5d7865ea2c6a00c86014e2.css" integrity="sha256-zVASxpr8lmSaDEAId7fKVxApE5I7XXhl6ixqAMhgFOI=">
+  <link href="/atom.xml" rel="alternate" title="Made of Bugs" type="application/atom+xml">
+  
+  <link rel='stylesheet' href="/css/fonts.b428aca6651515b69efbc3270422da34019189b3e6682f16b10e4455d5834152.css" integrity="sha256-tCispmUVFbae&#43;8MnBCLaNAGRibPmaC8WsQ5EVdWDQVI=">
+</head>
+<body class="collapse-sidebar sidebar-footer">
+  <header role="banner">
+    <hgroup>
+      <h1><a href="/">Made of Bugs</a></h1>
+      <h3>It&#39;s software. It&#39;s made of bugs.</h3>
+    </hgroup>
+  </header>
+  <div class="navi">
+<ul>
+  <li><a href="/post/">Archives</a></li>
+  <li><a href="/subscribe">Subscribe</a></li>
+  <li><a href="https://nelhage.com/">Author</a></li>
+</ul>
+</div>
+
+  <div id="main">
+    <div id="content">
+
+
+<div>
+  <article class="hentry" role="article">
+    <header>
+  <h1 class="entry-title">Reflections on software performance</h1>
+  <p class="meta">
+    
+    <time datetime="2020-02-02T17:00:00-08:00" pubdate>
+      Feb  2, 2020
+    </time>
+    
+  </p>
+</header>
+
+<div class="entry-content">
+  <p>At this point in my career, I’ve worked on at least three projects where performance was a defining characteristic: <a href="https://livegrep.com/search/linux">Livegrep</a>, <a href="https://github.com/nelhage/taktician">Taktician</a>, and <a href="https://sorbet.org/">Sorbet</a> (I <a href="https://blog.nelhage.com/post/why-sorbet-is-fast/">discussed sorbet</a> in particular last time, and <a href="https://blog.nelhage.com/2015/02/regular-expression-search-with-suffix-arrays/">livegrep in an earlier post</a>). I’ve also done a lot of other performance work on the tools I use, some of which ended up on my other blog, <a href="https://accidentallyquadratic.tumblr.com/">Accidentally Quadratic</a>.</p>
+<p>In this post, I want to reflect on some of the lessons I’ve learned while writing performant software, and working with rather a lot more not-so-performant software.</p>
+<h2 id="performance-is-a-feature">Performance is a feature&nbsp;<a class="anchor" href="#performance-is-a-feature"><i class="small linkify icon">	&#x1F517;&#xFE0E;</i></a> </h2>
+<p>I’ve really come to appreciate that performance isn’t just some property of a tool independent from its functionality or its feature set. Performance — in particular, being notably fast — is a feature in and of its own right, which fundamentally alters how a tool is used and perceived.</p>
+<p>One of the recurring pieces of feedback and appreciation we got from Stripe engineers following the Sorbet rollout was how <em>fast</em> the tool was. In a world of slow tooling<sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup> developers genuinely appreciated a tool that felt fast and responsive.</p>
+<p>I think the value of performance is sometimes well-understood intellectually — many engineers know of and talk about the <a href="https://www.nngroup.com/articles/response-times-3-important-limits/">perceptual thresholds for response time</a> or <a href="https://blog.hubspot.com/marketing/page-load-time-conversion-rates">the impact of latency on conversion rates</a> — but it’s rarely appreciated on a really visceral level, and also is often given lip service more so than real investment. It feels popular to bemoan slow software these days, and yet it also feels rare that a team is doing something about it — our tools still keep getting slower. My experiences lead me to the strong belief that while our tools do make it increasingly hard to write fast software, it’s very much still possible, and very much still worth it.</p>
+<h3 id="performance-changes-how-users-use-software">Performance changes how users use software&nbsp;<a class="anchor" href="#performance-changes-how-users-use-software"><i class="small linkify icon">	&#x1F517;&#xFE0E;</i></a> </h3>
+<p>It’s probably fairly intuitive that users prefer faster software, and will have a better experience performing a given task if the tools are faster rather than slower.</p>
+<p>What is perhaps less apparent is that having faster tools <em>changes how users use a tool or perform a task</em>. Users almost always have multiple strategies available to pursue a goal — including deciding to work on something else entirely — and they will choose to use faster tools more and more frequently. Fast tools don’t just allow users to accomplish tasks faster; they allow users to accomplish entirely new types of tasks, in entirely new ways. I’ve seen this phenomenon clearly while working on both Sorbet and Livegrep:</p>
+<p>With Sorbet, one of the primary goals of the project was to get users faster feedback about their code as they developed. Stripe has always maintained an extensive test suite with fairly high quality and code coverage, and whose run time is pretty consistently in the 10-15 minute range. While we hoped Sorbet would eliminate a few classes of tests and runtime errors, shrinking the test suite or getting additional safety in production was not a primary goal. Instead, a larger outcome we were hoping for was shrinking the feedback loop in development, and getting users actionable feedback on their code much faster than they were previously.</p>
+<p>Many individual tests at Stripe would take 10-20s or more in the development environment. Because we succeeded at building Sorbet so that it could typecheck the entire codebase in that time window, it became the fastest way many developers could get decent feedback on their code, to check for basic typos, misused APIs, and other low-hanging classes of errors. Since it was their fastest option, we saw users reaching for Sorbet as their first line of checking their code fairly early on in our development and rollout. Getting even mediocre feedback and some confidence fast was much more important than anything that would take minutes.</p>
+<p>Being fast also meant that users were (comparatively) more tolerant of false errors (Sorbet complaining about code that would not actually go wrong), as long as it was clear how to fix the error (e.g. adding a <a href="https://sorbet.org/docs/nilable-types#tmust-asserting-that-something-is-not-nil"><code>T.must</code></a>). If Sorbet had run with a similar runtime as our CI — 10 minutes or so — users would have had a very different relationship to it; it would have to provide very clear additional value on top of CI, and rarely require users to make changes only for Sorbet’s sake, since it would no longer have the advantage of providing early feedback to users.</p>
+<p>Watching users use livegrep, I’ve seen a related upside from its performance. Livegrep aims to respond to most searches inside of 100ms, corresponding to <a href="https://www.nngroup.com/articles/response-times-3-important-limits/">a well-documented threshold</a> at which a response appears “instantaneous” to most users. Because livegrep is so fast, users use it <em>interactively</em> in a way I’ve rarely seen people interact with other search engines: they enter an initial query, and then, if they get too many or too few results, they edit it based on the result list, which gets a new set of results, which they continue to refine or expand until they hit on the results they are seeking.</p>
+<p>I built livegrep to use regular expressions largely as an interesting technical challenge — on paper, a syntax- or semantics-aware search sounds better for a lot of uses of Livegrep. However, I’ve never seen a syntax-aware tool that is nearly as fast as livegrep, and I’ve come to appreciate that the interactive nature of livegrep adds additional power, since it makes it cheap to iterate and refine your searches. And the fact that most engineers have some familiarity with regular expressions already, coupled with the ability to interactively experiment and explore and see results in real-time, makes it incredibly approachable in a way that a more-complex query syntax would not be.</p>
+<h2 id="performance-needs-effort-throughout-a-projects-lifecycle">Performance needs effort throughout a project’s lifecycle&nbsp;<a class="anchor" href="#performance-needs-effort-throughout-a-projects-lifecycle"><i class="small linkify icon">	&#x1F517;&#xFE0E;</i></a> </h2>
+<p>It seems increasingly common these days to not worry about performance at all, especially in the early days of a project. One hears advice like:</p>
+<ul>
+<li>&ldquo;premature optimization is the root of all evil”</li>
+<li>“Make it work, then make it right, then make it fast.”</li>
+<li>“CPU time is always cheaper than an engineer’s time”</li>
+</ul>
+<p>You hear similar sentiments from those who argue that Ruby or Python are <a href="https://m.signalvnoise.com/ruby-has-been-fast-enough-for-13-years/">“fast enough;”</a> the idea seems to be that performance need only be an afterthought, and that code that works is far-and-away the bulk of the problem.</p>
+<p>The general prevailing philosophy I see seems to be that one should first write an application in whatever form is most expedient, and only once it works, turn to a profiler and optimize individual hot spots, maybe even rewriting individual components into faster languages or technologies.</p>
+<p>I think this may indeed be decent default advice, but I’ve also learned that it is really important to recognize its limitations, and to be able to reach for other paradigms when it matters. In particular, I’ve come to believe that the “performance last” model will rarely, if ever, produce truly fast software (and, as discussed above, I believe truly-fast software is a worthwhile target). I identify two main reasons why it doesn’t work:</p>
+<h3 id="architecture-strongly-impacts-performance">Architecture strongly impacts performance&nbsp;<a class="anchor" href="#architecture-strongly-impacts-performance"><i class="small linkify icon">	&#x1F517;&#xFE0E;</i></a> </h3>
+<p>The basic architecture of a system — the high-level structure, dataflow and organization — often has profound implications for performance. <a href="https://blog.nelhage.com/post/why-sorbet-is-fast/">As discussed last time</a>, one design decision we made in Sorbet was to only perform local type inference within methods. This decision had implications for the type system and the user experience, but also made Sorbet drastically simpler, faster, and easier to parallelize and incrementalize. This architectural decision was cheap to make up front, but would have been incredibly costly to change; the Flow team is in the middle of a <a href="https://medium.com/flow-type/what-the-flow-team-has-been-up-to-54239c62004f">multi-year refactor</a> to move Flow and Facebook’s code base to a more local-only model. <sup id="fnref:2"><a href="#fn:2" class="footnote-ref" role="doc-noteref">2</a></sup></p>
+<p>If you want to build truly performant software, you need to at least keep performance in mind as you make early design and architectural decisions, lest you paint yourself into awkward corners later on.</p>
+<h3 id="performance-isnt-just-about-hot-spots">Performance isn’t just about hot spots&nbsp;<a class="anchor" href="#performance-isnt-just-about-hot-spots"><i class="small linkify icon">	&#x1F517;&#xFE0E;</i></a> </h3>
+<p>Sorbet, like most compilers and typecheckers, has very few hot spots; time is divided relatively evenly between the tool’s major passes, and spread among the code within those passes. This diffuse profile means that it would have been virtually impossible to start with a slow typechecker and make it fast by optimizing the hot spots, since there aren’t any.</p>
+<p>Instead, a lot of the techniques I discussed last post — such as cache-optimized data structures, or writing in C++ — essentially make <em>every</em> line of code in the typechecker faster, in a way that adds up across the entire application.</p>
+<p>One of my favorite performance anecdotes is the SQLite 3.8.7 release, which was <a href="https://www.mail-archive.com/sqlite-users@mailinglists.sqlite.org/msg86235.html">50% faster than the previous release</a> in total, all by way of numerous stacked performance improvements, each gaining less than 1% individually. This example speaks to the benefit of worrying about small performance costs across the entire codebase; even if they are individually insignificant, they do add up. And while the SQLite developers were able to do this work after the fact, the more 1% regressions you can avoid in the first place, the easier this work is.</p>
+<h2 id="performant-foundations-simplify-architecture">Performant foundations simplify architecture&nbsp;<a class="anchor" href="#performant-foundations-simplify-architecture"><i class="small linkify icon">	&#x1F517;&#xFE0E;</i></a> </h2>
+<p>Another observation I’ve made is that starting with a performant core can ultimately drastically <em>simplify</em> the architecture of a software project, relative to a given level of functionality.</p>
+<p>Before we wrote Sorbet, Stripe had some internal Ruby static analysis which performed a very limited subset of the analysis implemented by Sorbet (global constant resolution). This tooling was built in Ruby on top of the <a href="https://github.com/whitequark/parser">Parser</a> gem, and was drastically slower than Sorbet, as well as being more challenging to parallelize because of Ruby’s GVL. In order to make it work, we ended up building an increasingly-complex caching solution using <code>fork</code>-based parallelization, just to keep it to an acceptable runtime. Sorbet was able to outperform this system without any caching, due to greatly superior baseline performance, and simple internal parallelism.</p>
+<p>There’s a general observation here: attempts to add performance to a slow system often add complexity, in the form of complex caching, distributed systems, or additional bookkeeping for fine-grained incremental recomputation. These features add complexity and new classes of bugs, and also add overhead and make straight-line performance even worse, further increasing the problem.</p>
+<p>When a tool is fast in the first place, these additional layers may be unnecessary to achieve acceptable overall performance, resulting in a system that is in net much simpler for a given level of performance.</p>
+<p>In the case of Sorbet, while we did make use of some caches, and while Sorbet’s <a href="https://langserver.org/">LSP server</a> has some complexity to perform incremental re-typechecking, both systems were drastically simpler than the ones in comparable typecheckers I am familiar with. We got away with this simplicity in large part because the base-case performance for Sorbet just isn’t that bad; Sorbet doesn’t have to go to extreme lengths to save work, because it’s often fast enough to just do the work instead.</p>
+<p>One specific nice property is that Sorbet’s cache format has no forward- or backwards- compatibility: Sorbet releases know their git commit sha1, and will ignore cache files generated by a different version. This decision means that the cache format can be incredibly simple and minimal, and we never have to worry about data migrations or compatibility. The downside, of course, is that our users briefly see uncached performance every time we do a release, until the new caches are populated. Since the cache only saves a few seconds, and the cold-start performance is still &lt; 20 seconds, we decided this was an acceptable tradeoff for the simplicity (and lower bug rate) it brought. In comparison, I have several friends who worked on the <a href="http://mypy-lang.org/">MyPy</a> deployment at Dropbox, where a full uncached run there could take ten minutes or more. This drastic disparity meant they were facing an entirely different calculus, and had to worry a lot harder about when and whether it was OK to invalidate caches, adding complexity to their development process which we could entirely avoid.</p>
+<p>As Stripe’s monorepo continues to grow, relying on Sorbet’s raw performance will work less and less well, and I expect Sorbet may eventually grow increasingly sophisticated caches and incremental execution; raw performance isn’t a panacea. However, <em>for a given level of scale</em>, it matters a lot, and we should not underestimate how helpful it was to be able to get to Sorbet’s level of successful deployment with a fundamentally simple design.</p>
+<h1 id="conclusion">Conclusion&nbsp;<a class="anchor" href="#conclusion"><i class="small linkify icon">	&#x1F517;&#xFE0E;</i></a> </h1>
+<p>I’ve really strongly come to believe that we underrate performance when designing and building software. We have become accustomed to casually giving up factors of two or ten or more with our choices of tools and libraries, without asking if the benefits are worth it.</p>
+<p>Software can still be fast and responsive in 2020, and it’s very often well worth it to put in that effort. What’s your favorite software tool that’s <em>surprisingly</em> fast, in a way that makes it really pleasant to work with?</p>
+<hr>
+<p>This post has been <a href="https://www.infoq.cn/article/2xBCHuSjb13UCQAISqOU">translated into Chinese</a> by InfoQ CN.</p>
+<div class="footnotes" role="doc-endnotes">
+<hr>
+<ol>
+<li id="fn:1">
+<p>This is a place, in my opinion, where the Ruby ecosystem is especially egregious. For instance, Sorbet can typecheck Stripe’s codebase from a cold start faster than Ruby can <em>load</em> it, let alone execute any code.&#160;<a href="#fnref:1" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+<li id="fn:2">
+<p>I want to be clear that I don’t criticize the Flow team for their choices. Their tool has been very successful inside and outside of Facebook, and they made the decisions they did for what I’m sure were excellent reasons at the time. And I admire their transparency in the linked blog post. I do, though, find the comparison quite illustrative about the impact of early architectural decisions.&#160;<a href="#fnref:2" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+</ol>
+</div>
+
+
+</div>
+
+    <footer>
+
+      <div class='c2a'>
+        <form
+            action="https://buttondown.email/api/emails/embed-subscribe/nelhage"
+            method="post"
+            target="popupwindow"
+            onsubmit="window.open('https://buttondown.email/nelhage', 'popupwindow')"
+            class="embeddable-buttondown-form"
+            >
+          <p>
+            <label for="bd-email">Subscribe to my newsletter (blog updates and occasional other content):</label>
+          </p>
+          <p>
+          <input type="email" name="email" placeholder="email@domain.com" id="bd-email"></input>
+          <input type="hidden" value="1" name="embed"></input>
+          <input type="submit" value="Subscribe"></input>
+          </p>
+          <p>
+            <a href="https://buttondown.email" target="_blank">Powered by Buttondown.</a>
+          </p>
+        </form>
+      </div>
+
+    <p class="meta">
+      
+        <a class="basic-alignment left" href="/post/why-sorbet-is-fast/" title="Previous Post: Why the Sorbet typechecker is fast">&laquo; Why the Sorbet typechecker is fast</a>
+      
+      
+        <a class="basic-alignment right" href="/post/computers-can-be-understood/" title="Next Post: Computers can be understood">Computers can be understood &raquo;</a>
+      
+    </p>
+  </footer>
+</article>
+</div>
+
+<hr />
+
+</div>
+</div>
+<footer role="contentinfo">
+
+  <p>
+    <a rel="license" href="http://creativecommons.org/licenses/by/4.0/">
+      <img alt="Creative Commons License"
+           width="88" height="31"
+           style="border-width:0"
+           src="https://i.creativecommons.org/l/by/4.0/88x31.png" />
+    </a>
+    <br />
+    <span xmlns:dct="http://purl.org/dc/terms/"
+    property="dct:title">Made of Bugs</span> by <a
+    xmlns:cc="http://creativecommons.org/ns#"
+    href="https://nelhage.com" property="cc:attributionName"
+    rel="cc:attributionURL">Nelson Elhage</a> is licensed under a <a
+    rel="license"
+    href="http://creativecommons.org/licenses/by/4.0/">Creative
+    Commons Attribution 4.0 International License</a>.
+  </p>
+</footer>
+<script async defer src="https://sa.nelhage.com/latest.js"></script>
+<noscript><img src="https://sa.nelhage.com/noscript.gif" alt=""/></noscript>
+
+</body>
+</html>
+

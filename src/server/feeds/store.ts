@@ -5,7 +5,9 @@ import { packText } from '../db/text-blob.ts';
 import { indexEntry } from '../search/index.ts';
 import { contentHash, normalizeUrl, type UpsertStats } from './fetch.ts';
 import { sanitizeHtml } from './sanitize.ts';
-import type { ParsedFeed } from './parse.ts';
+import { htmlToText, type ParsedFeed } from './parse.ts';
+import { MIN_FEED_CHARS } from '../extract/article.ts';
+import { estimateWordCount } from '../extract/article.ts';
 
 // 订阅源与条目的持久化。
 //
@@ -179,7 +181,7 @@ export function upsertItems(
   parsed: ParsedFeed,
   now = Date.now(),
 ): UpsertStats {
-  const stats: UpsertStats = { inserted: 0, skipped: 0, invalid: 0 };
+  const stats: UpsertStats = { inserted: 0, skipped: 0, invalid: 0, extractSkipped: 0 };
 
   const existsGuid = db.prepare('SELECT id FROM entries WHERE feed_id = ? AND guid = ?');
   const existsUrl = db.prepare('SELECT id FROM entries WHERE user_id = ? AND url_norm = ? LIMIT 1');
@@ -190,7 +192,7 @@ export function upsertItems(
                          published_at, fetched_at, excerpt, content_hash, word_count,
                          stage, source_type, site_name, favicon_url, thumbnail_url,
                          duplicate_of)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'pending','rss',?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'rss',?,?,?,?)
   `);
   const insContent = db.prepare(
     'INSERT OR REPLACE INTO entry_contents (entry_id, html, extracted_by) VALUES (?,?,?)',
@@ -217,20 +219,42 @@ export function upsertItems(
       }
 
       const id = newId('e');
-      const words = it.excerpt ? Math.round(it.excerpt.length / 2) : null;
+
+      // 正文必须清洗后再存：feed 是外部输入，直接送进
+      // dangerouslySetInnerHTML 就是存储型 XSS（见 feeds/sanitize.ts）。
+      // 清洗在这里做（而不是等提取任务），因为"feed 正文够不够长"这个
+      // 判断要看清洗后的字数，而清洗后的 HTML 也正好就是要落库的那份。
+      let cleanHtml = '';
+      if (it.html) {
+        const clean = sanitizeHtml(it.html, { baseUrl: url });
+        if (clean.html) cleanHtml = clean.html;
+      }
+      const feedChars = cleanHtml.length > 0 ? htmlToText(cleanHtml).length : 0;
+
+      // 正文太短 → 交给提取任务去抓原文（PLAN §7.5）。
+      // 够长则直接标 extracted：这一步省掉的正是每天四五百次额外请求。
+      const needExtract = feedChars < MIN_FEED_CHARS;
+      const stage = needExtract ? 'pending' : 'extracted';
+      const words = cleanHtml ? estimateWordCount(htmlToText(cleanHtml)) : null;
 
       ins.run(
         id, feed.user_id, feed.id, it.guid, url, urlNorm, it.title, it.author,
-        it.publishedAt, now, it.excerpt, hash, words,
+        it.publishedAt, now, it.excerpt, hash, words, stage,
         parsed.title ?? feed.title, feed.icon_url, it.imageUrl,
         dupHash ? dupHash.id : null,
       );
 
-      // 正文必须清洗后再存：feed 是外部输入，直接送进
-      // dangerouslySetInnerHTML 就是存储型 XSS（见 feeds/sanitize.ts）。
-      if (it.html) {
-        const clean = sanitizeHtml(it.html, { baseUrl: url });
-        if (clean.html) insContent.run(id, packText(clean.html), 'feed');
+      if (cleanHtml) insContent.run(id, packText(cleanHtml), 'feed');
+
+      if (needExtract) {
+        // dedupe_key 保证同一篇不会被重复排进队列（重复抓是纯浪费）
+        enqueue(db, {
+          kind: 'extract',
+          payload: { entryId: id },
+          dedupeKey: `extract:${id}`,
+        });
+      } else {
+        stats.extractSkipped++;
       }
 
       // 摘要进 FTS（正文不进，见 §7.3）

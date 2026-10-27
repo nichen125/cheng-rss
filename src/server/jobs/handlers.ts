@@ -72,6 +72,24 @@ export function buildHandlers(ctx: HandlerContext): Record<string, JobHandler> {
     ctx.log?.(`fetch_feed 完成`, { feedId, inserted: r.inserted, notModified: r.notModified });
   };
 
+  // ── 正文提取（PLAN §7.5）────────────────────────────────
+  //
+  // 失败一律在本函数内吃掉：extract 只有 4 个并发槽位，
+  // 一个 404 的原文重试 3 次就是 3 次白占槽位，而用户已经有 feed 正文可读。
+  // 失败原因写进 entries.stage_error，条目照常推进到 extracted。
+  handlers['extract'] = async (job, db: DatabaseSync) => {
+    const p = safeParse(job.payload);
+    const entryId = String(p.entryId ?? '');
+    if (!entryId) throw new Error('extract 缺少 entryId');
+
+    const { runExtract } = await import('../extract/run.ts');
+    const r = await runExtract(db, entryId);
+    ctx.log?.(`extract 完成`, {
+      entryId, replaced: r.replaced, skipped: r.skipped,
+      failure: r.failure ?? undefined,
+    });
+  };
+
   return handlers;
 }
 

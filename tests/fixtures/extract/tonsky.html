@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en" prefix="og: http://ogp.me/ns#" xmlns:og="http://opengraphprotocol.org/schema/">
+  <head>
+    <meta http-equiv="content-type" content="text/html;charset=UTF-8">
+    <meta name="viewport" content="width=640">
+    <meta name="theme-color" content="#FDDB29">
+    <link href="/i/favicon.png?t=1697319007" rel="icon" sizes="32x32">
+    <link href="/fonts/fonts.css?t=1713310090" rel="stylesheet" type="text/css">
+    <link href="/style.css?t=1792101836" rel="stylesheet" type="text/css">
+    <title>The Absolute Minimum Every Software Developer Must Know About Unicode in 2023 (Still No Excuses!) @ tonsky.me</title>
+    <link href="/atom.xml" rel="alternate" title="Nikita Prokopov’s blog" type="application/atom+xml">
+    <meta name="author" content="Nikita Prokopov">
+    <meta property="og:title" content="The Absolute Minimum Every Software Developer Must Know About Unicode in 2023 (Still No Excuses!)">
+    <meta property="og:url" content="https://tonsky.me/blog/unicode">
+    <meta name="twitter:title" content="The Absolute Minimum Every Software Developer Must Know About Unicode in 2023 (Still No Excuses!)">
+    <meta property="twitter:domain" content="tonsky.me">
+    <meta property="twitter:url" content="https://tonsky.me/blog/unicode">
+    <meta property="article:published_time" content="2023-10-02">
+    <meta property="og:type" content="article">
+    <meta property="og:image" content="https://dynogee.com/gen?id=niutqf5hxi7rjlw&title=The+Absolute+Minimum+Every+Software+Developer+Must+Know+About+Unicode+in+2023+%28Still+No+Excuses%21%29">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="https://dynogee.com/gen?id=awabsokfn29i8xt&title=The+Absolute+Minimum+Every+Software+Developer+Must+Know+About+Unicode+in+2023+%28Still+No+Excuses%21%29">
+    <meta property="og:description" content="Modern extension to classic 2003 article by Joel Spolsky">
+    <meta name="twitter:description" content="Modern extension to classic 2003 article by Joel Spolsky">
+    <meta property="og:site_name" content="tonsky.me">
+    <meta property="article:author" content="https://www.facebook.com/nikitonsky">
+    <meta property="profile:first_name" content="Nikita">
+    <meta property="profile:last_name" content="Prokopov">
+    <meta property="profile:username" content="tonsky">
+    <meta property="profile:gender" content="male">
+    <meta name="twitter:creator" content="@nikitonsky">
+    <script src="/script.js?t=1767837812" defer=""></script>
+  </head>
+  <body class="blog">
+    <div class="page">
+      <ul class="menu">
+        <li class="inside"><a href="/">Blog</a></li>
+        <li><a href="/projects/">Work</a></li>
+        <li><a href="/talks/">Talks</a></li>
+        <li><a href="/design/">Logos</a></li>
+        <li><a href="/about/">About</a></li>
+        <div class="spacer"></div>
+        <div class="dark_mode">
+          <div id="darkModeGlow"></div>
+        </div>
+        <div class="hamburger">
+          <input type="checkbox" id="checkbox">
+          <label for="checkbox"></label>
+          <ul>
+            <li><a href="/sign-in/">Sign In</a></li>
+            <li><a href="/personal-information/">Personal Information</a></li>
+            <li><a href="/user-agreement/">User Agreement</a></li>
+          </ul>
+        </div>
+      </ul>
+      <article class="content">
+        <h1 class="title">The Absolute Minimum Every Software Developer Must Know About Unicode in 2023 (Still No Excuses!)</h1>
+        <p><em>Translations: <a href="https://blog.xinshijiededa.men/unicode/" target="_blank">Chinese</a> <a href="https://www.outofpluto.com/blog/nikita-prokopov-must-read-article-about-utf-8/" target="_blank">French</a> <a href="https://teblo.de/unicode/" target="_blank">German</a> <a href="https://habr.com/ru/companies/wunderfund/articles/777850/" target="_blank">Russian</a> <a href="es/">Spanish</a></em></p>
+        <p>Twenty years ago, <a href="https://www.joelonsoftware.com/2003/10/08/the-absolute-minimum-every-software-developer-absolutely-positively-must-know-about-unicode-and-character-sets-no-excuses/" target="_blank">Joel Spolsky wrote</a>:</p>
+        <blockquote>
+          <p>There Ain’t No Such Thing As Plain Text.</p>
+          <p>It does not make sense to have a string without knowing what encoding it uses. You can no longer stick your head in the sand and pretend that “plain” text is ASCII.</p>
+        </blockquote>
+        <p>A lot has changed in 20 years. In 2003, the main question was: what encoding is this?</p>
+        <p>In 2023, it’s no longer a question: with a 98% probability, it’s UTF-8. Finally! We can stick our heads in the sand again!</p>
+        <figure>
+<img src="utf8_trend@2x.png?t=1696023686" loading="lazy" style="aspect-ratio: 1024/452; " width="1024" height="452">        </figure>
+        <p>The question now becomes: how do we use UTF-8 correctly? Let’s see!</p>
+        <h1 id="what-is-unicode">What is Unicode?</h1>
+        <p>Unicode is a standard that aims to unify all human languages, both past and present, and make them work with computers.</p>
+        <p>In practice, Unicode is a table that assigns unique numbers to different characters. </p>
+        <p>For example:</p>
+        <ul>
+          <li>The Latin letter <code>A</code> is assigned the number <code>65</code>.</li>
+          <li>The Arabic Letter Seen <code>س</code> is <code>1587</code>.</li>
+          <li>The Katakana Letter Tu <code>ツ</code> is <code>12484</code></li>
+          <li>The Musical Symbol G Clef <code>𝄞</code> is <code>119070</code>.</li>
+          <li><code class="emoji">💩</code> is <code>128169</code>.</li>
+        </ul>
+        <p>Unicode refers to these numbers as <em>code points</em>.</p>
+        <p>Since everybody in the world agrees on which numbers correspond to which characters, and we all agree to use Unicode, we can read each other’s texts.</p>
+        <p class="loud">Unicode == character ⟷ code point.</p>
+        <h1 id="how-big-is-unicode">How big is Unicode?</h1>
+        <p>Currently, the largest defined code point is 0x10FFFF. That gives us a space of about 1.1 million code points.</p>
+        <p>About 170,000, or 15%, are currently defined. An additional 11% are reserved for private use. The rest, about 800,000 code points, are not allocated at the moment. They could become characters in the future.</p>
+        <p>Here’s roughly how it looks:</p>
+        <figure>
+<img src="overview@2x.png?t=1696253886" loading="lazy" style="aspect-ratio: 835/725; " width="835" height="725">        </figure>
+        <p>Large square == plane == 65,536 characters. Small one == 256 characters. The entire ASCII is half of a small red square in the top left corner.</p>
+        <h1 id="whats-private-use">What’s Private Use?</h1>
+        <p>These are code points reserved for app developers and will never be defined by Unicode itself.</p>
+        <p>For example, there’s no place for the Apple logo in Unicode, so Apple puts it at <code>U+F8FF</code> which is within the Private Use block. In any other font, it’ll render as missing glyph <code>􀣺</code>, but in fonts that ship with macOS, you’ll see <img class="inline" src="apple-logo@2x.png?t=1695591116" style="aspect-ratio: 24/24; " width="24" height="24">.</p>
+        <p>The Private Use Area is mostly used by icon fonts:</p>
+        <figure>
+<img src="nerd_font@2x.png?t=1695726809" loading="lazy" style="aspect-ratio: 584/268; " width="584" height="268"><figcaption>Isn’t it a beauty? It’s all text!</figcaption>        </figure>
+        <h1 id="what-does-u1f4a9-mean">What does <code>U+1F4A9</code> mean?</h1>
+        <p>It’s a convention for how to write code point values. The prefix <code>U+</code> means, well, Unicode, and <code>1F4A9</code> is a code point number in hexadecimal.</p>
+        <p>Oh, and <code>U+1F4A9</code> specifically is <code class="emoji">💩</code>.</p>
+        <h1 id="whats-utf-8-then">What’s UTF-8 then?</h1>
+        <p>UTF-8 is an encoding. Encoding is how we store code points in memory.</p>
+        <p>The simplest possible encoding for Unicode is UTF-32. It simply stores code points as 32-bit integers. So <code>U+1F4A9</code> becomes <code>00 01 F4 A9</code>, taking up four bytes. Any other code point in UTF-32 will also occupy four bytes. Since the highest defined code point is <code>U+10FFFF</code>, any code point is guaranteed to fit.</p>
+        <p>UTF-16 and UTF-8 are less straightforward, but the ultimate goal is the same: to take a code point and encode it as bytes.</p>
+        <p>Encoding is what you’ll actually deal with as a programmer.</p>
+        <h1 id="how-many-bytes-are-in-utf-8">How many bytes are in UTF-8?</h1>
+        <p>UTF-8 is a variable-length encoding. A code point might be encoded as a sequence of one to four bytes.</p>
+        <p>This is how it works:</p>
+<table>
+  <thead>
+    <tr>
+      <th>Code point</th>
+      <th>Byte 1</th>
+      <th>Byte 2</th>
+      <th>Byte 3</th>
+      <th>Byte 4</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>U+<code>0000</code>..<code>007F</code></td>
+      <td><code>0xxxxxxx</code></td>
+    </tr>
+    <tr>
+      <td>U+<code>0080</code>..<code>07FF</code></td>
+      <td><code>110xxxxx</code></td>
+      <td><code>10xxxxxx</code></td>
+    </tr>
+    <tr>
+      <td>U+<code>0800</code>..<code>FFFF</code></td>
+      <td><code>1110xxxx</code></td>
+      <td><code>10xxxxxx</code></td>
+      <td><code>10xxxxxx</code></td>
+    </tr>
+    <tr>
+      <td>U+<code>10000</code>..<code>10FFFF</code></td>
+      <td><code>11110xxx</code></td>
+      <td><code>10xxxxxx</code></td>
+      <td><code>10xxxxxx</code></td>
+      <td><code>10xxxxxx</code></td>
+    </tr>
+  </tbody>
+</table>        <p>If you combine this with the Unicode table, you’ll see that English is encoded with 1 byte, Cyrillic, Latin European languages, Hebrew and Arabic need 2, and Chinese, Japanese, Korean, other Asian languages, and Emoji need 3 or 4.</p>
+        <p>A few important points here:</p>
+        <p>First, UTF-8 is byte-compatible with ASCII. The code points 0..127, the former ASCII, are encoded with one byte, and it’s the same exact byte. <code>U+0041</code> (<code>A</code>, Latin Capital Letter A) is just <code>41</code>, one byte.</p>
+        <p>Any pure ASCII text is also a valid UTF-8 text, and any UTF-8 text that only uses codepoints 0..127 can be read as ASCII directly.</p>
+        <p>Second, UTF-8 is space-efficient for basic Latin. That was one of its main selling points over UTF-16. It might not be fair for texts all over the world, but for technical strings like HTML tags or JSON keys, it makes sense.</p>
+        <p>On average, UTF-8 tends to be a pretty good deal, even for non-English computers. And for English, there’s no comparison.</p>
+        <p>Third, UTF-8 has error detection and recovery built-in. The first byte’s prefix always looks different from bytes 2-4. This way you can always tell if you are looking at a complete and valid sequence of UTF-8 bytes or if something is missing (for example, you jumped it the middle of the sequence). Then you can correct that by moving forward or backward until you find the beginning of the correct sequence.</p>
+        <p>And a couple of important consequences:</p>
+        <ul>
+          <li>You CAN’T determine the length of the string by counting bytes.</li>
+          <li>You CAN’T randomly jump into the middle of the string and start reading.</li>
+          <li>You CAN’T get a substring by cutting at arbitrary byte offsets. You might cut off part of the character.</li>
+        </ul>
+        <p>Those who do will eventually meet this bad boy: �</p>
+        <h1 id="whats-">What’s �?</h1>
+        <p><code>U+FFFD</code>, the Replacement Character, is simply another code point in the Unicode table. Apps and libraries can use it when they detect Unicode errors.</p>
+        <p>If you cut half of the code point off, there’s not much left to do with the other half, except displaying an error. That’s when � is used.</p>
+        <pre><code>var bytes = &quot;Аналитика&quot;.getBytes(&quot;UTF-8&quot;);
+var partial = Arrays.copyOfRange(bytes, 0, 11);
+new String(partial, &quot;UTF-8&quot;); // =&gt; &quot;Анал�&quot;</code></pre>
+        <h1 id="wouldnt-utf-32-be-easier-for-everything">Wouldn’t UTF-32 be easier for everything?</h1>
+        <p>NO.</p>
+        <p>UTF-32 is great for operating on code points. Indeed, if every code point is always 4 bytes, then <code>strlen(s) == sizeof(s) / 4</code>, <code>substring(0, 3) == bytes[0, 12]</code>, etc.</p>
+        <p>The problem is, you don’t want to operate on code points. A code point is not a unit of writing; one code point is not always a single character. What you should be iterating on is called “<strong>extended grapheme clusters</strong>”, or graphemes for short.</p>
+        <p>A grapheme is a minimally distinctive unit of writing in the context of a particular writing system. <code>ö</code> is one grapheme. <code>é</code> is one too. And <code>각</code>. Basically, grapheme is what the user thinks of as a single character.</p>
+        <p>The problem is, in Unicode, some graphemes are encoded with multiple code points!</p>
+        <figure>
+<img src="graphemes@2x.png?t=1696076481" loading="lazy" style="aspect-ratio: 600/340; " width="600" height="340">        </figure>
+        <p>For example, <code>é</code> (a single grapheme) is encoded in Unicode as <code>e</code> (U+0065 Latin Small Letter E) + <code>´</code> (U+0301 Combining Acute Accent). Two code points!</p>
+        <p>It can also be more than two:</p>
+        <ul>
+          <li><code class="emoji">☹️</code> is <code>U+2639</code> + <code>U+FE0F</code></li>
+          <li><code class="emoji">👨‍🏭</code> is <code>U+1F468</code> + <code>U+200D</code> + <code>U+1F3ED</code></li>
+          <li><code class="emoji">🚵🏻‍♀️</code> is <code>U+1F6B5</code> + <code>U+1F3FB</code> + <code>U+200D</code> + <code>U+2640</code> + <code>U+FE0F</code></li>
+          <li><code style="font-family: unset">y̖̠͍̘͇͗̏̽̎͞</code> is <code>U+0079</code> + <code>U+0316</code> + <code>U+0320</code> + <code>U+034D</code> + <code>U+0318</code> + <code>U+0347</code> + <code>U+0357</code> + <code>U+030F</code> + <code>U+033D</code> + <code>U+030E</code> + <code>U+035E</code></li>
+        </ul>
+        <p>There’s no limit, as far as I know.</p>
+        <p>Remember, we are talking about code points here. Even in the widest encoding, UTF-32, <code class="emoji">👨‍🏭</code> will still take three 4-byte units to encode. And it still needs to be treated as a single character.</p>
+        <p>If the analogy helps, we can think of the Unicode itself (without any encodings) as being variable-length.</p>
+        <p class="loud">An Extended Grapheme Cluster is a sequence of one or more Unicode code points that must be treated as a single, unbreakable character.</p>
+        <p>Therefore, we get all the problems we have with variable-length encodings, but now on code point level: you can’t take only a part of the sequence, it always should be selected, copied, edited, or deleted as a whole.</p>
+        <p>Failure to respect grapheme clusters leads to bugs like this:</p>
+        <figure>
+<img src="error1.png?t=1695591116" loading="lazy" style="aspect-ratio: 680/180; " width="680" height="180">        </figure>
+        <p>or this:</p>
+        <figure>
+          <video autoplay="" muted="" loop="" preload="auto" playsinline="" controls="" width="600" height="201">
+            <source src="intellij@2x.mp4?t=1695726809" type="video/mp4">
+          </video>
+<figcaption>Just to be clear: this is NOT correct behavior</figcaption>        </figure>
+        <p>Using UTF-32 instead of UTF-8 will not make your life any easier in regards to extended grapheme clusters. And extended grapheme clusters is what you should care about.</p>
+        <p class="loud">Code points — 🥱. Graphemes — 😍</p>
+        <h1 id="is-unicode-hard-only-because-of-emojis">Is Unicode hard only because of emojis?</h1>
+        <p>Not really. Extended Grapheme Clusters are also used for alive, actively used languages. For example:</p>
+        <ul>
+          <li><code>ö</code> (German) is a single character, but multiple code points (<code>U+006F U+0308</code>).</li>
+          <li><code>ą́</code> (Lithuanian) is <code>U+00E1 U+0328</code>.</li>
+          <li><code>각</code> (Korean) is <code>U+1100 U+1161 U+11A8</code>.</li>
+        </ul>
+        <p>So no, it’s not just about emojis.</p>
+        <h1 id="whats-length">What’s &quot;🤦🏼‍♂️&quot;.length?</h1>
+        <p>The question is inspired by <a href="https://hsivonen.fi/string-length/" target="_blank">this brilliant article</a>.</p>
+        <p>Different programming languages will happily give you different answers.</p>
+        <p>Python 3:</p>
+        <pre><code>&gt;&gt;&gt; len(&quot;🤦🏼‍♂️&quot;)
+5</code></pre>
+        <p>JavaScript / Java / C#:</p>
+        <pre><code>&gt;&gt; &quot;🤦🏼‍♂️&quot;.length 
+7</code></pre>
+        <p>Rust:</p>
+        <pre><code>println!(&quot;{}&quot;, &quot;🤦🏼‍♂️&quot;.len());
+// =&gt; 17</code></pre>
+        <p>As you can guess, different languages use different internal string representations (UTF-32, UTF-16, UTF-8) and report length in whatever units they store characters in (ints, shorts, bytes).</p>
+        <p>BUT! If you ask any normal person, one that isn’t burdened with computer internals, they’ll give you a straight answer: 1. The length of <code class="emoji">🤦🏼‍♂️</code> string is 1.</p>
+        <p>That’s what extended grapheme clusters are all about: what <em>humans</em> perceive as a single character. And in this case, <code class="emoji">🤦🏼‍♂️</code> is undoubtedly a single character.</p>
+        <p>The fact that <code class="emoji">🤦🏼‍♂️</code> consists of 5 code points (<code>U+1F926 U+1F3FB U+200D U+2642 U+FE0F</code>) is mere implementation detail. It should not be broken apart, it should not be counted as multiple characters, the text cursor should not be positioned inside it, it shouldn’t be partially selected, etc.</p>
+        <p>For all intents and purposes, this is an atomic unit of text. Internally, it could be encoded whatever, but for user-facing API, it should be treated as a whole.</p>
+        <p>The only two modern languages that get it right are Swift:</p>
+        <pre><code>print(&quot;🤦🏼‍♂️&quot;.count)
+// =&gt; 1</code></pre>
+        <p>and Elixir:</p>
+        <pre><code>String.length(&quot;🤦🏼‍♂️&quot;)
+// =&gt; 1</code></pre>
+        <p>Basically, there are two layers:</p>
+        <ol start="1">
+          <li>Internal, computer-oriented. How to copy strings, send them over the network, store on disk, etc. This is where you need encodings like UTF-8. Swift uses UTF-8 internally, but it might as well be UTF-16 or UTF-32. What&#x27;s important is that you only use it to copy strings as a whole and never to analyze their content.</li>
+          <li>External, human-facing API. Character count in UI. Taking first 10 characters to generate preview. Searching in text. Methods like <code>.count</code> or <code>.substring</code>. Swift gives you <em>a view</em> that pretends the string is a sequence of grapheme clusters. And that view behaves like any human would expect: it gives you 1 for <code>&quot;🤦🏼‍♂️&quot;.count</code>.</li>
+        </ol>
+        <p>I hope more languages adopt this design soon.</p>
+        <p>Question to the reader: what to you think <code style="font-family: unset">"ẇ͓̞͒͟͡ǫ̠̠̉̏͠͡ͅr̬̺͚̍͛̔͒͢d̠͎̗̳͇͆̋̊͂͐".length</code> should be?</p>
+        <h1 id="how-do-i-detect-extended-grapheme-clusters-then">How do I detect extended grapheme clusters then?</h1>
+        <p>Unfortunately, most languages choose the easy way out and let you iterate through strings with 1-2-4-byte chunks, but not with grapheme clusters.</p>
+        <p>It makes no sense and has no semantics, but since it’s the default, programmers don’t think twice, and we see corrupted strings as the result:</p>
+        <figure>
+<img src="stdlib@2x.png?t=1695941450" loading="lazy" style="aspect-ratio: 600/180; " width="600" height="180">        </figure>
+        <p>“I know, I’ll use a library to do strlen()!” — nobody, ever.</p>
+        <p>But that’s exactly what you should be doing! Use a proper Unicode library! Yes, for basic stuff like <code>strlen</code> or <code>indexOf</code> or <code>substring</code>!</p>
+        <p>For example:</p>
+        <ol start="1">
+          <li>C/C++/Java: use <a href="https://github.com/unicode-org/icu" target="_blank">ICU</a>. It’s a library from Unicode itself that encodes all the rules about text segmentation.</li>
+          <li>C#: use <code>TextElementEnumerator</code>, which is kept up to date with Unicode as far as I can tell.</li>
+          <li>Swift: just stdlib. Swift does the right thing by default.</li>
+          <li>UPD: Erlang/Elixir seem to be doing the right thing, too.</li>
+          <li>For other languages, there’s probably a library or binding for ICU.</li>
+          <li>Roll your own. Unicode <a href="https://www.unicode.org/reports/tr29/#Grapheme_Cluster_Boundaries" target="_blank">publishes</a> rules and tables in a machine-readable format, and all the libraries above are based on them.</li>
+        </ol>
+        <p>But whatever you choose, make sure it’s on the recent enough version of Unicode (15.1 at the moment of writing), because the definition of graphemes changes from version to version. For example, Java’s <code>java.text.BreakIterator</code> is a no-go: it’s based on a very old version of Unicode and not updated.</p>
+        <p class="loud">Use a library</p>
+        <p>IMO, the whole situation is a shame. Unicode should be in the stdlib of every language by default. It’s the lingua franca of the internet! It’s not even new: we’ve been living with Unicode for 20 years now.</p>
+        <h1 id="wait-rules-are-changing">Wait, rules are changing?</h1>
+        <p>Yes! Ain’t it cool?</p>
+        <p>(I know, it ain’t)</p>
+        <p>Starting roughly in 2014, Unicode has been releasing a major revision of their standard every year. This is where you get your new emojis from — Android and iOS updates in the Fall usually include the newest Unicode standard among other things.</p>
+        <figure>
+<img src="versions@2x.png?t=1695941450" loading="lazy" style="aspect-ratio: 300/620; " width="300" height="620">        </figure>
+        <p>What’s sad for us is that the rules defining grapheme clusters change every year as well. What is considered a sequence of two or three separate code points today might become a grapheme cluster tomorrow! There’s no way to know! Or prepare!</p>
+        <p>Even worse, different versions of your own app might be running on different Unicode standards and report different string lengths!</p>
+        <p>But that’s the reality we live in. You don’t really have a choice here. You can’t ignore Unicode or Unicode updates if you want to stay relevant and provide a decent user experience. So, buckle up, embrace, and update.</p>
+        <p class="loud">Update yearly</p>
+        <h1 id="why-is-a----">Why is &quot;Å&quot; !== &quot;Å&quot; !== &quot;Å&quot;?</h1>
+        <figure>
+<img src="spider_men@2x.jpg?t=1696023686" loading="lazy" style="aspect-ratio: 600/300; " width="600" height="300">        </figure>
+        <p>Copy any of these to your JavaScript console:</p>
+        <pre><code>&quot;Å&quot; === &quot;Å&quot;
+&quot;Å&quot; === &quot;Å&quot;
+&quot;Å&quot; === &quot;Å&quot;</code></pre>
+        <p>What do you get? False? You should get false, and it’s not a mistake.</p>
+        <p>Remember earlier when I said that <code>ö</code> is two code points, <code>U+006F U+0308</code>? Basically, Unicode offers more than one way to write characters like <code>ö</code> or <code>Å</code>. You can:</p>
+        <ol start="1">
+          <li>Compose <code>Å</code> from normal Latin <code>A</code> + a combining character,</li>
+          <li>OR there’s also a pre-composed code point <code>U+00C5</code> that does that for you.</li>
+        </ol>
+        <p>They will look the same (<code>Å</code> vs <code>Å</code>), they should work the same, and for all intents and purposes, they are considered exactly the same. The only difference is the byte representation.</p>
+        <p>That’s why we need normalization. There are four forms:</p>
+        <p><strong>NFD</strong> tries to explode everything to the smallest possible pieces, and also sorts pieces in a canonical order if there is more than one.</p>
+        <p><strong>NFC</strong>, on the other hand, tries to combine everything into pre-composed form if one exists.</p>
+        <figure>
+<img src="normalization@2x.png?t=1696023686" loading="lazy" style="aspect-ratio: 600/300; " width="600" height="300">        </figure>
+        <p>For some characters there are also multiple versions of them in Unicode. For example, there’s <code>U+00C5 Latin Capital Letter A with Ring Above</code>, but there’s also <code>U+212B Angstrom Sign</code> which looks the same. </p>
+        <p>These are also replaced during normalization:</p>
+        <figure>
+<img src="normalization_clones@2x.png?t=1696023686" loading="lazy" style="aspect-ratio: 600/180; " width="600" height="180">        </figure>
+        <p>NFD and NFC are called “canonical normalization”. Another two forms are “compatibility normalization”:</p>
+        <p><strong>NFKD</strong> tries to explode everything and replaces visual variants with default ones.</p>
+        <p><strong>NFKC</strong> tries to combine everything while replacing visual variants with default ones.</p>
+        <figure>
+<img src="normalization_compat@2x.png?t=1695997312" loading="lazy" style="aspect-ratio: 600/400; " width="600" height="400">        </figure>
+        <p>Visual variants are separate Unicode code points that represent the same character but are supposed to render differently. Like, <code>①</code> or <code>⁹</code> or <code>𝕏</code>. We want to be able to find both <code>&quot;x&quot;</code> and <code>&quot;2&quot;</code> in a string like <code>&quot;𝕏²&quot;</code>, don’t we?</p>
+        <figure>
+<img src="x_variants@2x.png?t=1695997312" loading="lazy" style="aspect-ratio: 438/185; " width="438" height="185"><figcaption>All of these have their own code points, but they are also all Xs</figcaption>        </figure>
+        <p>Why does the <code>ﬁ</code> ligature even have its own code point? No idea. A lot can happen in a million characters.</p>
+        <p class="loud">Before comparing strings or searching for a substring, normalize!</p>
+        <h1 id="unicode-is-locale-dependent">Unicode is locale-dependent</h1>
+        <p>The Russian name Nikolay is written like this:</p>
+        <figure>
+<img src="nikolay_ru.png?t=1695989399" loading="lazy" style="aspect-ratio: 600/150; " width="600" height="150">        </figure>
+        <p>and encoded in Unicode as <code>U+041D 0438 043A 043E 043B 0430 0439</code>.</p>
+        <p>The Bulgarian name Nikolay is written:</p>
+        <figure>
+<img src="nikolay_bg.png?t=1695989399" loading="lazy" style="aspect-ratio: 600/150; " width="600" height="150">        </figure>
+        <p>and encoded in Unicode as <code>U+041D 0438 043A 043E 043B 0430 0439</code>. Exactly the same!</p>
+        <p>Wait a second! How does the computer know when to render Bulgarian-style glyphs and when to use Russian ones?</p>
+        <p>Short answer: it doesn’t. Unfortunately, Unicode is not a perfect system, and it has many shortcomings. Among them is assigning the same code point to glyphs that are supposed to look differently, like Cyrillic Lowercase K and Bulgarian Lowercase K (both are <code>U+043A</code>).</p>
+        <p>From what I understand, Asian people <a href="https://en.wikipedia.org/wiki/Han_unification" target="_blank">get it much worse</a>: many Chinese, Japanese, and Korean logograms that are written very differently get assigned the same code point:</p>
+        <figure>
+<img src="han.png?t=1695989399" loading="lazy" style="aspect-ratio: 600/149; " width="600" height="149"><figcaption>U+8FD4 in different locales</figcaption>        </figure>
+        <p>Unicode motivation is to save code points space (my guess). Information on how to render is supposed to be transferred outside of the string, as locale/language metadata.</p>
+        <p>Unfortunately, it fails the original goal of Unicode:</p>
+        <blockquote>
+          <p>[...] no escape sequence or control code is required to specify any character in any language.</p>
+        </blockquote>
+        <p>In practice, dependency on locale brings a lot of problems:</p>
+        <ol start="1">
+          <li>Being metadata, locale often gets lost.</li>
+          <li>People are not limited to a single locale. For example, I can read and write English (USA), English (UK), German, and Russian. Which locale should I set my computer to?</li>
+          <li>It’s hard to mix and match. Like Russian names in Bulgarian text or vice versa. Why not? It’s the internet, people from all cultures hang out here.</li>
+          <li>There’s no place to specify the locale. Even making the two screenshots above was non-trivial because in most software, there’s no dropdown or text input to change locale.</li>
+          <li>When needed, it had to be guessed. For example, Twitter tries to guess the locale from the text of the tweet itself (because where else could it get it from?) and sometimes gets it wrong:</li>
+        </ol>
+        <figure>
+<a href="https://twitter.com/nikitonsky/status/1171115067112398849" target="_blank"><img src="twitter_locale.jpg?t=1695989399" loading="lazy" style="aspect-ratio: 597/422; " width="597" height="422"></a>        </figure>
+        <h1 id="why-does-stringtolowercase-accepts-locale-as-an-argument">Why does <code>String::toLowerCase()</code> accepts Locale as an argument?</h1>
+        <p>Another unfortunate example of locale dependence is the Unicode handling of dotless <code>i</code> in the Turkish language.</p>
+        <p>Unlike English, Turks have two <code>I</code> variants: dotted and dotless. Unicode decided to reuse <code>I</code> and <code>i</code> from ASCII and only add two new code points: <code>İ</code> and <code>ı</code>.</p>
+        <p>Unfortunately, that made <code>toLowerCase</code>/<code>toUpperCase</code> behave differently on the same input:</p>
+        <pre><code>var en_US = Locale.of(&quot;en&quot;, &quot;US&quot;);
+var tr = Locale.of(&quot;tr&quot;);
+
+&quot;I&quot;.toLowerCase(en_US); // =&gt; &quot;i&quot;
+&quot;I&quot;.toLowerCase(tr);    // =&gt; &quot;ı&quot;
+
+&quot;i&quot;.toUpperCase(en_US); // =&gt; &quot;I&quot;
+&quot;i&quot;.toUpperCase(tr);    // =&gt; &quot;İ&quot;</code></pre>
+        <p>So no, you can’t convert string to lowercase without knowing what language that string is written in.</p>
+        <h1 id="i-live-in-the-usuk-should-i-even-care">I live in the US/UK, should I even care?</h1>
+        <figure>
+<img src="english@2x.png?t=1696023686" loading="lazy" style="aspect-ratio: 600/67; " width="600" height="67">        </figure>
+        <ul>
+          <li>quotation marks <code>“</code> <code>”</code> <code>‘</code> <code>’</code>, </li>
+          <li>apostrophe <code>’</code>,</li>
+          <li>dashes <code>–</code> <code>—</code>,</li>
+          <li>different variations of spaces (figure, hair, non-breaking),</li>
+          <li>bullets <code>•</code> <code>■</code> <code>☞</code>,</li>
+          <li>currency symbols other than the <code>$</code> (kind of tells you who invented computers, doesn’t it?): <code>€</code> <code>¢</code> <code>£</code>,</li>
+          <li>mathematical signs—plus <code>+</code> and equals <code>=</code> are part of ASCII, but minus <code>−</code> and multiply <code>×</code> are not <nobr>¯\_(ツ)_/¯</nobr>,</li>
+          <li>various other signs <code>©</code> <code>™</code> <code>¶</code> <code>†</code> <code>§</code>.</li>
+        </ul>
+        <p>Hell, you can’t even spell <code>café</code>, <code>piñata</code>, or <code>naïve</code> without Unicode. So yes, we are all in it together, even Americans.</p>
+        <p>Touché.</p>
+        <h1 id="what-are-surrogate-pairs">What are surrogate pairs?</h1>
+        <p>That goes back to Unicode v1. The first version of Unicode was supposed to be fixed-width. A 16-bit fixed width, to be exact:</p>
+        <figure>
+<img src="unicode1@2x.png?t=1695941450" loading="lazy" style="aspect-ratio: 700/465; " width="700" height="465"><figcaption>Version 1.0 of the Unicode Standard, October 1991</figcaption>        </figure>
+        <p>They believed 65,536 characters would be enough for all human languages. They were almost right!</p>
+        <p>When they realized they needed more code points, UCS-2 (an original version of UTF-16 without surrogates) was already used in many systems. 16 bit, fixed-width, it only gives you 65,536 characters. What can you do?</p>
+        <p>Unicode decided to allocate some of these 65,536 characters to encode higher code points, essentially converting fixed-width UCS-2 into variable-width UTF-16.</p>
+        <p>A surrogate pair is two UTF-16 units used to encode a single Unicode code point. For example, <code>D83D DCA9</code> (two 16-bit units) encodes <em>one</em> code point, <code>U+1F4A9</code>.</p>
+        <p>The top 6 bits in surrogate pairs are used for the mask, leaving 2×10 free bits to spare:</p>
+        <pre><code>   High Surrogate          Low Surrogate
+        D800        ++          DC00
+1101 10?? ???? ???? ++ 1101 11?? ???? ????</code></pre>
+        <p>Technically, both halves of the surrogate pair can be seen as Unicode code points, too. In practice, the whole range from <code>U+D800</code> to <code>U+DFFF</code> is allocated as “for surrogate pairs only”. Code points from there are not even considered valid in any other encodings.</p>
+        <figure>
+<img src="bmp@2x.png?t=1695941450" loading="lazy" style="aspect-ratio: 556/373; " width="556" height="373"><figcaption>This space on a very crammed Basic Multilingual Plane will never be used for anything good ever again</figcaption>        </figure>
+        <h1 id="is-utf-16-still-alive">Is UTF-16 still alive?</h1>
+        <p>Yes!</p>
+        <p>The promise of a fixed-width encoding that covers all human languages was so compelling that many systems were eager to adopt it. Among them were Microsoft Windows, Objective-C, Java, JavaScript, .NET, Python 2, QT, SMS, and CD-ROM!</p>
+        <p>Since then, Python has moved on, CD-ROM has become obsolete, but the rest is stuck with UTF-16 or even UCS-2. So UTF-16 lives there as in-memory representation.</p>
+        <p>In practical terms today, UTF-16 has roughly the same usability as UTF-8. It’s also variable-length; counting UTF-16 units is as useless as counting bytes or code points, grapheme clusters are still a pain, etc. The only difference is memory requirements.</p>
+        <p>The only downside of UTF-16 is that everything else is UTF-8, so it requires conversion every time a string is read from the network or from disk.</p>
+        <p>Also, fun fact: the number of planes Unicode has (17) is defined by how much you can express with surrogate pairs in UTF-16.</p>
+        <h1 id="conclusion">Conclusion</h1>
+        <p>To sum it up:</p>
+        <ul>
+          <li>Unicode has won.</li>
+          <li>UTF-8 is the most popular encoding for data in transfer and at rest.</li>
+          <li>UTF-16 is still sometimes used as an in-memory representation.</li>
+          <li>The two most important views for strings are bytes (allocate memory/copy/encode/decode) and extended grapheme clusters (all semantic operations).</li>
+          <li>Using code points for iterating over a string is wrong. They are not the basic unit of writing. One grapheme could consist of multiple code points.</li>
+          <li>To detect grapheme boundaries, you need Unicode tables.</li>
+          <li>Use a Unicode library for everything Unicode, even boring stuff like <code>strlen</code>, <code>indexOf</code> and <code>substring</code>.</li>
+          <li>Unicode updates every year, and rules sometimes change.</li>
+          <li>Unicode strings need to be normalized before they can be compared.</li>
+          <li>Unicode depends on locale for some operations and for rendering.</li>
+          <li>All this is important even for pure English text.</li>
+        </ul>
+        <p>Overall, yes, Unicode is not perfect, but the fact that</p>
+        <ol start="1">
+          <li>an encoding exists that covers all possible languages at once,</li>
+          <li>the entire world agrees to use it,</li>
+          <li>we can completely forget about encodings and conversions and all that stuff</li>
+        </ol>
+        <p>is a miracle. Send this to your fellow programmers so they can learn about it, too.</p>
+        <p class="loud">There’s such a thing as plain text, and it’s encoded with UTF-8.</p>
+        <p>Thanks Lev Walkin and my patrons for reading early drafts of this article.</p>
+        <p class="footer"><span>October 2, 2023</span><span class="separator">·</span><span>Discuss on</span> <a href="https://news.ycombinator.com/item?id=37735801" target="_blank">Hacker News</a> <a href="https://lobste.rs/s/bkavdb/unicode_overview" target="_blank">Lobsters</a></p>
+      </article>
+      <div class="about">
+        <div class="about_photo"></div>
+        <div class="about_inner">
+          <p>Hi!</p>
+          <p>I’m Niki. Here I write about programming and UI design <a href="/subscribe/" class="btn-action">Subscribe</a></p>
+          <p>I consult on all things Clojure: web, backend, Datomic, DataScript, performance, etc. Check out my <a action="_blank" href="https://github.com/tonsky" class="btn-action" target="_blank">Github</a> and get in touch <a href="mailto:niki@tonsky.me" class="btn-action">niki@tonsky.me</a></p>
+        </div>
+      </div>
+    </div>
+<img src="/i/flashlight.webp?t=1735225375" id="flashlight" style="aspect-ratio: 250/250; " width="250" height="250">  </body>
+</html>

@@ -293,6 +293,46 @@ Enter/Space）手工补回来。
 字母键在输入框里全部失效（否则打字会触发跳页）；带 Ctrl/Cmd/Alt 的组合键也
 不参与（否则 `Ctrl+V` 会被当成"打开原文"）。
 
+## 正文提取
+
+很多源的 feed 只给一段导语，点开阅读区只有两行字 —— 用户会以为这个源质量差，
+实际是我们没去抓原文。抓与不抓的规则只有一条：
+
+```
+feed 正文（去标签后的字数） < 500  →  抓原文跑 Readability
+否则                              →  直接用 feed 正文
+```
+
+不无条件抓的理由是算术：50 个源 × 每天 500 条 = 每天 500 次额外请求，而其中
+大多数 feed 本来就带全文。抓了只是把网页原样抄一遍，还多一份对方站点的日志。
+
+| 情况 | 结果 |
+|---|---|
+| feed 正文够长 | `extracted_by=feed`，一次网络请求都不发 |
+| 只有摘要 + 原文可抓 | 抓原文 → Readability → 清洗 → `extracted_by=readability` |
+| 原文 404 / 超时 / 是 PDF | 保留 feed 正文，原因写进 `stage_error`，约概不重试 |
+| 提出了但内容不比 feed 多 | 保留 feed 正文（`no-improvement`），不塞一段错内容 |
+
+**失败不重试**是刻意的：`extract` 只有 4 个并发槽位，为一个 404 重试 3 次就是
+3 次白占槽位，而用户已经有可读的 feed 正文。条目的 `stage` 照常推进到
+`extracted`，不会卡在 `pending`。
+
+"提出了但不够多"的门槛是 `max(500, feed 字数 × 1.2)`。1.2 倍余量是因为
+Readability 会剥掉导航、作者栏、相关阅读，字符数略少于页面是正常的；但若比
+feed 正文还短，说明它抓错了节点（页面里有多个 `<article>` 时很常见）。
+
+实测（真实页面，Node 24.13 / Windows x64）：
+
+| 站点 | 页面体积 | 耗时 | 提取字数 / 语义容器字数 |
+|---|---|---|---|
+| jvns.ca | 31 KB | 50 ms | 0.93 |
+| simonwillison.net | 77 KB | 128 ms | 1.00 |
+| tonsky.me | 37 KB | 46 ms | 0.99 |
+| martinfowler.com | 26 KB | 34 ms | 0.92 |
+| blog.nelhage.com | 22 KB | 30 ms | 0.94 |
+
+这五个页面已落成离线夹具（`tests/fixtures/extract/`，共 252 KB），验收脚本不打外网。
+
 ## 添加订阅
 
 启动后打开 UI → 侧栏「订阅」→「+ 添加订阅」，贴任何地址都行：
@@ -371,7 +411,7 @@ node scripts/verify-all.mjs
 输出汇总：
 
 ```
-验收汇总  23 个脚本，耗时 174s
+验收汇总  24 个脚本，耗时 180s
   PASS  docker-path.mjs            3.8s
   PASS  m0-01-toolchain.mjs        1.3s
   ...
@@ -387,10 +427,11 @@ node scripts/verify-all.mjs
   PASS  m1-11-folder-feeds.mjs     33.4s
   PASS  m1-12-inbox-view.mjs       24.0s
   PASS  m1-13-settings.mjs         28.1s
-全部通过 23/23
+  PASS  m1-14-extract.mjs          3.2s
+全部通过 24/24
 ```
 
-> 加 `--no-docker-path`（跳过 Docker 产物验证）时是 22 个脚本、170s。
+> 加 `--no-docker-path`（跳过 Docker 产物验证）时是 23 个脚本、176s。
 > 本机没下载 linux node 时用这个更快；产物验证在 CI 里跑。
 
 单独跑某一步：
@@ -504,9 +545,10 @@ Docker 构建天然满足这一点（容器里跑的就是 linux node），所�
   请留意：若失败，最可能的原因是 `package-lock.json` 与容器内 npm 版本差异。
 - **订阅已可用**：RSS 2.0 / Atom / RDF、OPML 导入导出、自动发现地址、定时抓取、条件请求
 - **AI 分析仍待 M2**：「AI 摘要」卡片目前只在演示数据里出现，真实抓取的条目没有分析结果
-- **正文提取是简化版**：feed 自带全文就直接清洗入库；只有摘要时**不会**去抓原网页跑 Readability，
-  这项在 M1 后续步骤补齐（`m1-08-extract`）
-- **去重只有 URL 与标题指纹两层**，向量余弦判重在 M1 后续步骤（`m1-09-dedupe`）
+- **正文提取按需触发**：feed 自带全文（≥500 字）就直接清洗入库、**不抓原网页**；
+  只有摘要的条目才抓原文跑 Readability。失败（404 / 非 HTML / 提出内容不够多）时
+  回退 feed 正文并在 `stage_error` 记录原因，条目不会丢也不会卡在 pending
+- **去重只有 URL 与标题指纹两层**，向量余弦判重在 1.15（`m1-15-dedupe`）
 - 侧栏的「简报」标灰注明"待接入"，点了不会有反应（不是 bug，是明确标注的未实现）
 
 ### 想先看界面上手

@@ -419,6 +419,41 @@ check('组的未读角标 = 组内各源未读之和（0+1+…+10 = 55）', () =
   return eq(sum, 55);
 });
 
+// ── ③④ 点源 / 再点回整组 ─────────────────────────────────
+//
+// 与 m1-11 ③④ 的分工：m1-11 验的是**筛选语义**（请求带对参数、
+// 列表内容对得上），这里只验**树自身的视觉状态**（高亮在谁身上、
+// 标题怎么拼）。两者都要有 —— 语义对但高亮错，用户会以为自己没点上；
+// 高亮对但没过滤，那就是个装饰。
+const clickedLeaf = await clickLeaf('大组源3');
+check('③ 点组内一个源能点中', () => ok(clickedLeaf === true));
+const onLeaf = await snapshot();
+check('③ 点源后只有该子行高亮，组行让出高亮只留 in-path 线索', () => {
+  const active = onLeaf.leaves.filter((c) => c.active).map((c) => c.label);
+  const g = onLeaf.groups.find((x) => x.name === '大组');
+  return ok(active.length === 1 && active[0] === '大组源3'
+    && g?.active === false && g?.inPath === true,
+    `子行激活=${JSON.stringify(active)} 组行 active=${g?.active} inPath=${g?.inPath}`);
+});
+check('③ 标题变成「组名 · 源名」', () => {
+  return ok(/大组/.test(onLeaf.title) && /大组源3/.test(onLeaf.title),
+    JSON.stringify(onLeaf.title));
+});
+check('③ 列表只剩该源的条目（不是变空）', () => {
+  return ok(onLeaf.rows > 0 && onLeaf.rows <= 4,
+    `${onLeaf.rows} 条（大组源3 造了 3 条未读 + 1 条已读）`);
+});
+await clickLeaf('大组源3');
+const backAll = await snapshot();
+check('④ 回整组后组行高亮、没有子行高亮、标题不再带源名', () => {
+  const g = backAll.groups.find((x) => x.name === '大组');
+  const active = backAll.leaves.filter((c) => c.active).map((c) => c.label);
+  return ok(g?.active === true && g?.inPath === false && active.length === 0
+    && !/大组源3/.test(backAll.title),
+    `组行 active=${g?.active} inPath=${g?.inPath} 子行激活=${JSON.stringify(active)} `
+    + `标题=${JSON.stringify(backAll.title)}`);
+});
+
 // ── ③ 手风琴：同时只展开一组 ──────────────────────────────
 await clickGroup('双源组');
 const two = await snapshot();

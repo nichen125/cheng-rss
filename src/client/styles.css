@@ -35,8 +35,18 @@
   --radius-xs: 4px;
   /* 胶囊写成 999px 而不是固定 14px：高度变化时不会露出直角（§15.12） */
   --radius-pill: 999px;
-  --sidebar-w: 218px;
-  --list-w: 400px;
+  /* 三栏宽度（§15.16，v1.13 实测收敛）。
+   *
+   * 218/400 是按"最坏情况"定的：侧栏按最长的分组名定宽，但那个名字本来
+   * 就有 ellipsis；列表栏按"标题能排满 2 行"定宽，实测平均 1.4 行。
+   * 收到 196/368 之后，最长标签与 2 行标题仍然排得下，多出来的宽度
+   * 全部让给正文区（72ch 是硬指标，不该跟着变）。
+   *
+   * 下限不能无限压：368 + 196 = 564px，加上正文 72ch ≈ 594px 共需 1158px，
+   * 所以 <1200px 时另有规则（见 mobile.css），否则 1180px 的笔记本上
+   * 正文会被压到 60ch 以下。 */
+  --sidebar-w: 196px;
+  --list-w: 368px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
           "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -202,7 +212,9 @@ input::placeholder { color: var(--fg-faint); }
   flex-direction: column;
   background: var(--bg-elev);
   border-right: 1px solid var(--border);
-  padding: 14px 10px 10px;
+  /* 14/10/10 → 10/8/8（§15.16）：侧栏是导航不是内容，
+     靠"分组标题上方的 18px 空隙"做分隔已经够，不需要再加内边距。 */
+  padding: 10px 8px 8px;
   overflow-y: auto;
 }
 
@@ -319,7 +331,8 @@ input::placeholder { color: var(--fg-faint); }
 }
 
 .pane-head {
-  padding: 14px 14px 11px;
+  /* 14/14/11 → 12/12/10（§15.16）：头部常驻，压缩收益全在首屏 */
+  padding: 12px 12px 10px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -411,29 +424,94 @@ input::placeholder { color: var(--fg-faint); }
 }
 .scope-clear:hover { background: var(--bg-hover); color: var(--fg); }
 
-/* 分组内的源筛选行（§15.13）。与订阅页的 .folder-filter 同源，但这里
-   只在一行内横向滚动 —— 组里 10 个源换行会把列表压下去半屏。
+/* ── 侧栏分组树（§15.13 v1.13）─────────────────────────────
+ *
+ * 这一块取代了「列表头部一行横向滚动的源 chip」。改到侧栏的理由：
+ * 组内源多时（实测 11 个）那行吃掉 41px 且看不全 —— 正是需求方说的
+ * 「分组内部订阅数量多会导致博客列表栏显示不全」。
+ *
+ * 尺寸刻意**不复用** .nav-item 的 padding：树的行是三层级（固定视图 /
+ * 分组 / 源），层级靠缩进表达，靠字号和内边距区分会让三种行看起来像
+ * 三个不同的组件。所以：三种行共用 13.5px 字号与同一套圆角（§15.12，
+ * 圆角仍落在 {4,7,999} 尺度里），只让 padding-left 逐层递增。 */
 
-   只覆盖"排布"（不换行、可横向滚、长名截断），**不覆盖字号与内边距**：
-   一旦在这里改 font-size/padding，同样叫 .chip 的控件就会在订阅页是
-   30px、在列表页是 27px —— 这正是 §15.12 要消灭的"同类控件两个高度"。
-   第一版就是多写了 font-size: 12px + padding: 3px 9px，被 m1-10 抓出来。 */
-.feed-chips {
-  display: flex;
-  gap: 5px;
-  margin-top: 10px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: 1px;
+.tree-group { display: block; }
+
+.tree-row {
+  /* 箭头占位：收起与展开时文字起点不动，否则整块会左右跳 13px */
+  padding-left: 5px;
 }
-.feed-chips::-webkit-scrollbar { display: none; }
-.feed-chips .chip {
+.tree-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
   flex-shrink: 0;
-  max-width: 15ch;
+  color: var(--fg-faint);
+  transition: transform 120ms ease;
+}
+/* 展开 = 箭头转 90°。用 data 属性而不是 :has()：
+   Safari 15 之前不支持 :has()，而这里不值得为它写 fallback。 */
+.tree-row[aria-expanded='true'] .tree-caret { transform: rotate(90deg); }
+/* 组行在"路径上"（该组被选中但选的是组内的某个源）时，
+   箭头跟着亮起来 —— 高亮只在子行，父行留一个"你在这里"的线索。 */
+.tree-row.in-path .tree-caret { color: var(--accent); }
+.tree-row.in-path { color: var(--fg-dim); }
+
+.tree-kids {
+  list-style: none;
+  margin: 1px 0 2px;
+  /* 子行整体右移，并画一条 1px 脊线标出从属关系。
+     没有这条线时，展开后的子行看起来像和分组平级的导航项。 */
+  padding: 0 0 0 20px;
+  position: relative;
+}
+.tree-kids::before {
+  content: '';
+  position: absolute;
+  left: 11px; top: 1px; bottom: 3px;
+  width: 1px;
+  background: var(--border);
+}
+
+.tree-leaf {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 7px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-faint);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.tree-leaf:hover { background: var(--bg-hover); color: var(--fg-dim); }
+.tree-leaf.active { background: var(--bg-active); color: var(--fg); font-weight: 500; }
+.tree-leaf.active .tree-leaf-count { color: var(--accent); }
+
+.tree-leaf-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 未读数用同位数字而不是胶囊（§15.13）：子行里再挂一个 badge 会和
+   父行的角标抢同一种视觉重量，展开后整块像一排按钮。
+   0 也要显示 —— "这个源没新内容"本身是信息。 */
+.tree-leaf-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+  opacity: 0.65;
+  flex-shrink: 0;
+}
+.tree-leaf-count.has { color: var(--fg-dim); opacity: 1; }
 
 .search-box { position: relative; }
 .search-box input { padding-left: 30px; font-size: 13.5px; }
@@ -484,7 +562,9 @@ input::placeholder { color: var(--fg-faint); }
   display: block;
   width: 100%;
   text-align: left;
-  padding: 10px 14px 10px 16px;
+  /* 10/14/10/16 → 9/12/9/14（§15.16）：每行省 4px，
+     一屏 9 行省出 36px ≈ 再多 0.4 条 */
+  padding: 9px 12px 9px 14px;
   border: none;
   border-bottom: 1px solid var(--border-soft);
   border-radius: 0;

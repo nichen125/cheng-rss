@@ -99,7 +99,7 @@ const loginRes = await fetch(`${base}/api/v1/auth/login`, {
 const cookie = (loginRes.headers.get('set-cookie') ?? '').split(';')[0];
 check('登录拿到 cookie', () => ok(cookie.includes('='), cookie));
 
-// ── 造数据：一个组 3 个源（够触发 chip 行），一个组 1 个源 ──────
+// ── 造数据：一个组 3 个源（够展开出 3 个子行），一个组 1 个源 ────
 const { DatabaseSync } = await import('node:sqlite');
 const db = new DatabaseSync(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
@@ -257,15 +257,19 @@ const collect = async () => {
   // A. 列表页（含侧栏导航项、行内迷你按钮）
   pages.list = await evaluate(PROBE);
 
-  // B. 选中分组 → 出现 chip 行
+  // B. 选中分组 → 侧栏分组树展开、组内源作为子行出现（v1.13 起，§15.13）
   await evaluate(`(() => {
-    const b = [...document.querySelectorAll('.nav-item')].find((x) => x.textContent.includes('科技IT'));
+    const b = [...document.querySelectorAll('.tree-row')]
+      .find((x) => (x.querySelector('.nav-label')?.textContent ?? '').includes('科技IT'));
     if (b) b.click();
     return Boolean(b);
   })()`);
   await sleep(1400);
   pages.folder = await evaluate(PROBE);
-  const chipCount = await evaluate(`document.querySelectorAll('.feed-chips .chip').length`);
+  // v1.13：分组内的源不再是列表头部的 chip 行，而是侧栏树里的子行。
+  // 这个数（组内 3 个源 → 3 个子行）下面用来证明"点的确实是分组视图"，
+  // 否则「清除按钮存在」那条可能在收件箱下就通过了。
+  const leafCount = await evaluate(`document.querySelectorAll('.tree-leaf').length`);
   // 清除按钮只在这个视图下存在，必须在切走之前量 ——
   // 第一版把它放在 collect() 之后量，那时已经跳到订阅页，
   // 于是「按钮不存在」红的是测试自己，不是实现（§15.8 同类坑）。
@@ -309,10 +313,10 @@ const collect = async () => {
   await sleep(1600);
   pages.feeds = await evaluate(PROBE);
 
-  return { pages, chipCount, scopeClear };
+  return { pages, leafCount, scopeClear };
 };
 
-const { pages, chipCount, scopeClear } = await collect();
+const { pages, leafCount, scopeClear } = await collect();
 
 // 采样必须真的采到东西，否则后面所有断言都是空转（§15.8 的教训）
 const totalSampled = Object.values(pages).reduce((n, p) => n + p.length, 0);
@@ -433,8 +437,8 @@ check('采样覆盖到了各类控件（图标按钮 / 文字按钮 / chip / 分
   return ok(Object.values(kinds).every(Boolean), JSON.stringify(kinds));
 });
 
-check('分组里有 3 个源时渲染出 chip 行（与 m1-11 的判据互不重复）', () => {
-  return ok(chipCount === 4, `chip 数 ${chipCount}（1 个"全部" + 3 个源）`);
+check('分组里有 3 个源时侧栏树渲染出 3 个子行（与 m1-11 的判据互不重复）', () => {
+  return ok(leafCount === 3, `子行数 ${leafCount}（组内 3 个源各一行）`);
 });
 
 ws.close();

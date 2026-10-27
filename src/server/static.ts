@@ -101,10 +101,18 @@ function loadFromDisk(dir: string): StaticAssets {
       return null;
     }
     if (!existsSync(target) || statSync(target).isDirectory()) return null;
+    // index.html **不进缓存**。
+    //
+    // 它是唯一一个"文件名不变、内容会变"的产物：重新 build 之后 hash 变了，
+    // 它里面的 <script src> 也跟着变。缓存住它，服务就永远发旧的 index，
+    // 而旧 index 指向的 hash 文件已经被删 —— 浏览器加载不到 JS，白屏。
+    // 开发时表现为"改完前端刷新还是白屏，非要重启服务"。
+    // 带 hash 的资源可以放心缓存（同名必然同内容），index.html 只有 0.5KB。
+    const cacheable = !/^index\.html$/i.test(rel);
     const hit = cache.get(target);
-    if (hit) return hit;
+    if (hit && cacheable) return hit;
     const buf = new Uint8Array(readFileSync(target));
-    cache.set(target, buf);
+    if (cacheable) cache.set(target, buf);
     return buf;
   }
 

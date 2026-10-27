@@ -243,13 +243,21 @@ function Main(props: { user: User; onLogout: () => void }) {
   const [prefs, setPrefs] = useState<ReaderPrefs>(() => loadPrefs());
   const readerRef = useRef<HTMLElement>(null);
   const [prefsOpen, setPrefsOpen] = useState(false);
-  /** 当前分组内的订阅源（§15.13）。空数组 = 没有分组筛选，或组里没有源 */
-  const [folderFeeds, setFolderFeeds] = useState<FeedItem[]>([]);
-  /** 上面这份源列表是为哪个分组加载的；用于区分"加载完是空的"和"还没加载" */
-  const [feedsLoadedFor, setFeedsLoadedFor] = useState<string | null>(null);
+  /**
+   * 全部订阅源（§15.13 v1.13：侧栏分组树的数据源）。
+   *
+   * 为什么从"按组取"改成"一次全取"：改成树之后任何组都可能被展开，
+   * 按组取会变成 N 次请求；单人自托管的源总量在几十到几百条，
+   * 一次全量（/feeds 已带 unread/total/folderId）更省，也不需要额外接口。
+   */
+  const [feeds, setFeeds] = useState<FeedItem[]>([]);
+  /** 源列表是否已取回。区分"组里确实没有源"和"还没加载"，自愈逻辑要用 */
+  const [feedsLoaded, setFeedsLoaded] = useState(false);
+  /** 侧栏里展开着的分组（§15.13）。单元素集合 = 手风琴，同时只展开一个 */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   /** 手动刷新中（§15.14）：只驱动按钮旋转态，不参与列表渲染 */
   const [refreshing, setRefreshing] = useState(false);
-  /** 自增后让分组内源列表（chip 上的未读数）也重取一次 */
+  /** 自增后让源列表（侧栏树上的未读数）也重取一次 */
   const [reloadTick, setReloadTick] = useState(0);
   /**
    * 历史视图的分组（PLAN §7.4）。
@@ -382,48 +390,107 @@ function Main(props: { user: User; onLogout: () => void }) {
 
   useEffect(() => { refreshShell(); }, [refreshShell]);
 
-  // 分组内的订阅源（§15.13）：选中分组时把组里的源取回来，渲染成筛选行。
+  // 全部订阅源（§15.13 v1.13）：侧栏分组树的数据源。
   //
-  // 为什么复用 GET /feeds?folderId= 而不是新开一个读接口：那个接口已经返回
-  // unread / total / status / folderName，渲染 chip 需要的就是这几项；
-  // /folders/:id/feeds 存在但语义是"批量移入"（写接口），不能当读接口用。
+  // 一次全取而不是按组取 —— 树里任何组都可能被展开，按组取会变成 N 次请求。
+  // `reloadTick` 让关闭配置弹窗后（可能换了分组/删了源）树上的未读数一起更新。
   useEffect(() => {
-    const fid = scope.folderId;
-    if (!fid) { setFolderFeeds([]); setFeedsLoadedFor(null); return; }
     let alive = true;
-    setFeedsLoadedFor(null);
-    api.listFeeds({ folderId: fid })
+    api.listFeeds()
       .then((r) => {
         if (!alive) return;
-        setFolderFeeds(r.items);
-        setFeedsLoadedFor(fid);
+        setFeeds(r.items);
+        setFeedsLoaded(true);
       })
       .catch(() => {
         if (!alive) return;
-        setFolderFeeds([]);
-        setFeedsLoadedFor(fid);
+        // 取不到就当作"已加载但为空"：否则自愈逻辑会一直等不到判据，
+        // 一个指向已删源的筛选态会永久留在界面上。
+        setFeeds([]);
+        setFeedsLoaded(true);
       });
     return () => { alive = false; };
-  }, [scope.folderId, reloadTick]);
+  }, [reloadTick]);
 
-  // 源筛选的自愈：当前筛的源已不在这个组里（被移出 / 被删），退回整组。
+  // 按分组归拢源（§15.13）。用 Map 而不是每次 render 都 filter 一遍：
+  // 侧栏每组都要拿一次自己那份，11 组 × 21 源 = 231 次比较，虽然小，
+  // 但它在每次滚动/打字时都会重跑。
+  const feedsByFolder = useMemo(() => {
+    const m = new Map<string, FeedItem[]>();
+    for (const f of feeds) {
+      if (!f.folderId) continue;
+      const list = m.get(f.folderId);
+      if (list) list.push(f); else m.set(f.folderId, [f]);
+    }
+    return m;
+  }, [feeds]);
+
+  /** 当前分组内的源（标题「组名 · 源名」与自愈判据都要用） */
+  const folderFeeds = useMemo(
+    () => (scope.folderId ? feedsByFolder.get(scope.folderId) ?? [] : []),
+    [scope.folderId, feedsByFolder],
+  );
+
+  // 源筛选的自愈：当前筛的源已不在**这个组**里（被移出 / 被删），退回整组。
   //
-  // 不自愈的话会出现"顶部还挂着一个源 chip，列表却永远是空的" ——
+  // 不自愈的话会出现"侧栏里那个源还高亮着，列表却永远是空的" ——
   // 请求带的是 {folderId: 新组, feedId: 旧组的源}，交集必然为空，
   // 用户看到的是"这个组里没有文章"，而不是"你的筛选失效了"。
   //
-  // 判据用「源列表是否已对当前分组加载过」，不能用「列表是否为空」：
-  // 组里的源被删光时列表也是空的，而那时恰恰最需要退回整组。
+  // 判据必须是「这个组里有没有它」，不是「库里有没有它」：源被移出分组
+  // 时它还在库里（只是 folder_id 变了），用全局 feeds 判会永远不触发。
+  // 第一版 v1.13 就是这么写的，m1-11 ⑩ 当场抓到。
   useEffect(() => {
     if (!scope.feedId) return;
-    if (feedsLoadedFor !== scope.folderId) return; // 还在加载，不能据此判定
+    if (!feedsLoaded) return; // 还在加载，不能据此判定
     if (!folderFeeds.some((f) => f.id === scope.feedId)) {
       // 只丢源、保留分组 —— 顺手把 folderId 也清掉会让用户以为自己
-      // 被弹出了分组（chip 行消失、标题变回收件箱）。m1-11 的
+      // 被弹出了分组（树收起、标题变回收件箱）。m1-11 的
       // 「自愈只丢源、不丢分组」那条就是专门抓这个的。
       setScope((s) => ({ folderId: s.folderId }));
     }
-  }, [folderFeeds, feedsLoadedFor, scope.feedId, scope.folderId]);
+  }, [folderFeeds, feedsLoaded, scope.feedId, scope.folderId]);
+
+  /**
+   * 展开/收起一个分组（§15.13 手风琴）。
+   *
+   * 只展开一个的理由：侧栏高度有限，同时展开 3 组 × 11 个源 = 33 行，
+   * 会把固定视图（收件箱/未读/…）顶出视口。手风琴保证"正在看哪一组"
+   * 永远可见，也让"展开的这个组"成为第二个高亮信号。
+   */
+  const toggleExpand = useCallback((folderId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderId)) next.delete(folderId);
+      else { next.clear(); next.add(folderId); }
+      return next;
+    });
+  }, []);
+
+  /**
+   * 点侧栏的一个分组（§15.13）。
+   *
+   * 三件事必须一起发生，少一件用户都会困惑：
+   *   1. 选中整组（scope = {folderId}）—— 取消可能存在的源筛选
+   *   2. 展开这一组 —— 否则点了分组却看不到组内的源
+   *   3. 切回 inbox —— 否则在「历史」视图点分组什么也不会发生
+   */
+  const pickFolder = useCallback((folderId: string) => {
+    setView('inbox');
+    setScope({ folderId });
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.clear();
+      next.add(folderId);
+      return next;
+    });
+  }, []);
+
+  /** 点组内的一个源：再点同一个 = 取消源筛选，回整组（§15.13） */
+  const pickFeed = useCallback((folderId: string, feedId: string) => {
+    setView('inbox');
+    setScope((s) => (s.feedId === feedId ? { folderId } : { folderId, feedId }));
+  }, []);
 
 
   const open = useCallback(async (id: string) => {
@@ -561,18 +628,6 @@ function Main(props: { user: User; onLogout: () => void }) {
     return feed ? `${base} · ${feed.title ?? hostOf(feed.url) ?? '该源'}` : base;
   }, [scope.folderId, scope.feedId, folders, folderFeeds, current.label]);
 
-  /** 当前分组信息（用于筛选行的显隐判断与"未分组"命名） */
-  const activeFolder = useMemo(
-    () => (scope.folderId ? folders.find((x) => x.id === scope.folderId) ?? null : null),
-    [scope.folderId, folders],
-  );
-
-  /** 组内未读总数（chip 行里「全部」上的数字，与各个源 chip 同一口径） */
-  const folderUnread = useMemo(
-    () => folderFeeds.reduce((n, f) => n + (f.unread ?? 0), 0),
-    [folderFeeds],
-  );
-
   return (
     <div className="app">
       {/* ── 侧栏 ─────────────────────────────────────────── */}
@@ -600,6 +655,9 @@ function Main(props: { user: User; onLogout: () => void }) {
                   // 点固定视图等于"看全部"，必须清掉分组过滤，
                   // 否则会出现"点了收件箱但还是只有 3 个源的内容"
                   setScope({});
+                  // 同时收起分组树（§15.13）：范围已经回到全库，
+                  // 侧栏还展开着一组的源会让人以为筛选仍在生效。
+                  setExpanded(new Set());
                 }}
                 title={n.label}
               >
@@ -629,32 +687,82 @@ function Main(props: { user: User; onLogout: () => void }) {
           </button>
         </nav>
 
-        {/* 分组快捷筛选：点一下只看这个组。
-            放在侧栏而不是只放订阅页，是因为"按组分看文章"是
-            日常动作，每次都先跳订阅页再点太绕。 */}
+        {/* 分组树（§15.13 v1.13）：分组行就地展开，组内源作为子行挂在下面。
+            改之前是"列表头部一行横向滚动的 chip" —— 组里 11 个源时那行
+            吃掉 41px 高度，而且滚出去就看不见。改到侧栏之后：
+              · 列表栏一行不占，一屏条目数回到 9
+              · 未读数与源名同时可见，不用横向滚
+              · 范围的选择全在左栏一处，符合"左=范围 / 中=列表 / 右=内容" */}
         {folders.length > 0 && (
           <>
             <div className="nav-section">分组</div>
-            <nav className="nav">
-              {folders.map((f) => (
-                <button
-                  key={f.id}
-                  className={`nav-item ${
-                    scope.folderId === f.id ? 'active' : ''
-                  }`}
-                  onClick={() => {
-                    setView('inbox');
-                    setScope({ folderId: f.id });
-                  }}
-                  title={`只看「${f.name}」里的条目`}
-                >
-                  <span className="nav-icon"><IconFolder size={16} /></span>
-                  <span className="nav-label">{f.name}</span>
-                  {f.unread > 0 && (
-                    <span className="badge">{f.unread > 999 ? '999+' : f.unread}</span>
-                  )}
-                </button>
-              ))}
+            <nav className="nav tree" aria-label="分组与订阅源">
+              {folders.map((f) => {
+                const open = expanded.has(f.id);
+                const kids = feedsByFolder.get(f.id) ?? [];
+                // 选中整组（没有源筛选）时组行才是"当前范围"；
+                // 选了组内某个源时高亮转移到子行，组行只保留展开箭头的高亮。
+                const groupActive = scope.folderId === f.id && !scope.feedId;
+                return (
+                  <div className="tree-group" key={f.id}>
+                    <button
+                      className={`nav-item tree-row ${groupActive ? 'active' : ''} ${
+                        // in-path 只表示"路径上但不是终点"：选了组内某个源时，
+                        // 组行让出高亮、只留箭头变色的线索。整组选中时
+                        // 它自己就是终点，两个类同时挂上去是自相矛盾的。
+                        scope.folderId === f.id && scope.feedId ? 'in-path' : ''
+                      }`}
+                      onClick={() => {
+                        // 点已展开且在看的组 = 收起；其余情况 = 选中并展开。
+                        // 不这么做的话，"收起"没有入口 —— 组行既要选范围又要
+                        // 开合，只能让第二次点击承担收起。
+                        if (open && groupActive) toggleExpand(f.id);
+                        else pickFolder(f.id);
+                      }}
+                      aria-expanded={open}
+                      title={`「${f.name}」${open ? '收起' : '展开'}组内 ${kids.length} 个源`}
+                    >
+                      <span className="tree-caret" aria-hidden="true">
+                        <IconChevronRight size={13} />
+                      </span>
+                      <span className="nav-label">{f.name}</span>
+                      {f.unread > 0 && (
+                        <span className="badge">{f.unread > 999 ? '999+' : f.unread}</span>
+                      )}
+                    </button>
+
+                    {/* 子行：组内每个源一行。0 未读也显示 —— "没新内容"是信息。
+                        组里 0 个源时不渲染，避免一条空脊线。 */}
+                    {open && kids.length > 0 && (
+                      <ul className="tree-kids">
+                        {kids.map((fd) => {
+                          const on = scope.feedId === fd.id;
+                          return (
+                            <li key={fd.id}>
+                              <button
+                                className={`tree-leaf ${on ? 'active' : ''}`}
+                                onClick={() => pickFeed(f.id, fd.id)}
+                                title={fd.title ?? hostOf(fd.url) ?? fd.url}
+                                aria-pressed={on}
+                              >
+                                <span className="tree-leaf-name">
+                                  {fd.title ?? hostOf(fd.url) ?? '未命名源'}
+                                </span>
+                                {/* 未读数用文字而不是 badge：子行里再挂一个
+                                    胶囊会和父行的角标抢同一种视觉重量，
+                                    展开后整块看起来像一排按钮。 */}
+                                <span className={`tree-leaf-count ${fd.unread > 0 ? 'has' : ''}`}>
+                                  {fd.unread > 999 ? '999+' : fd.unread}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
             </nav>
           </>
         )}
@@ -739,7 +847,7 @@ function Main(props: { user: User; onLogout: () => void }) {
             {(scope.folderId || scope.feedId) && (
               <button
                 className="scope-clear"
-                onClick={() => setScope({})}
+                onClick={() => { setScope({}); setExpanded(new Set()); }}
                 title="清除分组与源筛选"
                 aria-label="清除筛选"
               >
@@ -794,37 +902,10 @@ function Main(props: { user: User; onLogout: () => void }) {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          {/* 分组内的源筛选行（§15.13）：点一下只看这个源，再点回整组。
-              组内只有 1 个源时不渲染 —— 一行 chip 只为过滤到一个源没有意义。 */}
-          {scope.folderId && folderFeeds.length > 1 && (
-            <div className="feed-chips" role="group" aria-label="按订阅源筛选">
-              <button
-                className={`chip ${scope.feedId ? '' : 'active'}`}
-                onClick={() => setScope({ folderId: scope.folderId })}
-                title={`看「${activeFolder?.name ?? '这个分组'}」的全部条目`}
-              >
-                全部
-                <span className="chip-count">{folderUnread}</span>
-              </button>
-              {folderFeeds.map((f) => (
-                <button
-                  key={f.id}
-                  className={`chip ${scope.feedId === f.id ? 'active' : ''}`}
-                  onClick={() => setScope(
-                    scope.feedId === f.id
-                      ? { folderId: scope.folderId }
-                      : { folderId: scope.folderId, feedId: f.id },
-                  )}
-                  title={f.title ?? hostOf(f.url) ?? f.url}
-                >
-                  {f.title ?? hostOf(f.url) ?? '未命名源'}
-                  {/* 0 也要显示：「这个源没新内容」本身是用户想知道的信息，
-                      隐藏之后无法区分"0 未读"和"没取到未读数"。 */}
-                  <span className="chip-count">{f.unread}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          {/* 这里原本是「组内源筛选 chip 行」（v1.8）。v1.13 搬到侧栏分组树
+              （§15.13）之后删除 —— 留一个空 div 或注释掉的代码比删掉更糟，
+              下一个人会以为它还在起作用。判据见 m1-18 ②：组内有 11 个源时
+              列表头部高度必须与无分组时完全相等。 */}
         </header>
 
         <div className="list-scroll">
@@ -836,7 +917,7 @@ function Main(props: { user: User; onLogout: () => void }) {
               view={view}
               scopeLabel={scope.folderId ? listTitle : null}
               onGoFeeds={() => { setSettingsSection('feeds'); setSettingsOpen(true); }}
-              onClearScope={scope.folderId ? () => setScope({}) : undefined}
+              onClearScope={scope.folderId ? () => { setScope({}); setExpanded(new Set()); } : undefined}
             />
           )}
 
@@ -1088,6 +1169,9 @@ function Main(props: { user: User; onLogout: () => void }) {
               onClick={() => {
                 setView(n.key);
                 setScope({});
+                // 与侧栏同一份状态：手机上点底部导航也是"回到全库"，
+                // 分组树要一起收起（§15.13）。
+                setExpanded(new Set());
                 setOpenId(null);
               }}
             >

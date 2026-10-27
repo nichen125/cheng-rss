@@ -537,7 +537,11 @@ check('刷新中图标旋转态生效（.spinning）', () => {
 const entered = await clickNav('科技IT');
 check('（前置）进入「科技IT」分组', () => ok(entered === true));
 await ev(`(() => {
-  const c = [...document.querySelectorAll('.feed-chips .chip')]
+  // v1.13：组内的源从"列表头部 chip 行"搬到侧栏分组树（§15.13），
+  // 这里跟着改成点树里的子行。它验的是"刷新保留三重筛选"，
+  // 与源选择控件长什么样无关 —— 但**必须真的选中一个源**，
+  // 否则请求里只有两重参数，这条就退化成两重筛选的测试。
+  const c = [...document.querySelectorAll('.tree-leaf')]
     .find((x) => (x.textContent || '').includes('源甲'));
   if (!c) return false;
   c.click();

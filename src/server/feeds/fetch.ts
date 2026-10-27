@@ -381,44 +381,17 @@ export interface UpsertStats {
   invalid: number;
   /** feed 正文够长、不需要抓原文的条数（PLAN §7.5 的收益计数） */
   extractSkipped: number;
+  /** 判为重复的条数（写 duplicate_of，PLAN §7.1 L2） */
+  duplicates: number;
 }
 
 /**
- * URL 规范化，用于判重。
+ * 内容指纹：标题 + 正文前 2KB 的 sha1，用于跨源同文判重
  *
- * 去掉的：utm_* / fbclid / gclid 等追踪参数、fragment、
- *        末尾多余的斜杠、http/https 差异（不统一，因为有些站两者内容不同）
- * 保留的：其余 query（很多站点用 ?p=123 区分文章）
+ * 注意它只是去重的第 2 层：要求几乎逐字相同。跨站转载通常会加一句导语、
+ * 改标点、挂上自己站名的后缀 —— 这类改动会把 sha1 完全打散，所以第 3 层
+ * （向量余弦，§dedupe）不能省。
  */
-export function normalizeUrl(raw: string): string {
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    return raw.trim();
-  }
-  u.hash = '';
-  const junk = [
-    /^utm_/, /^fbclid$/, /^gclid$/, /^mc_cid$/, /^mc_eid$/, /^ref$/, /^ref_src$/,
-    /^spm$/, /^from$/, /^share_/, /^_hs/, /^igshid$/, /^yclid$/,
-  ];
-  const keep: [string, string][] = [];
-  for (const [k, v] of u.searchParams) {
-    if (junk.some((re) => re.test(k))) continue;
-    keep.push([k, v]);
-  }
-  // 保持顺序重建，避免 searchParams.sort() 改变语义
-  const qs = new URLSearchParams();
-  for (const [k, v] of keep) qs.append(k, v);
-  u.search = qs.toString();
-
-  if (u.pathname.length > 1 && u.pathname.endsWith('/')) {
-    u.pathname = u.pathname.replace(/\/+$/, '');
-  }
-  return u.toString();
-}
-
-/** 内容指纹：标题 + 正文前 2KB 的 sha1，用于跨源同文判重 */
 export function contentHash(title: string, html: string | null): string {
   const norm = `${title}\u0000${htmlToText(html).slice(0, 2048)}`
     .toLowerCase()

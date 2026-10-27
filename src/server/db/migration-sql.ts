@@ -13,10 +13,23 @@ import { fileURLToPath } from 'node:url';
 // esbuild 会在 bundle 时替换为字符串常量（见 scripts/build-server.mjs）。
 // 声明可选类型：源码模式下这两个标识符不存在，typeof 检查为 'undefined'。
 declare const __SQL_0001_INIT__: string | undefined;
+declare const __SQL_0002_DEDUPE_VECTORS__: string | undefined;
 
-function bundledSql(): string | null {
-  // typeof 对未声明标识符不会抛 ReferenceError
-  return typeof __SQL_0001_INIT__ === 'string' ? __SQL_0001_INIT__ : null;
+/**
+ * 按文件名查内嵌 SQL。
+ *
+ * 每加一个迁移都要在这里登记 —— 漏登记的症状是"源码模式正常、二进制里报找不到"，
+ * 而那条错误只在发布产物上出现。m0-08 的产物验证会跑到真实迁移，能挡住。
+ */
+function bundledSqlFor(name: string): string | null {
+  switch (name) {
+    case '0001_init.sql':
+      return typeof __SQL_0001_INIT__ === 'string' ? __SQL_0001_INIT__ : null;
+    case '0002_dedupe_vectors.sql':
+      return typeof __SQL_0002_DEDUPE_VECTORS__ === 'string' ? __SQL_0002_DEDUPE_VECTORS__ : null;
+    default:
+      return null;
+  }
 }
 
 // 源码模式下定位 migrations 目录。
@@ -54,12 +67,11 @@ function loadFromFs(name: string): string {
 }
 
 export function loadMigrationSql(name: string): string {
-  switch (name) {
-    case '0001_init.sql': {
-      const bundled = bundledSql();
-      return bundled ?? loadFromFs(name);
-    }
-    default:
-      throw new Error(`未登记的迁移文件: ${name}`);
+  const bundled = bundledSqlFor(name);
+  if (bundled !== null) return bundled;
+  if (name === '0001_init.sql' || name === '0002_dedupe_vectors.sql') {
+    // 源码模式：__SQL_*__ 常量不存在，直接读文件
+    return loadFromFs(name);
   }
+  throw new Error(`未登记的迁移文件: ${name}`);
 }

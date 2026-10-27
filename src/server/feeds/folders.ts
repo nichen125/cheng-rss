@@ -29,12 +29,14 @@ export interface FolderWithCount extends FolderRow {
 const MAX_NAME = 40;
 
 export function listFolders(db: DatabaseSync, userId: string): FolderWithCount[] {
+  // 未读数排除重复条目 —— 与 feeds/store.ts 的 listFeeds、entries 路由
+  // 保持同一口径。三处若不一致，侧栏角标会大于列表里真正能看到的条目数。
   const rows = db.prepare(`
     SELECT f.*,
            (SELECT COUNT(*) FROM feeds WHERE folder_id = f.id) AS feed_count,
            (SELECT COUNT(*) FROM entries e
               JOIN feeds fd ON fd.id = e.feed_id
-             WHERE fd.folder_id = f.id AND e.is_read = 0) AS unread
+             WHERE fd.folder_id = f.id AND e.is_read = 0 AND e.duplicate_of IS NULL) AS unread
       FROM folders f
      WHERE f.user_id = ?
      ORDER BY f.sort, f.name

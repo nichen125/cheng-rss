@@ -3,12 +3,12 @@ import { createHash, randomBytes } from 'node:crypto';
 import { enqueue } from '../jobs/queue.ts';
 import { packText } from '../db/text-blob.ts';
 import { indexEntry } from '../search/index.ts';
-import { contentHash, normalizeUrl, type UpsertStats } from './fetch.ts';
+import { contentHash, type UpsertStats } from './fetch.ts';
 import { sanitizeHtml } from './sanitize.ts';
 import { htmlToText, type ParsedFeed } from './parse.ts';
 import { MIN_FEED_CHARS } from '../extract/article.ts';
 import { estimateWordCount } from '../extract/article.ts';
-
+import { canonicalUrl, findDuplicate, ensureLocalVector } from '../dedupe/index.ts';
 // 订阅源与条目的持久化。
 //
 // 与路由分开的理由：抓取（job handler）与 HTTP 请求都要用同一套写入逻辑。
@@ -44,10 +44,14 @@ export const newId = (prefix: string): string =>
   `${prefix}_${randomBytes(8).toString('hex')}`;
 
 export function listFeeds(db: DatabaseSync, userId: string): (FeedRow & { unread: number; total: number })[] {
+  // 未读数与总数都要排除重复条目，否则侧栏角标会比列表里能看到的条目多
+  // （重复条目被 entries 路由过滤掉，但角标若照数就会对不上）。
   const rows = db.prepare(`
     SELECT f.*,
-           (SELECT COUNT(*) FROM entries e WHERE e.feed_id = f.id AND e.is_read = 0) AS unread,
-           (SELECT COUNT(*) FROM entries e WHERE e.feed_id = f.id) AS total
+           (SELECT COUNT(*) FROM entries e
+             WHERE e.feed_id = f.id AND e.is_read = 0 AND e.duplicate_of IS NULL) AS unread,
+           (SELECT COUNT(*) FROM entries e
+             WHERE e.feed_id = f.id AND e.duplicate_of IS NULL) AS total
       FROM feeds f
      WHERE f.user_id = ?
      ORDER BY f.status = 'broken', f.title IS NULL, f.title
@@ -181,11 +185,9 @@ export function upsertItems(
   parsed: ParsedFeed,
   now = Date.now(),
 ): UpsertStats {
-  const stats: UpsertStats = { inserted: 0, skipped: 0, invalid: 0, extractSkipped: 0 };
+  const stats: UpsertStats = { inserted: 0, skipped: 0, invalid: 0, extractSkipped: 0, duplicates: 0 };
 
   const existsGuid = db.prepare('SELECT id FROM entries WHERE feed_id = ? AND guid = ?');
-  const existsUrl = db.prepare('SELECT id FROM entries WHERE user_id = ? AND url_norm = ? LIMIT 1');
-  const existsHash = db.prepare('SELECT id FROM entries WHERE user_id = ? AND content_hash = ? LIMIT 1');
 
   const ins = db.prepare(`
     INSERT INTO entries (id, user_id, feed_id, guid, url, url_norm, title, author,
@@ -206,29 +208,31 @@ export function upsertItems(
         stats.invalid++;
         continue;
       }
-      const urlNorm = normalizeUrl(url);
+      const urlNorm = canonicalUrl(url);
       const hash = contentHash(it.title, it.html);
 
       if (existsGuid.get(feed.id, it.guid)) { stats.skipped++; continue; }
-      const dupUrl = existsUrl.get(feed.user_id, urlNorm) as { id: string } | undefined;
-      if (dupUrl) { stats.skipped++; continue; }
-      // 没有正文的条目算不出可信指纹，跳过哈希判重避免误杀
-      let dupHash: { id: string } | undefined;
-      if (it.html && it.html.length > 200) {
-        dupHash = existsHash.get(feed.user_id, hash) as { id: string } | undefined;
-      }
-
-      const id = newId('e');
 
       // 正文必须清洗后再存：feed 是外部输入，直接送进
       // dangerouslySetInnerHTML 就是存储型 XSS（见 feeds/sanitize.ts）。
       // 清洗在这里做（而不是等提取任务），因为"feed 正文够不够长"这个
-      // 判断要看清洗后的字数，而清洗后的 HTML 也正好就是要落库的那份。
+      // 判断要看清洗后的字数，而清洗后的 HTML 也正好就是要落库的那份；
+      // 去重的向量层同样要用它算签名。
       let cleanHtml = '';
       if (it.html) {
         const clean = sanitizeHtml(it.html, { baseUrl: url });
         if (clean.html) cleanHtml = clean.html;
       }
+
+      // 三层判重（PLAN §7.1 L2）：URL → 内容指纹 → 向量余弦。
+      // 命中时不丢弃条目，而是写 duplicate_of 指回已存在那条 ——
+      // "这篇文章被几个源报道"是 M3 简报的输入，丢弃就查不到了。
+      const dup = findDuplicate(db, {
+        userId: feed.user_id,
+        url, title: it.title, html: cleanHtml, contentHash: hash,
+      });
+
+      const id = newId('e');
       const feedChars = cleanHtml.length > 0 ? htmlToText(cleanHtml).length : 0;
 
       // 正文太短 → 交给提取任务去抓原文（PLAN §7.5）。
@@ -241,10 +245,16 @@ export function upsertItems(
         id, feed.user_id, feed.id, it.guid, url, urlNorm, it.title, it.author,
         it.publishedAt, now, it.excerpt, hash, words, stage,
         parsed.title ?? feed.title, feed.icon_url, it.imageUrl,
-        dupHash ? dupHash.id : null,
+        dup ? dup.entryId : null,
       );
+      if (dup) stats.duplicates++;
 
       if (cleanHtml) insContent.run(id, packText(cleanHtml), 'feed');
+
+      // 向量层判重要读它，所以入库当下就写。异步补写会留下一个
+      // "刚入库、还没有向量"的窗口，窗口里同一篇的转载查不到它
+      // （§dedupe/index.ts 有说明）。
+      ensureLocalVector(db, id, it.title, cleanHtml);
 
       if (needExtract) {
         // dedupe_key 保证同一篇不会被重复排进队列（重复抓是纯浪费）
@@ -341,7 +351,7 @@ export function enqueueFetch(db: DatabaseSync, feedId: string, priority = 0, run
 }
 
 /** 指纹工具再导出，便于验收脚本单独测 */
-export { contentHash, normalizeUrl };
+export { contentHash, canonicalUrl };
 
 /** 供 OPML 使用的稳定 id（导出不带内部 id，导入时重建） */
 export function opmlKey(url: string): string {

@@ -12,6 +12,7 @@ import { JobRunner } from './server/jobs/runner.ts';
 import { buildHandlers } from './server/jobs/handlers.ts';
 import { sweepDueFeeds } from './server/routes/feeds.ts';
 import { ensureOwnerUser, countUsers, purgeExpiredSessions } from './server/auth/session.ts';
+import { pruneOldVectors } from './server/dedupe/index.ts';
 
 // esbuild 打包时注入（scripts/build-server.mjs）；源码模式走 package.json
 declare const __AI_RSS_VERSION__: string | undefined;
@@ -334,6 +335,24 @@ async function cmdServe(args: Args): Promise<void> {
   }, 60_000);
   sweepTimer.unref?.();
 
+  // 每日维护：清掉过期的去重向量（PLAN §7.1 L2）。
+  //
+  // 判重只看近 14 天的候选，更早的向量永远读不到，但一条 1KB × 10 万条
+  // = 100MB。放在启动后 5 分钟跑一次再每 24h 一次：不在启动关键路径上，
+  // 也不依赖外部 cron（NAS 用户不会配）。
+  const pruneVectors = () => {
+    try {
+      const n = pruneOldVectors(h.db);
+      if (n > 0) log.info(`清理了 ${n} 条过期的去重向量`);
+    } catch (e) {
+      log.warn('清理去重向量失败', { err: (e as Error).message });
+    }
+  };
+  const firstPrune = setTimeout(pruneVectors, 5 * 60_000);
+  firstPrune.unref?.();
+  const pruneTimer = setInterval(pruneVectors, 24 * 3600_000);
+  pruneTimer.unref?.();
+
   let runner: JobRunner | null = null;
   if (inlineWorker) {
     runner = new JobRunner({
@@ -362,6 +381,8 @@ async function cmdServe(args: Args): Promise<void> {
   const shutdown = async (sig: string) => {
     log.info(`收到 ${sig}，正在关闭`);
     clearInterval(sweepTimer);
+    clearTimeout(firstPrune);
+    clearInterval(pruneTimer);
     try {
       if (runner) await runner.stop();
     } catch { /* runner 已停 */ }

@@ -6,6 +6,7 @@ import { searchKeyword, searchLike } from '../search/index.ts';
 import { queueStats } from '../jobs/queue.ts';
 import { unpackText } from '../db/text-blob.ts';
 import { sanitizeHtml } from '../feeds/sanitize.ts';
+import { duplicateStats } from '../dedupe/index.ts';
 
 // 条目相关 API。
 //
@@ -31,6 +32,20 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
 
     const where: string[] = ['e.user_id = ?'];
     const params: (string | number)[] = [uid];
+
+    // 重复条目不进时间线（PLAN §7.1 L2）。
+    //
+    // 判重命中时条目照样入库（写 duplicate_of 指回原件），所以"这篇文章
+    // 被几个源报道"是可查的。但把它摆进列表就是给用户看两遍同一篇 ——
+    // 这正是去重要解决的问题本身。
+    //
+    // 例外两处：
+    //   · view=starred / history：用户明确标记过的，藏起来会更困惑
+    //   · ?includeDuplicates=1：排查"为什么这条没显示"时的出口
+    const includeDuplicates = c.req.query('includeDuplicates') === '1';
+    if (!includeDuplicates && view !== 'starred' && view !== 'history') {
+      where.push('e.duplicate_of IS NULL');
+    }
 
     if (view === 'unread') where.push('e.is_read = 0');
     else if (view === 'starred') where.push('e.is_starred = 1');
@@ -302,11 +317,15 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       return Number(x?.c ?? 0);
     };
     const q = queueStats(ctx.dbh.db);
+    const dup = duplicateStats(ctx.dbh.db, uid);
     return c.json({
       entries: one('SELECT COUNT(*) c FROM entries WHERE user_id = ?'),
       feeds: one('SELECT COUNT(*) c FROM feeds WHERE user_id = ?'),
-      unread: one('SELECT COUNT(*) c FROM entries WHERE user_id = ? AND is_read = 0'),
-      starred: one('SELECT COUNT(*) c FROM entries WHERE user_id = ? AND is_starred = 1'),
+      // 未读/收藏都不计重复条目，与列表可见范围一致
+      unread: one('SELECT COUNT(*) c FROM entries WHERE user_id = ? AND is_read = 0 AND duplicate_of IS NULL'),
+      starred: one('SELECT COUNT(*) c FROM entries WHERE user_id = ? AND is_starred = 1 AND duplicate_of IS NULL'),
+      // 去重效果可观测：重复率是 §19.3 1.15 判据 ③（<1%）的运行时数据来源
+      duplicates: { count: dup.duplicates, rate: Number(dup.rate.toFixed(4)) },
       queue: { pending: q.pending, running: q.running, dead: q.dead },
     });
   });

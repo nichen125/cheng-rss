@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { extractForEntry, estimateWordCount, type ExtractFailure } from './article.ts';
 import { packText, unpackText } from '../db/text-blob.ts';
+import { ensureLocalVector } from '../dedupe/index.ts';
 
 // 提取任务的执行体（PLAN §7.5）。
 //
@@ -63,6 +64,14 @@ export async function runExtract(db: DatabaseSync, entryId: string): Promise<Ext
                            word_count = COALESCE(?, word_count)
          WHERE id = ? AND stage = 'pending'
       `).run(estimateWordCount(outcome.html), entryId);
+
+      // 正文换成了全文，去重向量必须跟着换。
+      // 不换的后果：摘要型 feed 的条目用"两行导语"算出的向量入库，
+      // 同一篇文章的另一条转载（自带全文）算出的是完全不同的向量，
+      // 余弦达不到 0.95，重复就漏判了 —— 而这正是最常见的一类重复。
+      const row = db.prepare('SELECT title FROM entries WHERE id = ?').get(entryId) as
+        { title: string } | undefined;
+      ensureLocalVector(db, entryId, row?.title ?? '', outcome.html);
     } else {
       // 失败不丢条目：正文保持 feed 原样，只把原因记下来。
       // 用 stage_error 而不是抛错，是因为重试 3 次也不会让 404 变成 200，

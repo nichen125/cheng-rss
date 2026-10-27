@@ -760,6 +760,21 @@ CREATE TABLE embeddings (
 );
 CREATE INDEX idx_emb_model ON embeddings (model);
 
+-- ── 去重向量（v1.10 新增，0002 迁移）────────────────────────────
+-- 与 embeddings 分开的理由：embeddings 存 M2 的真实语义向量（1536 维，
+-- 用于检索与聚类），entry_vectors 存本地判重指纹（256 维，用于"是不是同一篇"）。
+-- 一张表只能有一条主键为 entry_id 的记录 —— 挤在一起，M2 写入真实向量时
+-- 就会把去重指纹覆盖掉，而去重层对语义向量用 0.95 阈值本来就是错的
+-- （语义相近 ≠ 重复）。
+CREATE TABLE entry_vectors (
+  entry_id   TEXT PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
+  dim        INTEGER NOT NULL,
+  vec        BLOB NOT NULL,          -- Float32Array，dim*4 字节
+  model      TEXT NOT NULL,          -- local-hash-v1
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX idx_entry_vectors_model ON entry_vectors (model);
+
 -- ── 跨篇聚合：事件簇 ─────────────────────────────────────────
 CREATE TABLE clusters (
   id           TEXT PRIMARY KEY,
@@ -2380,7 +2395,7 @@ ai-rss/
 │  │  ├─ ai/{client,schemas,analyze,embed,cluster,digest,rag,vector}.ts
 │  │  ├─ mcp/server.ts
 │  │  ├─ extract/{article,run}.ts  # 正文提取（Readability）与落库
-│  │  ├─ dedupe/{url,simhash,cosine}.ts
+│  │  ├─ dedupe/{url,cosine,index,types}.ts  # URL 规范化 / 向量 / 三层判重
 │  │  ├─ jobs/{runner,handlers,queue}.ts
 │  │  ├─ auth/require-user.ts     # 多人预留的唯一开关点
 │  │  └─ compat/huntly/           # 插件兼容层（§14）
@@ -2516,7 +2531,7 @@ FAIL  m0-02-schema      schema_migrations 应为 1 行，实际 0
 | # | 步骤 | 产出 | 自验证命令 | 通过判据 |
 |---|---|---|---|---|
 | 0.1 | 项目内工具链 | `.toolchain/node`、`.npmrc`、`.gitignore`、`scripts/bootstrap.{sh,ps1}` | `m0-01-toolchain.mjs` | ① `node -v` = v24.13.0 ② `npm config get cache` 在项目内 ③ 构建前后 `$HOME` 文件数不变 |
-| 0.2 | 表结构与迁移 | `schema.ts`、`migrations/0001_init.sql`、`migrate.ts` | `m0-02-schema.mjs` | ① 19 张业务表逐一点名存在（不数数量，FTS5 的 shadow 表会干扰计数）② 再跑一次不报错且 `schema_migrations` 仍 1 行 ③ `integrity_check` = ok ④ `entries_fts` 可 `MATCH` |
+| 0.2 | 表结构与迁移 | `schema.ts`、`migrations/0001_init.sql`、`migrate.ts` | `m0-02-schema.mjs` | ① 19 张业务表逐一点名存在（不数数量，FTS5 的 shadow 表会干扰计数）② 再跑一次不报错且 `schema_migrations` 行数 = 迁移清单长度（**不写死 1**：后续每加一个迁移都会让它假红）③ `integrity_check` = ok ④ `entries_fts` 可 `MATCH` |
 | 0.3 | 数据库访问层 | `db/client.ts`、`adapter.ts` | `m0-03-db.mjs` | ① WAL 生效 ② `busy_timeout`=5000 ③ 写 1 万条 < 3s ④ 两进程并发写不报 `SQLITE_BUSY` |
 | 0.4 | HTTP 骨架 | `src/index.ts`、`app.ts`、子命令 | `m0-04-server.mjs` | ① `version`/`doctor` 有输出 ② `/api/health` 200 ③ 未登录访问 `/api/v1/feeds` 返回 401 |
 | 0.5 | 认证 | cookie session + Bearer 双认 | `m0-05-auth.mjs` | ① 登录返回 `Set-Cookie`（`SameSite=Lax`、`Path=/`）② 带 cookie 200 ③ 带 Bearer 200 ④ `loginUserInfo` 未登录返回 **200** 而非 401 |
@@ -2551,12 +2566,12 @@ FAIL  m0-02-schema      schema_migrations 应为 1 行，实际 0
 | 1.12 | 收件箱阅读控制（v1.9） | `m1-12-inbox-view.mjs` | ① 标题行右侧有「全部/未读」分段控件，点「未读」后列表只剩未读 ② 点「全部」回到全量且**已读条目仍在**（只是变灰）③ 刷新按钮点击后重新请求且保留 view/分组/源/搜索 ④ 刷新期间列表条数不归零（`items.length` 不出现中途 0）⑤ 侧栏「未读」与分段控件同一份状态（点一处另一处同步，不会两处高亮不同）⑥ 已收藏行只有一颗星（`star-mark` 已删除，星星就是那个可点按钮）⑦ 375px 视口下标题行无横向溢出 |
 | 1.13 | 配置中心（v1.9） | `m1-13-settings.mjs` | ① 侧栏点「订阅」打开配置弹窗并停在订阅分类（不再切独立页）② 六个分类都在，M2/M3/M6 三个标「待接入」且点开有 ≥3 条清单 ③ 分类切换不重挂：**先在添加面板写入半截 URL**，切走再切回值还在 ④ 遮罩挡住背后点击（`elementFromPoint` 落在弹窗内）⑤ `Esc` 能关且 DOM 真的移除；重开不记住上次分类（关窗前先切到分组做前置）⑥ 分组筛选：`folders>=3` 用 `<select>`、`<=2` 用 chip，删一个组掉到 2 时自动换回 chip ⑦ 下拉选「未分组」只显示 `folderId` 为 null 的源，选回「全部」5 个源都回来 ⑧ 分组页能改名、删组有确认框且说明"订阅退回未分组"，删完订阅页源数不变、未分组 +1 ⑨ 关闭弹窗后侧栏分组列表同步（改名生效、删掉的消失）⑩ 手机上弹窗铺满视口、分类栏横向可滚、分类项 ≥36px、无横向溢出 |
 | 1.14 | 正文提取（Readability 兜底） | `m1-14-extract.mjs` | ① 5 个真实站点（离线夹具）提出正文 ≥ 参照容器 60%，且不含 `script`/`onerror` ② 提取失败（404 / 非 HTML）回退 feed 内 HTML，**条目仍在且不卡 pending** ③ 触发条件生效：feed 正文 ≥ 500 字时**一次网络请求都不发**，且**不排进 extract 队列** ④ 提出内容不到 `max(500, feed×1.2)` 时不替换（认错节点时保留可读内容）⑤ 落库字段齐：`extracted_by`/`stage`/`stage_error`/`word_count` ⑥ 没有 `<body>` 的页面不抛异常且能提出正文 ⑦ 重复入队不重复抓、不覆盖已有结果 ⑧ 20 条短摘要并发提取全部 `extracted`，成功率 100% |
-| 1.15 | 去重（向量层） | `m1-15-dedupe.mjs` | ① 同 URL 不同 utm 参数判重 ② 余弦 >0.95 判重 ③ 混入 20 条重复，重复率 < 1% |
+| 1.15 | 去重（向量层） | `m1-15-dedupe.mjs` | ① 同 URL 不同 utm 参数判重（含 fbclid/gclid/spm/ref/share_*，且 `?p=`/`?id=` 等语义参数保留、不同文章不被误合并）② 余弦 >0.95 判重：逐字相同 + 四种转载变体（标题加站名 / 加版权声明 / 加导语 / 改开头一句）全部命中，不同事件余弦 <0.3 ③ 混入 20 条重复后重复率 <1%（3000 条基数）④ 三层短路：URL 命中不再算向量、不重复写库 ⑤ 重复条目不进时间线、`duplicate_of` 指回原件、`includeDuplicates=1` 可查 ⑥ 向量维度 256 / 字节 = dim×4 / model=`local-hash-v1`，坏 BLOB 不抛 ⑦ 提取到全文后向量随之更新（否则摘要型源永远漏判）⑧ 超短正文不写向量 |
 | 1.16 | 列表/阅读/历史 API | `m1-16-ui-api.mjs` | ① 游标分页不重复不漏 ② `POST /read` 两次 → `read_count=2` ③ 历史按日期分组正确 |
 | 1.17 | RSSHub 搜索 | `m1-17-rsshub.mjs` | ① 关键词搜到路由 ② URL 反查到路由 ③ 预览拉到 ≥1 条 ④ 断网时用 7 天缓存仍能搜 |
 
-**已完成**：1.1~1.14（含 0.9 三栏 UI、移动端、订阅分组与编辑、一键批量管理、
-阅读页交互、控件形状尺度、分组内查看订阅源、收件箱阅读控制、配置中心、正文提取）。
+**已完成**：1.1~1.15（含 0.9 三栏 UI、移动端、订阅分组与编辑、一键批量管理、
+阅读页交互、控件形状尺度、分组内查看订阅源、收件箱阅读控制、配置中心、正文提取、去重）。
 
 **原 1.8「进程清理」已下架**（v1.5）：浏览器自动化交给 DSH 浏览器插件后，
 "脚本自起浏览器 → 攒残留 → 三层清理"这条链的前提消失，`cleanup.mjs`、

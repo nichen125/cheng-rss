@@ -13,6 +13,7 @@ export interface Migration {
 
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'init', file: '0001_init.sql' },
+  { version: 2, name: 'dedupe_vectors', file: '0002_dedupe_vectors.sql' },
 ];
 
 export const CURRENT_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

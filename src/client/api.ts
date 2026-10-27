@@ -113,6 +113,45 @@ export interface HistoryResponse {
   nextCursor: string | null;
 }
 
+export interface RsshubRoute {
+  key: string;
+  title: string;
+  namespace: string;
+  path: string;
+  example: string | null;
+  categories: string[];
+  description: string;
+  namespaceDescription: string;
+  params: string[];
+  paramDocs: { name: string; description: string }[];
+  matchedBy: 'radar' | 'name' | 'description' | 'category' | 'path';
+  viaDomain?: string;
+}
+
+export interface RsshubSearchResponse {
+  items: RsshubRoute[];
+  total: number;
+  type: 'url' | 'keyword';
+  /** 缓存超过 7 天：界面提示"去看看更新"，但仍可用 */
+  stale: boolean;
+  fetchedAt: number;
+  library: { routes: number; radar: number };
+}
+
+export interface RsshubPreviewResponse {
+  ok: boolean;
+  url: string;
+  title: string | null;
+  items: { title: string; link: string | null; publishedAt: number | null }[];
+  error?: string;
+}
+
+export interface RsshubConfigResponse {
+  baseUrl: string;
+  accessKey: string;
+  cache: { routes: number; radar: number; fetchedAt: number; stale: boolean; bytes: number };
+}
+
 export interface EntryDetail extends EntrySummary {
   contentHtml: string | null;
   contentMarkdown: string | null;
@@ -264,6 +303,25 @@ export const api = {
     sp.set('limit', String(params.limit ?? 60));
     return request<HistoryResponse>(`/entries/history?${sp}`);
   },
+
+  // ── RSSHub 订阅搜索（§10）──────────────────────────────
+  rsshubConfig: () => request<RsshubConfigResponse>('/rsshub/config'),
+  saveRsshubConfig: (baseUrl: string, accessKey: string) =>
+    request<RsshubConfigResponse>('/rsshub/config', {
+      method: 'PUT',
+      body: JSON.stringify({ baseUrl, accessKey }),
+    }),
+  refreshRsshub: () =>
+    request<{ ok: boolean; routes: number; radar: number; errors: string[]; ms: number; cache: RsshubConfigResponse['cache'] }>(
+      '/rsshub/refresh', { method: 'POST' },
+    ),
+  searchRsshub: (q: string, limit = 20) =>
+    request<RsshubSearchResponse>(`/rsshub/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  previewRsshub: (path: string, params: Record<string, string> = {}) =>
+    request<RsshubPreviewResponse>('/rsshub/preview', {
+      method: 'POST',
+      body: JSON.stringify({ path, params }),
+    }),
 
   markRead: (id: string, progress?: number) =>
     request<{ ok: boolean }>('/entries/read', {

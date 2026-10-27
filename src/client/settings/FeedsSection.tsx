@@ -21,6 +21,7 @@ import {
   IconRefresh, IconRss, IconSearch, IconTrash,
 } from '../icons.tsx';
 import { FOLDER_DROPDOWN_THRESHOLD, UNFILED, useFeeds } from './store.tsx';
+import { RsshubSearch } from './RsshubSearch.tsx';
 
 interface EditState {
   feed: FeedItem;
@@ -500,6 +501,11 @@ export function FeedsSection(props: { onClose: () => void }) {
           <p className="hint">
             直接贴网站首页也可以 —— 会自动从页面里找订阅地址。
           </p>
+
+          {/* RSSHub 搜索（§10）：没有原生 feed 的站点走这条路。
+              它嵌在「添加订阅」面板里而不是单开入口 —— 用户的目标始终是
+              "把这个网站订上"，RSSHub 只是手段。 */}
+          <RsshubSearch onSubscribe={subscribe} disabled={busy} />
 
           {notes.length > 0 && (
             <ul className="notes">

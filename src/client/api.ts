@@ -69,12 +69,62 @@ export interface EntrySummary {
   wordCount: number | null;
 }
 
+/** 历史条目：比 EntrySummary 多"怎么读的"这一组字段（PLAN §7.4） */
+export interface HistoryEntry {
+  id: string;
+  title: string;
+  url: string;
+  author: string | null;
+  publishedAt: number;
+  /** 最后一次读的时间。历史页的时间轴用它，**不是** publishedAt */
+  readAt: number;
+  firstReadAt: number | null;
+  /** 读过几次。>1 时卡片上画角标（"这篇我回看过"） */
+  readCount: number;
+  /** 0~1；null 表示没有上报过 */
+  readProgress: number | null;
+  isRead: boolean;
+  isStarred: boolean;
+  excerpt: string | null;
+  siteName: string | null;
+  summary: string | null;
+  tier: string | null;
+  faviconUrl: string | null;
+  wordCount: number | null;
+  feedId: string | null;
+  feedTitle: string | null;
+}
+
+export type HistoryBucket = 'today' | 'yesterday' | 'week' | 'earlier';
+
+export interface HistoryGroup {
+  key: HistoryBucket;
+  title: string;
+  count: number;
+  items: HistoryEntry[];
+}
+
+export interface HistoryResponse {
+  groups: HistoryGroup[];
+  /** 本页条数（各分组之和） */
+  count: number;
+  /** 读过的总条数（不含游标条件） */
+  total: number;
+  nextCursor: string | null;
+}
+
 export interface EntryDetail extends EntrySummary {
   contentHtml: string | null;
   contentMarkdown: string | null;
   /** 源站首页（feed 的 site_url）。网页捕获条目没有源，为 null */
   feedSiteUrl: string | null;
   feedTitle: string | null;
+  /** 读过几次（>1 说明回看过） */
+  readCount: number;
+  firstReadAt: number | null;
+  lastReadAt: number | null;
+  /** 0~1；null 表示没上报过 */
+  readProgress: number | null;
   analysis: {
     summary: string;
     keyPoints: string[];
@@ -200,6 +250,21 @@ export const api = {
     return request<ListResponse>(`/entries?${sp}`);
   },
   getEntry: (id: string) => request<EntryDetail>(`/entries/${id}`),
+
+  /**
+   * 阅读历史（按日期分组）。
+   *
+   * 独立于 listEntries：返回结构是"分组数组"而不是"平铺列表 + 游标"，
+   * 因为历史页要渲染日期标题。把它塞进 listEntries 的返回类型，
+   * 会逼所有调用方处理一个它们从来不会用的 groups 字段。
+   */
+  listHistory: (params: { cursor?: string | null; limit?: number } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.cursor) sp.set('cursor', params.cursor);
+    sp.set('limit', String(params.limit ?? 60));
+    return request<HistoryResponse>(`/entries/history?${sp}`);
+  },
+
   markRead: (id: string, progress?: number) =>
     request<{ ok: boolean }>('/entries/read', {
       method: 'POST',

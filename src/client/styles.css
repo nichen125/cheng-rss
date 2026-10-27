@@ -449,6 +449,37 @@ input::placeholder { color: var(--fg-faint); }
 
 .entry-list { list-style: none; margin: 0; padding: 0; }
 
+/* ── 阅读历史的分组标题（§7.4）─────────────────────────────
+   粘性定位：滚动时"今天/昨天/本周/更早"要一直挂在顶上，
+   否则滚到第 40 条时用户已经不知道自己在哪个时间段里了。
+   底色不能透明 —— 透明的话条目会从标题下面穿过去显形。 */
+.hist-group { display: block; }
+
+.hist-title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 16px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--fg-faint);
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* 计数跟标题同一行、更淡：它是注释，不是第二个标题 */
+.hist-count { font-size: 11px; font-weight: 400; color: var(--fg-faint); opacity: 0.7; }
+
+/* 回看角标与已读进度。都要比元信息更安静 ——
+   它们是"附加事实"，抢了标题的注意力就本末倒置了。 */
+.read-count { color: var(--accent); opacity: 0.85; }
+.read-progress { opacity: 0.7; }
+
 .entry-item {
   display: block;
   width: 100%;

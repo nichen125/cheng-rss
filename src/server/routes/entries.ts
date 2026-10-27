@@ -7,6 +7,7 @@ import { queueStats } from '../jobs/queue.ts';
 import { unpackText } from '../db/text-blob.ts';
 import { sanitizeHtml } from '../feeds/sanitize.ts';
 import { duplicateStats } from '../dedupe/index.ts';
+import { groupByDay } from '../entries/history.ts';
 
 // 条目相关 API。
 //
@@ -86,17 +87,35 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       params.push(...ftsIds);
     }
 
+    // 排序键必须在游标比较之前确定：历史视图按 last_read_at 排，
+    // 若游标仍拿 published_at 比，翻页会在"发布时间最新但读得最早"的
+    // 那几条上原地打转（或跳过大段）。
+    const orderCol = view === 'history' ? 'e.last_read_at' : 'e.published_at';
+
+    // 先把"不含游标"的条件存一份，供 total 使用。
+    // 带游标算 total 的话，翻页时标题行的数字会一路缩小（30 → 20 → 10），
+    // 用户会以为数据在丢 —— 它其实只是"这条游标之后还剩多少"。
+    const baseWhere = [...where];
+    const baseParams = [...params];
+
     if (cursor) {
-      const [pubStr, idStr] = cursor.split('_');
+      // 游标格式 `<时间戳>_<id>`，而 id 本身形如 `e_1a2b3c…`（含下划线）。
+      //
+      // 这里必须**只按第一个下划线切**。早先写的是 `cursor.split('_')`
+      // 再取 `[1]`，拿到的是 `'e'` —— 于是同一毫秒的条目全部被判为
+      // "id 不小于游标"，翻页时那一批被整段跳过（且悄无声息）。
+      // 只在"同一毫秒多于 limit 条"时才复现，所以一直没被发现。
+      const sep = cursor.indexOf('_');
+      const pubStr = sep < 0 ? cursor : cursor.slice(0, sep);
+      const idStr = sep < 0 ? '' : cursor.slice(sep + 1);
       const pub = Number(pubStr);
       if (Number.isFinite(pub)) {
         // 严格小于游标位置；同毫秒用 id 打破平局
-        where.push('(e.published_at < ? OR (e.published_at = ? AND e.id < ?))');
-        params.push(pub, pub, idStr ?? '');
+        where.push(`(${orderCol} < ? OR (${orderCol} = ? AND e.id < ?))`);
+        params.push(pub, pub, idStr);
       }
     }
 
-    const orderCol = view === 'history' ? 'e.last_read_at' : 'e.published_at';
     const sql = `
       SELECT e.id, e.title, e.url, e.author, ${orderCol} AS sort_at,
              e.published_at AS published_at, e.excerpt, e.is_read, e.is_starred,
@@ -147,10 +166,100 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     }
 
     const totalRow = ctx.dbh.db.prepare(
-      `SELECT COUNT(*) AS c FROM entries e WHERE ${where.join(' AND ')}`,
-    ).get(...params) as { c: number };
+      `SELECT COUNT(*) AS c FROM entries e WHERE ${baseWhere.join(' AND ')}`,
+    ).get(...baseParams) as { c: number };
 
     return c.json({ items, total: Number(totalRow.c), nextCursor });
+  });
+
+  // ── 阅读历史（按日期分组，PLAN §7.4）───────────────────
+  //
+  // **必须注册在 `/entries/:id` 之前**。Hono 按注册顺序匹配，若晚一步，
+  // `/entries/history` 会被 `:id` 吃掉，把 "history" 当成一个条目 id
+  // 去查库，返回 404 —— 而且报错信息（"条目不存在"）完全指不到真正原因。
+  r.get('/entries/history', (c) => {
+    const uid = requireUserId(c);
+    const rawLimit = Number(c.req.query('limit') ?? 60);
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 60, 1), 200);
+    const cursor = c.req.query('cursor') ?? null;
+
+    const where: string[] = ['e.user_id = ?', 'e.last_read_at IS NOT NULL'];
+    const params: (string | number)[] = [uid];
+    // total 用**不含游标**的条件算（见下方注释），所以先把基础条件存一份
+    const baseWhere = [...where];
+    const baseParams = [...params];
+
+    // 历史只看"读过的"，与 inbox 的 is_hidden 无关：
+    // 隐藏一条未读是为了不看它，不代表"我读过它"该从历史里消失。
+    if (cursor) {
+      const sep = cursor.indexOf('_');
+      const atStr = sep < 0 ? cursor : cursor.slice(0, sep);
+      const idStr = sep < 0 ? '' : cursor.slice(sep + 1);
+      const at = Number(atStr);
+      if (Number.isFinite(at)) {
+        where.push('(e.last_read_at < ? OR (e.last_read_at = ? AND e.id < ?))');
+        params.push(at, at, idStr);
+      }
+    }
+
+    const rows = ctx.dbh.db.prepare(`
+      SELECT e.id, e.title, e.url, e.author, e.published_at, e.last_read_at,
+             e.first_read_at, e.read_count, e.read_progress, e.is_read, e.is_starred,
+             e.excerpt, e.site_name, e.favicon_url, e.word_count,
+             e.feed_id AS feed_id, fd.title AS feed_title,
+             a.summary AS summary, a.tier AS tier
+        FROM entries e
+        LEFT JOIN entry_analysis a ON a.entry_id = e.id
+        LEFT JOIN feeds fd ON fd.id = e.feed_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY e.last_read_at DESC, e.id DESC
+       LIMIT ?
+    `).all(...params, limit + 1) as Record<string, unknown>[];
+
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit);
+
+    const items = page.map((row) => ({
+      id: row.id,
+      title: row.title,
+      url: row.url,
+      author: row.author,
+      publishedAt: Number(row.published_at),
+      // readAt 与 publishedAt 分开给：历史页的时间轴用 readAt，
+      // 而卡片上仍要显示"原文发表于何时"。混成一个字段就没法区分了。
+      readAt: Number(row.last_read_at),
+      firstReadAt: row.first_read_at === null ? null : Number(row.first_read_at),
+      readCount: Number(row.read_count ?? 0),
+      readProgress: row.read_progress === null ? null : Number(row.read_progress),
+      isRead: Boolean(row.is_read),
+      isStarred: Boolean(row.is_starred),
+      excerpt: row.excerpt,
+      siteName: row.site_name,
+      summary: row.summary,
+      tier: row.tier,
+      faviconUrl: row.favicon_url,
+      wordCount: row.word_count === null ? null : Number(row.word_count),
+      feedId: row.feed_id ?? null,
+      feedTitle: row.feed_title ?? null,
+    }));
+
+    const last = page[page.length - 1];
+    const nextCursor = hasMore && last
+      ? `${Number(last.last_read_at)}_${String(last.id)}`
+      : null;
+
+    // total 用**不含游标**的条件算：带了游标就只剩"这页之后还有几条"，
+    // 标题行显示的数字会在翻页时一路缩小 —— 看着像数据丢了。
+    const totalRow = ctx.dbh.db.prepare(
+      `SELECT COUNT(*) AS c FROM entries e WHERE ${baseWhere.join(' AND ')}`,
+    ).get(...baseParams) as { c: number };
+
+    return c.json({
+      groups: groupByDay(items, (x) => x.readAt),
+      count: items.length,
+      total: Number(totalRow.c),
+      nextCursor,
+    });
   });
 
   // ── 详情 ────────────────────────────────────────────────
@@ -207,6 +316,11 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       feedSiteUrl: row.feed_site_url ?? null,
       feedTitle: row.feed_title ?? null,
       highlightCount: Number(row.highlight_count ?? 0),
+      // 阅读历史三件套：读过几次 / 第一次读 / 读了多少
+      readCount: Number(row.read_count ?? 0),
+      firstReadAt: row.first_read_at === null ? null : Number(row.first_read_at),
+      lastReadAt: row.last_read_at === null ? null : Number(row.last_read_at),
+      readProgress: row.read_progress === null ? null : Number(row.read_progress),
       contentHtml: html,
       contentMarkdown: null,
       analysis,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  api, ApiFailure, type EntryDetail, type EntrySummary, type FeedItem, type FolderItem, type User,
+  api, ApiFailure, type EntryDetail, type EntrySummary, type FeedItem, type FolderItem,
+  type HistoryGroup, type User,
 } from './api.ts';
 import {
   IconArrowLeft, IconBookmark, IconCheck, IconChevronRight, IconCircle, IconClock, IconClose,
@@ -250,6 +251,14 @@ function Main(props: { user: User; onLogout: () => void }) {
   const [refreshing, setRefreshing] = useState(false);
   /** 自增后让分组内源列表（chip 上的未读数）也重取一次 */
   const [reloadTick, setReloadTick] = useState(0);
+  /**
+   * 历史视图的分组（PLAN §7.4）。
+   *
+   * null = 当前不在历史视图（或还没加载）。用 null 而不是空数组，是为了
+   * 区分"历史里确实没有记录"和"还没取到" —— 空数组会让加载中的一瞬间
+   * 闪出「还没有阅读记录」。
+   */
+  const [historyGroups, setHistoryGroups] = useState<HistoryGroup[] | null>(null);
 
   // 偏好变更 → 立刻写 CSS 变量 + 落盘。
   // 放在 effect 里而不是 setPrefs 的调用处：刷新页面时初次挂载也要应用一次。
@@ -288,6 +297,34 @@ function Main(props: { user: User; onLogout: () => void }) {
   }, [view, debounced, cursor, scope]);
 
   useEffect(() => { void load(true); /* eslint-disable-next-line */ }, [view, debounced, scope]);
+
+  /**
+   * 历史视图的数据（PLAN §7.4）。
+   *
+   * 走 /entries/history 而不是 /entries?view=history：两者返回结构不同 ——
+   * 后者是平铺列表，前端还得自己按本地日期分桶（一份逻辑写两遍，
+   * 服务端已经算好了）。这里只负责取回来渲染。
+   */
+  useEffect(() => {
+    if (view !== 'history') { setHistoryGroups(null); return; }
+    let alive = true;
+    setLoading(true);
+    setErr('');
+    api.listHistory({ limit: 60 })
+      .then((r) => {
+        if (!alive) return;
+        setHistoryGroups(r.groups);
+        setTotal(typeof r.total === 'number' ? r.total : null);
+        setCursor(r.nextCursor);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setErr(e instanceof Error ? e.message : '加载历史失败');
+        setHistoryGroups([]);
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [view, reloadTick]);
 
   const refreshStats = useCallback(() => {
     api.stats().then((s) => {
@@ -793,7 +830,7 @@ function Main(props: { user: User; onLogout: () => void }) {
         <div className="list-scroll">
           {err && <div className="alert error inset">{err}</div>}
 
-          {!loading && items.length === 0 && (
+          {!loading && items.length === 0 && view !== 'history' && (
             <EmptyState
               hasQuery={Boolean(debounced)}
               view={view}
@@ -803,6 +840,110 @@ function Main(props: { user: User; onLogout: () => void }) {
             />
           )}
 
+          {/* 历史视图：按日期分组渲染（§7.4）。
+              分组标签是数据的一部分，不是装饰 —— 用户看历史时问的第一个
+              问题是"这是什么时候读的"，不是"发布什么时候"。所以行内
+              时间显示 readAt（读的时间），发布日期降级为副信息。 */}
+          {view === 'history' && (
+            historyGroups !== null && historyGroups.length === 0 && !loading ? (
+              <EmptyState hasQuery={false} view="history" scopeLabel={null} />
+            ) : (
+              (historyGroups ?? []).map((g) => (
+                <section className="hist-group" key={g.key} data-bucket={g.key}>
+                  <h2 className="hist-title">
+                    {g.title}
+                    <span className="hist-count">{g.count}</span>
+                  </h2>
+                  <ul className="entry-list">
+                    {g.items.map((it) => (
+                      <li key={it.id}>
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          className={`entry-item ${it.isRead ? 'read' : ''} ${openId === it.id ? 'active' : ''}`}
+                          data-tier={it.tier ?? 'normal'}
+                          onClick={() => void open(it.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              void open(it.id);
+                            }
+                          }}
+                        >
+                          <div className="entry-top">
+                            {it.faviconUrl
+                              ? <img className="favicon" src={it.faviconUrl} alt="" loading="lazy"
+                                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                              : <span className="favicon fallback">{(it.siteName ?? hostOf(it.url) ?? '?').slice(0, 1).toUpperCase()}</span>}
+                            <span className="entry-site">{it.siteName ?? hostOf(it.url)}</span>
+                            <span className="dot">·</span>
+                            {/* 读的时间在前，发布多久以前放在 title 里 ——
+                                历史页的坐标是"我什么时候读的" */}
+                            <span className="entry-time" title={`发布于 ${timeAgo(it.publishedAt)}`}>
+                              {timeAgo(it.readAt)}
+                            </span>
+                            {/* 读过多次：回看过的文章值得一个角标，它说明
+                                "这篇我后来又翻过一次"，是收藏之外的另一个信号 */}
+                            {it.readCount > 1 && (
+                              <span className="meta read-count" title={`读过 ${it.readCount} 次`}>
+                                ×{it.readCount}
+                              </span>
+                            )}
+                            {it.readProgress !== null && it.readProgress > 0 && it.readProgress < 0.95 && (
+                              <span className="meta read-progress" title={`读到 ${Math.round(it.readProgress * 100)}%`}>
+                                {Math.round(it.readProgress * 100)}%
+                              </span>
+                            )}
+                            <span className="grow" />
+                            <span className="entry-ops">
+                              <button
+                                type="button"
+                                className={`icon-btn tiny ${it.isStarred ? 'on' : ''}`}
+                                title={it.isStarred ? '取消收藏' : '收藏'}
+                                aria-pressed={it.isStarred}
+                                onClick={(e) => { e.stopPropagation(); void toggleStar(it.id); }}
+                              >
+                                <IconStar size={13} filled={it.isStarred} />
+                              </button>
+                              <a
+                                className="icon-btn tiny"
+                                href={it.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="在新标签打开原文"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <IconExternal size={13} />
+                              </a>
+                            </span>
+                          </div>
+                          <a
+                            className="entry-title"
+                            href={it.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => {
+                              if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                                e.preventDefault();
+                                void open(it.id);
+                              }
+                            }}
+                          >
+                            {it.title}
+                          </a>
+                          {(it.summary || it.excerpt) && (
+                            <p className="entry-summary">{it.summary ?? it.excerpt}</p>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))
+            )
+          )}
+
+          {view !== 'history' && (
           <ul className="entry-list">
             {items.map((it) => (
               <li key={it.id}>
@@ -892,8 +1033,9 @@ function Main(props: { user: User; onLogout: () => void }) {
               </li>
             ))}
           </ul>
+          )}
 
-          {cursor && (
+          {cursor && view !== 'history' && (
             <div className="load-more">
               <button className="btn" onClick={() => void load(false)} disabled={loading}>
                 {loading ? '加载中…' : '加载更多'}

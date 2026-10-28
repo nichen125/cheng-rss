@@ -13,6 +13,7 @@ import { buildHandlers } from './server/jobs/handlers.ts';
 import { sweepDueFeeds } from './server/routes/feeds.ts';
 import { ensureOwnerUser, countUsers, purgeExpiredSessions } from './server/auth/session.ts';
 import { pruneOldVectors } from './server/dedupe/index.ts';
+import { countOrphanPending, enqueueOrphanExtracts } from './server/extract/backfill.ts';
 
 // esbuild 打包时注入（scripts/build-server.mjs）；源码模式走 package.json
 declare const __AI_RSS_VERSION__: string | undefined;
@@ -335,6 +336,33 @@ async function cmdServe(args: Args): Promise<void> {
   }, 60_000);
   sweepTimer.unref?.();
 
+  // 补录孤儿提取任务（PLAN §7.5，v1.17）。
+  //
+  // 为什么必须有一条兜底，而不是"上游入队写对了就够"：pending 状态的
+  // 唯一含义是"等提取"，而队列里有没有它的任务是**另一张表**的事。
+  // 两者脱钩过一次（1.14 之前 stage 硬编码 pending，那时还没有提取任务），
+  // 结果是 514 条条目永远停在 pending、正文只有 feed 给的几十个字。
+  // 修上游只能保证以后不再新增，存量要有人认领。
+  //
+  // 每小时一轮、每轮 200 条：一场升级留下的积压在一小时内收敛，
+  // 而正常运行时这个查询是 0 命中（0.16ms，比一次抓取便宜得多）。
+  const backfill = () => {
+    try {
+      const n = enqueueOrphanExtracts(h.db);
+      const left = countOrphanPending(h.db);
+      if (n > 0 || left > 0) {
+        log.info(`补录 ${n} 条待提取条目`, { remaining: left });
+      }
+    } catch (e) {
+      log.warn('补录待提取条目失败', { err: (e as Error).message });
+    }
+  };
+  // 启动 30 秒后先跑一轮：积压不该等一个小时
+  const firstBackfill = setTimeout(backfill, 30_000);
+  firstBackfill.unref?.();
+  const backfillTimer = setInterval(backfill, 3600_000);
+  backfillTimer.unref?.();
+
   // 每日维护：清掉过期的去重向量（PLAN §7.1 L2）。
   //
   // 判重只看近 14 天的候选，更早的向量永远读不到，但一条 1KB × 10 万条
@@ -383,6 +411,8 @@ async function cmdServe(args: Args): Promise<void> {
     clearInterval(sweepTimer);
     clearTimeout(firstPrune);
     clearInterval(pruneTimer);
+    clearTimeout(firstBackfill);
+    clearInterval(backfillTimer);
     try {
       if (runner) await runner.stop();
     } catch { /* runner 已停 */ }

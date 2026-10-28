@@ -349,11 +349,28 @@ input::placeholder { color: var(--fg-faint); }
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+/* 列表栏标题行（§15.22，v1.17 重构）。
+
+   原来是「h1 + 条数 + × + 分段控件 + 刷新」五样东西挤在一个
+   `align-items: baseline` 的 flex 里，各自用 align-self 找位置：
+   文字坐在基线上、22px 的控件坐在中线上，同一行里两种对齐基准，
+   视觉上整行是歪的 —— 需求方反馈的「标题部分、数量、清除分组信息
+   等都不对齐」就是这个。
+
+   现在拆两层，语义上也是两件事：
+     · 左段（h1 + .pane-count）：我在看什么
+     · 右段（.pane-actions）：能对它做什么
+   外层 align-items: center 让左段整体垂直居中，右段整块 margin-left:
+   auto 贴住右边，内部匀速 gap。分段控件在收藏/历史视图隐藏时，
+   右段只是少了一个孩子，其余按钮不会跟着跳（原来它们靠 margin-left:
+   auto 各自定位，一显一隐就错位）。 */
 .pane-title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 9px;
   margin-bottom: 11px;
+  /* 标题很长时必须能截断，而不是把右段挤出视口 */
+  min-width: 0;
 }
 .pane-title h1 {
   font-size: 16px;
@@ -371,46 +388,36 @@ input::placeholder { color: var(--fg-faint); }
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+  /* 用行高而不是 padding 对齐：h1 是 16px/1.6=25.6，条数是 12px，
+     两者基线本来就差一截。给条数一条和标题行等高的小行盒，
+     文字的视觉中线就和标题对齐了。 */
+  line-height: 22px;
 }
 
-/* 标题行右侧的「全部 / 未读」+ 刷新（§15.14）。
-
-   .pane-title 是 align-items: baseline —— 分段控件的基线取的是它内部
-   第一行文字的基线，直接放进来会整体往下掉。两个元素各自 align-self:
-   center 就回到视觉中线，不动父容器的对齐方式（改了会把 h1 和「N 条」
-   的基线一起带歪）。
-
-   两者都压到 22px 高，与标题行 h1 的行高相同：控件高过它就会撑高
-   .pane-head，把列表往下推 —— 而"不额外占高度"正是把它们放进标题行
-   而不是单开一行的全部理由。刷新按钮直接用 .icon-btn.tiny（22×22）；
-   分段控件靠 `.seg-btn.sm` 把行高收到 16px，加上 .seg 自己的
-   1px 边框 ×2 + 2px 内衬 ×2 = 22px，**容器一个数都不用改**。
-
-   所以内圆角仍是 calc(7 − 2) = 5，与偏好面板里那个分段控件一致 ——
-   §15.12 和 m1-10 认的就是这个 5。要是为了凑高度去动 .seg 的内衬，
-   内圆角就变成 6：既不在尺度里，也是"内圆角只比外圆角小 1px"的错位
-   （那正是 §15.12 记的第四个缺陷）。
-
-   为什么不写成 `.pane-seg .seg-btn`：那样 DOM 上它和偏好面板里的
-   分段按钮是同一个 `seg-btn`，m1-10 的「同一 class 高度唯一」会把
-   16px 和 23px 判成缺陷 —— 那条断言是对的。紧凑版本来就是显式的
-   尺寸变体，跟 .icon-btn / .icon-btn.tiny 用同一套办法表达。 */
-.pane-seg {
-  align-self: center;
+/* 右段：分段控件 / 清除未读 / 清除范围 / 刷新。
+   margin-left: auto 把整块推到右边，内部 gap 固定 —— 任何一个按钮
+   显隐都只影响自己那一格，其余位置不动。 */
+.pane-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
 }
+
+/* 所有标题行按钮统一 22×22。尺寸一致是"对齐"的前提：原来 .scope-clear
+   是 20px、刷新是 22px、分段控件是 23px，三个高度摆在一排必然高低不齐。 */
+.pane-actions .icon-btn.tiny { width: 22px; height: 22px; }
+
+/* 「全部 / 未读」分段控件（§15.14）。
+   不再需要 align-self: center / margin-left: auto —— 父级 .pane-actions
+   已经是 flex + center，间距由 gap 承担。 */
+.pane-seg { flex-shrink: 0; }
 .seg-btn.sm {
   padding: 0 7px;
   font-size: 11.5px;
   line-height: 16px;
 }
-.refresh-btn {
-  align-self: center;
-  margin-left: 4px;
-  flex-shrink: 0;
-}
-/* 刷新中：图标转起来，按钮保持原位（尺寸不发散、周围不重排） */
 .refresh-btn.spinning svg { animation: spin 700ms linear infinite; }
 .refresh-btn:disabled { opacity: 0.6; }
 
@@ -418,24 +425,25 @@ input::placeholder { color: var(--fg-faint); }
    原来是「只看分组 · 清除」一整块实心按钮，宽 129 高 40，原因是它命中了
    全局 button 规则（padding 7px 13px + background + border）。
    它做的事只是"退出一个视图过滤"，不该比标题还重。
-   现在：无背景、无边框、20px 见方，hover 才给底色。 */
+   现在：无背景、无边框，尺寸与同排的其他 icon-btn 相同，hover 才给底色。 */
 .scope-clear {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
   padding: 0;
-  margin-left: 2px;
   border: none;
   background: none;
   border-radius: var(--radius-xs);
   color: var(--fg-faint);
   cursor: pointer;
-  align-self: center;
   flex-shrink: 0;
 }
 .scope-clear:hover { background: var(--bg-hover); color: var(--fg); }
+
+/* 清除未读（§15.21）：与 × 同一个视觉重量，但常显的语义更强，
+   所以未读 > 0 时颜色正常，hover 用 accent 而不是中性色。 */
+.mark-read-btn { color: var(--fg-dim); }
+.mark-read-btn:hover { color: var(--accent); }
 
 /* ── 侧栏分组树（§15.13 v1.13）─────────────────────────────
  *

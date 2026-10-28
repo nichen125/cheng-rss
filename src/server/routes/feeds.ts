@@ -409,6 +409,43 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     return c.json({ ok: true, queued, total: rows.length });
   });
 
+  // ── 复活所有「失效」源并立刻重抓（§15.23，v1.17）──────
+  //
+  // broken 是终态：sweep 只挑 active，所以一个被误判的源会永远停在
+  // 「失效」，除非用户手动挨个点重试。v1.17 修了误判的来源
+  // （瞬时失败不再置 broken，见 store.ts），但**已经坏掉的那批还躺在库里** ——
+  // 修判据不会回头改数据，就像修 pending 那批要补录任务一样。
+  //
+  // 所以这里提供一个批量复活：status 改回 active、error_count 归零、
+  // next_fetch_at 立刻到期，然后入队。
+  //
+  // 为什么不自动定期跑：复活的代价是一次抓取。对真的死掉的源
+  // （域名没了）每小时试一次毫无意义，而它对用户可见的成本是
+  // 日志里一排失败。让用户按一次按钮，比让服务自己猜要诚实。
+  r.post('/feeds/retry-broken', (c) => {
+    const uid = requireUserId(c);
+    const rows = listFeeds(ctx.dbh.db, uid).filter((f) => f.status === 'broken');
+    const now = Date.now();
+    const upd = ctx.dbh.db.prepare(
+      `UPDATE feeds SET status = 'active', error_count = 0, next_fetch_at = ?
+        WHERE id = ? AND user_id = ? AND status = 'broken'`,
+    );
+    let revived = 0;
+    let queued = 0;
+    ctx.dbh.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const f of rows) {
+        revived += Number(upd.run(now, f.id, uid).changes ?? 0);
+        if (enqueueFetch(ctx.dbh.db, f.id, 100) !== null) queued++;
+      }
+      ctx.dbh.db.exec('COMMIT');
+    } catch (e) {
+      ctx.dbh.db.exec('ROLLBACK');
+      throw e;
+    }
+    return c.json({ ok: true, revived, queued, total: rows.length });
+  });
+
   // ── OPML ────────────────────────────────────────────────
   r.get('/feeds/export', (c) => {
     const uid = requireUserId(c);

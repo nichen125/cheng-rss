@@ -34,7 +34,7 @@ export function FeedsSection(props: { onClose: () => void }) {
   const {
     feeds, folders, loading, err, notice, busy, filter,
     setFilter, setErr, setNotice, setBusy, reload, fail,
-    visible, grouped, unfiledCount, totalUnread,
+    visible, grouped, unfiledCount, totalUnread, brokenCount,
   } = useFeeds();
 
   const [adding, setAdding] = useState(false);
@@ -135,6 +135,32 @@ export function FeedsSection(props: { onClose: () => void }) {
       setTimeout(() => void reload(), 2000);
     } catch (e) {
       fail(e, '刷新失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * 复活所有「失效」源（§15.23，v1.17）。
+   *
+   * 为什么要一个按钮而不是自动做：broken 是终态，sweep 只挑 active，
+   * 所以判据修好之后已经坏掉的那批不会自己回来 —— 但反过来"每小时
+   * 自动复活一次"对真的死掉的源只是往日志里添一排失败。让用户按一次，
+   * 比让服务自己猜要诚实。
+   */
+  const retryBroken = async () => {
+    setBusy(true);
+    setErr('');
+    try {
+      const r = await api.retryBrokenFeeds();
+      setNotice(
+        r.revived === 0
+          ? '没有标记为失效的源'
+          : `已恢复 ${r.revived} 个源并加入抓取队列，稍后看结果`,
+      );
+      await reload();
+    } catch (e) {
+      fail(e, '重试失败');
     } finally {
       setBusy(false);
     }
@@ -329,6 +355,18 @@ export function FeedsSection(props: { onClose: () => void }) {
           </p>
         </div>
         <div className="feeds-actions">
+          {/* 复活失效源（§15.23，v1.17）。只在确实有失效源时出现 ——
+              没有坏源时它就是一个永远按不出效果的按钮。 */}
+          {brokenCount > 0 && (
+            <button
+              className="btn"
+              onClick={() => void retryBroken()}
+              disabled={busy}
+              title={`把 ${brokenCount} 个标记为「失效」的源改回正常并立刻重抓一次`}
+            >
+              重试失效源 · {brokenCount}
+            </button>
+          )}
           <button
             className={`btn ${bulkMode ? 'active' : ''}`}
             onClick={() => (bulkMode ? exitBulk() : enterBulk())}

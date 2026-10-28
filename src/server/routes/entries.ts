@@ -315,6 +315,10 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       // 网页捕获的条目没有 feed，这里是 null，前端据此不渲染入口。
       feedSiteUrl: row.feed_site_url ?? null,
       feedTitle: row.feed_title ?? null,
+      // v1.17：阅读时要把"这篇所属的源/分组"的未读数就地减一（§15.14 修订），
+      // 详情接口就得说清它属于谁。列表接口早就有这个字段（列表行要知道源名），
+      // 详情此前只有 feedTitle —— 靠标题反查源 id 在改名或重名时会错。
+      feedId: row.feed_id ?? null,
       highlightCount: Number(row.highlight_count ?? 0),
       // 阅读历史三件套：读过几次 / 第一次读 / 读了多少
       readCount: Number(row.read_count ?? 0),
@@ -325,6 +329,58 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       contentMarkdown: null,
       analysis,
     });
+  });
+
+  // ── 把一个范围内的未读全部标为已读（§15.21，v1.17）──
+  //
+  // 范围只接受分组或源，不接受"全库"：需求方明确只要求 ① 按分组
+  // ② 按单个订阅。留一个不带范围的入口等于给产品开一个"一键把整个库
+  // 读光"的按钮 —— 那个操作的代价（所有未读消失）和它的收益（省几十次
+  // 点击）完全不成比例。
+  //
+  // 语义上刻意**不写阅读历史**：`first_read_at` / `last_read_at` /
+  // `read_count` 一概不动，只把 `is_read` 置 1。
+  //
+  // 理由是这个动作的真实含义是"这些我不打算看了"，不是"我读过了"。
+  // 若在这里补 `last_read_at = now`，「历史」页会凭空多出 200 条我从未
+  // 打开过的文章，且每条都带"今天读过"的时间戳 —— 那是在伪造阅读记录。
+  // 与 POST /entries/read 的区别正在此：那个是"我真的打开了"，
+  // 这个是"我不想看见它了"。
+  r.post('/entries/mark-all-read', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as {
+      feedId?: string | null;
+      folderId?: string | null;
+    };
+    const feedId = typeof body.feedId === 'string' && body.feedId ? body.feedId : null;
+    const folderId = typeof body.folderId === 'string' && body.folderId ? body.folderId : null;
+    if (!feedId && !folderId) {
+      throw badRequest('需要 feedId 或 folderId —— 不支持把整个库一次标为已读');
+    }
+
+    const where: string[] = ['e.user_id = ?', 'e.is_read = 0', 'e.duplicate_of IS NULL'];
+    const params: (string | number)[] = [uid];
+    if (feedId) {
+      where.push('e.feed_id = ?');
+      params.push(feedId);
+    }
+    if (folderId === 'none') {
+      where.push(
+        '(e.feed_id IS NULL OR e.feed_id IN (SELECT id FROM feeds WHERE user_id = ? AND folder_id IS NULL))',
+      );
+      params.push(uid);
+    } else if (folderId) {
+      where.push('e.feed_id IN (SELECT id FROM feeds WHERE user_id = ? AND folder_id = ?)');
+      params.push(uid, folderId);
+    }
+
+    const r = ctx.dbh.db.prepare(
+      `UPDATE entries SET is_read = 1 WHERE id IN (
+         SELECT e.id FROM entries e WHERE ${where.join(' AND ')}
+       )`,
+    ).run(...params);
+
+    return c.json({ ok: true, count: Number(r.changes ?? 0) });
   });
 
   // ── 标记已读（幂等，PLAN §7.4）───────────────────────────

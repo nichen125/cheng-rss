@@ -67,6 +67,8 @@ export interface EntrySummary {
   faviconUrl: string | null;
   thumbnailUrl: string | null;
   wordCount: number | null;
+  /** 所属的源 id；网页捕获的条目为 null（v1.17 起列表与详情都带） */
+  feedId: string | null;
 }
 
 /** 历史条目：比 EntrySummary 多"怎么读的"这一组字段（PLAN §7.4） */
@@ -336,6 +338,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ids: [id] }),
     }),
+  /**
+   * 把一个范围（分组 / 单个源）的未读一次标为已读（§15.21，v1.17）。
+   *
+   * 只接受范围，不支持全库 —— 后端会拒绝不带 feedId/folderId 的请求。
+   * 与 markRead 的区别：这条不写阅读历史（first_read_at / last_read_at /
+   * read_count 都不动），因为它表达的是"不想看了"，不是"读过了"。
+   */
+  markAllRead: (scope: { feedId?: string | null; folderId?: string | null }) =>
+    request<{ ok: boolean; count: number }>('/entries/mark-all-read', {
+      method: 'POST',
+      body: JSON.stringify(scope),
+    }),
   /** 阅读进度上报。只增不减，重复值后端直接返回 changed:false。 */
   reportProgress: (id: string, progress: number) =>
     request<{ ok: boolean; progress: number; changed: boolean }>(`/entries/${id}/progress`, {
@@ -440,6 +454,16 @@ export const api = {
     request<{ ok: boolean; queued: boolean }>(`/feeds/${id}/refresh`, { method: 'POST' }),
   refreshAllFeeds: () =>
     request<{ ok: boolean; queued: number; total: number }>('/feeds/refresh-all', { method: 'POST' }),
+  /**
+   * 复活所有「失效」源并立刻重抓（§15.23，v1.17）。
+   *
+   * broken 是终态，sweep 不会再碰它 —— 判据修好之后，已经坏掉的那批
+   * 仍然躺在库里，需要一个显式动作把它们拉回时间线。
+   */
+  retryBrokenFeeds: () =>
+    request<{ ok: boolean; revived: number; queued: number; total: number }>(
+      '/feeds/retry-broken', { method: 'POST' },
+    ),
   updateFeed: (id: string, patch: { title?: string | null; fetchInterval?: number; status?: 'active' | 'paused' }) =>
     request<{ feed: FeedItem }>(`/feeds/${id}`, {
       method: 'PATCH',

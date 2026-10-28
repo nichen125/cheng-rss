@@ -127,11 +127,15 @@ const mock = createServer((req, res) => {
   if (url === '/empty.xml') {
     return send(200, 'application/rss+xml', EMPTY_FEED.replaceAll('PORT', String(mockPort)));
   }
+  // ⑨ 瞬时失败的靶子：500 是**可重试**的（站点临时挂了），
+  // 与 /missing 的 404 形成对照 —— 这是 v1.17 判据的分界线。
+  if (url === '/boom') {
+    return send(500, 'text/plain', 'temporary failure');
+  }
   if (url === '/site') {
     // 一个没有 feed <link> 的普通网页
     return send(200, 'text/html', '<html><body><h1>只是个网页</h1></body></html>');
-  }
-  if (url === '/site-with-link') {
+  }  if (url === '/site-with-link') {
     return send(200, 'text/html', `<html><head>
       <link rel="alternate" type="application/rss+xml" href="http://127.0.0.1:${mockPort}/feed.xml">
       </head><body>有订阅链接的网页</body></html>`);
@@ -331,7 +335,10 @@ check('没有 feed 时 found=false 且给出说明', () => {
 });
 
 // ── ④ 404 源置 broken ──────────────────────────────────────
-// 直接建一个指向 404 的源，然后连续刷新 3 次
+// 直接建一个指向 404 的源，然后刷新三次。
+// 404 是**永久失效**，第一次就该置 broken；但仍然抓三次，是为了顺带确认
+// "已经 broken 的源再抓也不会变成别的状态"（v1.17 起判据只剩 !retryable，
+// 三次的写法保留是因为它同时覆盖了"再次失败不该把 broken 改回 active"）。
 const { DatabaseSync } = await import('node:sqlite');
 const db = new DatabaseSync(join(dataDir, 'app.db'));
 const ghostId = 'f_ghosttest0001';
@@ -346,7 +353,7 @@ const r1 = await api(`/feeds/${ghostId}/fetch-now`, { method: 'POST' });
 check('404 源第一次抓取失败', () => ok(r1.body?.ok === false, JSON.stringify(r1.body)));
 const r2 = await api(`/feeds/${ghostId}/fetch-now`, { method: 'POST' });
 const r3 = await api(`/feeds/${ghostId}/fetch-now`, { method: 'POST' });
-check('连续失败 3 次后置 broken', () => ok(r3.body?.status === 'broken', JSON.stringify(r3.body)));
+check('404/410 是永久失效 → 置 broken', () => ok(r3.body?.status === 'broken', JSON.stringify(r3.body)));
 
 const db2 = new DatabaseSync(join(dataDir, 'app.db'));
 const ghost = db2.prepare('SELECT error_count, status FROM feeds WHERE id = ?').get(ghostId);
@@ -358,6 +365,81 @@ check('broken 源不再被 sweep 选中', () => {
   return ok(Number(due?.c) === 0, String(due?.c));
 });
 db2.close();
+
+// ── ⑨ 瞬时失败永不置 broken（v1.17 新增判据）──────────────
+//
+// 这是一次真实事故回归：原来 `!retryable || count >= 3` 会在"连续三次
+// 网络抖动"之后把源判成永久失效，而 broken 是**终态**（sweep 只认 active），
+// 于是源再也不会被自动抓取 —— 用户必须手动点重试才回来。
+// 实测 21 个源里有 15 个落到 broken，其中 11 个的失败原因只是
+// `网络错误: fetch failed` 和 `请求超时（30s）`。
+//
+// 断言必须打满 5 次（远超旧的 BROKEN_AFTER=3）：只跑 3 次的话，一个
+// "第 4 次才置 broken"的实现照样能通过，那不叫修好了。
+{
+  const flakyId = 'f_flakytest0001';
+  const d = new DatabaseSync(join(dataDir, 'app.db'));
+  d.prepare(`
+    INSERT INTO feeds (id, user_id, url, title, fetch_interval, error_count, status, source_kind)
+    VALUES (?,?,?,'网络抖动的源',1800,0,'active','rss')
+  `).run(flakyId, uidRow.id, `${MOCK}/boom`);
+  d.close();
+
+  let last = null;
+  for (let i = 0; i < 5; i++) {
+    last = await api(`/feeds/${flakyId}/fetch-now`, { method: 'POST' });
+  }
+  check('⑨ 瞬时失败（500）5 次后仍是 active，没有变成 broken', () =>
+    ok(last?.body?.ok === false && last?.body?.status === 'active', JSON.stringify(last?.body)));
+
+  const d2 = new DatabaseSync(join(dataDir, 'app.db'));
+  const f = d2.prepare('SELECT error_count, status FROM feeds WHERE id = ?').get(flakyId);
+  d2.close();
+  check('⑨ 瞬时失败仍在累加 error_count（供退避与"最近老失败"提示用）', () =>
+    ok(Number(f?.error_count) === 5, String(f?.error_count)));
+  check('⑨ 瞬时失败的源仍在 sweep 的候选里（status=active 且已到期）', () => {
+    const d3 = new DatabaseSync(join(dataDir, 'app.db'));
+    const due = d3.prepare(
+      "SELECT COUNT(*) c FROM feeds WHERE status='active' AND next_fetch_at <= ? AND id = ?",
+    ).get(Date.now() + 86400_000, flakyId);
+    d3.close();
+    return ok(Number(due?.c) === 1, `count=${due?.c}`);
+  });
+
+  // ── ⑩ 重试失效源：把误判的源拉回时间线（v1.17）─────────
+  //
+  // 修判据不会回头改数据 —— 已经躺在 broken 里的那批需要一个显式动作。
+  // 这里同时验证：只碰 broken（不动 active/paused）、error_count 归零、
+  // next_fetch_at 立刻到期。
+  const before = await api('/feeds');
+  const brokenBefore = (before.body?.items ?? []).filter((x) => x.status === 'broken');
+  check('⑩ 前置：库里确实有 broken 源（含刚造的 404 源）', () =>
+    ok(brokenBefore.length >= 1, JSON.stringify(brokenBefore.map((x) => x.title))));
+
+  const revived = await api('/feeds/retry-broken', { method: 'POST' });
+  check('⑩ 重试失效源返回 revived 数量', () =>
+    ok(Number(revived.body?.revived) === brokenBefore.length, JSON.stringify(revived.body)));
+
+  const after = await api('/feeds');
+  const items = after.body?.items ?? [];
+  check('⑩ 重试之后一个 broken 都不剩', () =>
+    ok(items.filter((x) => x.status === 'broken').length === 0,
+      JSON.stringify(items.filter((x) => x.status === 'broken').map((x) => x.title))));
+  check('⑩ 原来就是 active 的源没被误改（还是 active）', () => {
+    const normal = items.find((x) => x.url === `${MOCK}/feed.xml`);
+    return ok(normal?.status === 'active', JSON.stringify(normal?.status));
+  });
+  check('⑩ 复活的源 error_count 已归零', () => {
+    const g = items.find((x) => x.id === ghostId);
+    return ok(Number(g?.errorCount) === 0, String(g?.errorCount));
+  });
+
+  const d4 = new DatabaseSync(join(dataDir, 'app.db'));
+  const nf = d4.prepare('SELECT next_fetch_at FROM feeds WHERE id = ?').get(ghostId);
+  d4.close();
+  check('⑩ 复活的源 next_fetch_at 立刻到期（不用等退避窗口）', () =>
+    ok(Number(nf?.next_fetch_at) <= Date.now() + 1000, String(nf?.next_fetch_at)));
+}
 
 // ── ⑤ 删除订阅 ─────────────────────────────────────────────
 // 先把 mock 源的两条标一条已读、一条收藏，再看删除行为
@@ -393,12 +475,12 @@ if (mockItems.length >= 2) {
 }
 
 // ── ⑥ OPML 往返 ────────────────────────────────────────────
-// 先删掉 broken 的 ghost 源：它会被导出但导入时必然失败，
-// 留着会让「导入数 === 导出数」变成恒假。
-await api(`/feeds/${ghostId}`, { method: 'DELETE' });
-// 先删掉 broken 的 ghost 源：它会被导出但导入时必然失败，
-// 留着会让"导入数 === 导出数"变成恒假。
-await api('/feeds/', { method: 'DELETE' });
+{
+  // 先删掉两个"纯失败"的源：ghost（404）与 flaky（500）都会被导出，
+  // 而导入时必然失败，留着会让「导入数 === 导出数」变成恒假。
+  await api(`/feeds/${ghostId}`, { method: 'DELETE' });
+  await api('/feeds/f_flakytest0001', { method: 'DELETE' });
+}
 const atom = await api('/feeds', {
   method: 'POST',
   body: JSON.stringify({ url: `${MOCK}/atom.xml` }),

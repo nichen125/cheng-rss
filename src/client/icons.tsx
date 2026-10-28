@@ -214,6 +214,18 @@ export function IconCheck({ size, className, checked }: P & { checked?: boolean 
   );
 }
 
+/** 双对勾：把一个范围的未读一次清空（§15.21，v1.17）。
+ *  单个对勾已经被「勾选框」占用（IconCheck），两个对勾在语义上是
+ *  "不止一条"，正好对上"全部标为已读"。 */
+export function IconCheckCheck({ size, className }: P) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M2.6 12.6l3.5 3.5L13 7.6" />
+      <path d="M11 13.4l2.2 2.2L21.4 7.6" />
+    </svg>
+  );
+}
+
 /** 设置 / 配置中心（§15.15）。齿轮：一个圆 + 内圆 + 八向齿线。
  *  不用「三个圆点」那种"更多"，因为它是"配置"不是"更多菜单" ——
  *  两者在同一个侧栏里出现时，圆点会被理解成"展开更多导航"。 */

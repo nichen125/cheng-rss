@@ -4,9 +4,9 @@ import {
   type HistoryGroup, type User,
 } from './api.ts';
 import {
-  IconArrowLeft, IconBookmark, IconCheck, IconChevronRight, IconCircle, IconClock, IconClose,
-  IconExternal, IconFolder, IconInbox, IconMenu, IconRefresh, IconRss, IconSearch,
-  IconSettings, IconSparkle, IconStar,
+  IconArrowLeft, IconBookmark, IconCheck, IconCheckCheck, IconChevronRight, IconCircle,
+  IconClock, IconClose, IconExternal, IconFolder, IconInbox, IconMenu, IconRefresh, IconRss,
+  IconSearch, IconSettings, IconSparkle, IconStar,
 } from './icons.tsx';
 import { SettingsModal, type SettingsSection } from './settings/SettingsModal.tsx';
 import {
@@ -361,6 +361,41 @@ function Main(props: { user: User; onLogout: () => void }) {
   useEffect(() => { refreshStats(); }, [refreshStats, items]);
 
   /**
+   * 就地改未读角标（§15.14 修订，v1.17）。
+   *
+   * 起因：读完一篇之后侧栏那个红点不动，用户得去点刷新才看到数字掉下来。
+   * 之前只有 `refreshStats` 会因为列表变化重取一次 —— 它只更新**全局**
+   * 未读数（`/stats`），侧栏分组树上的两个数字分别来自 `folders` 与
+   * `feeds` 两份状态，它们只在 `reloadTick` 变化时重取（关配置弹窗/点刷新）。
+   * 所以读完一篇：侧栏「未读」的角标掉了，分组行和源行的数字却纹丝不动 ——
+   * 同一个界面里三个数字说三件事。
+   *
+   * 为什么在本地减而不是再发一次请求：`markRead` 已经落库了，这次只是把
+   * 已知的变化同步到另外两份本地状态上。再发一次 `/feeds` + `/folders`
+   * 是两次往返换一个"服务器可能会告诉我"的数字，而结果是确定的。
+   *
+   * `Math.max(0, …)` 不是防御性废话：重复打开同一篇（`read_count` 会再 +1
+   * 但 `is_read` 早已是 1）、或者在「全部」视图里读一篇已读的，都会走到
+   * 这里而不该产生负角标。调用方负责只在**真正的未读→已读**时调它。
+   */
+  const adjustUnread = useCallback((feedId: string | null, delta: number) => {
+    setStats((s) => (s ? { ...s, unread: Math.max(0, s.unread + delta) } : s));
+    if (!feedId) return; // 网页捕获的条目不属于任何源，只影响全局未读数
+    // folderId 在 updater **外面**取：updater 必须是纯函数，
+    // StrictMode 下会被调两次，在里面赋值会写出看不见的副作用。
+    const folderId = feeds.find((f) => f.id === feedId)?.folderId ?? null;
+    setFeeds((prev) => prev.map((f) => (
+      f.id === feedId ? { ...f, unread: Math.max(0, f.unread + delta) } : f
+    )));
+    // 分组的未读数是组内各源之和，所以跟着同一篇一起动
+    if (folderId) {
+      setFolders((prev) => prev.map((f) => (
+        f.id === folderId ? { ...f, unread: Math.max(0, f.unread + delta) } : f
+      )));
+    }
+  }, [feeds]);
+
+  /**
    * 手动刷新（§15.14）。
    *
    * 只做"重新拉一遍当前视图"，不重置任何筛选 —— 用户刚点了「科技IT」+「未读」
@@ -486,6 +521,38 @@ function Main(props: { user: User; onLogout: () => void }) {
   }, []);
 
   /**
+   * 从分组树里选中一个范围后，决定用哪个读/全部状态（§15.20，v1.17）。
+   *
+   * 规则：**如果这个范围一条未读都没有，就直接显示它的「全部」。**
+   * 场景是"点进一个已经读完的源"——进去看到「未读已经清零」再点「看全部」，
+   * 是两次点击换一次信息。用户点的是一个源，他要看的就是这个源的文章；
+   * 而这个源里只剩读过的，那"文章"就等于"全部"。
+   *
+   * 三处刻意的取舍：
+   *   1. **只在点选时判断，不在列表空了之后判断。** 读完最后一条的那一刻
+   *      仍会显示空态（带「看全部」按钮）—— 因为"读完这一篇"和"我要看
+   *      读过的"是两件事，自动跳过去会让「未读」这个视图在读完最后一篇时
+   *      静默消失，用户会以为未读还有内容。
+   *   2. **判据是未读数 0，不是列表为空。** 列表空可能是搜索词没命中，
+   *      那时切「全部」也不会变出内容，只是把用户的搜索意图改掉。
+   *   3. **已经手动选了「全部」就不动。** 用户点「全部」是一次明确表态，
+   *      再点别的地方不该把它改回去。
+   */
+  const viewForScope = useCallback((folderId: string | null, feedId: string | null): View => {
+    // 从收藏/历史进来：先回到列表型视图，再由下面的未读判断决定具体是哪个
+    const base: View = view === 'inbox' || view === 'unread' ? view : DEFAULT_VIEW;
+    if (base === 'inbox') return 'inbox'; // 已经是全部，没有可切的
+    const unread = feedId
+      ? feeds.find((f) => f.id === feedId)?.unread
+      : folders.find((f) => f.id === folderId)?.unread;
+    // 查不到（源/组刚被删，或列表还没取回来）→ 不动态度。
+    // 这里**不能**用 `?? 0` 兜底：那等于"未知就当没未读"，会把一个还有
+    // 200 条未读的源判成"读完了"，直接跳到全部 —— 错得毫无痕迹。
+    if (unread === undefined) return base;
+    return unread === 0 ? 'inbox' : 'unread';
+  }, [view, feeds, folders]);
+
+  /**
    * 点侧栏的一个分组（§15.13）。
    *
    * 三件事必须一起发生，少一件用户都会困惑：
@@ -498,9 +565,11 @@ function Main(props: { user: User; onLogout: () => void }) {
    * "只看未读"悄悄改成"全部" —— 用户切个分组，读过的条目突然全冒出来。
    * 所以只在当前视图不是列表型（starred / history）时才改，且改到**默认值**
    * 而不是硬编码 inbox。
+   *
+   * v1.17 再补一层（§15.20）：这个组已经 0 未读时，直接进「全部」。
    */
   const pickFolder = useCallback((folderId: string) => {
-    setView((v) => (v === 'inbox' || v === 'unread' ? v : DEFAULT_VIEW));
+    setView(viewForScope(folderId, null));
     setScope({ folderId });
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -508,15 +577,25 @@ function Main(props: { user: User; onLogout: () => void }) {
       next.add(folderId);
       return next;
     });
-  }, []);
+  }, [viewForScope]);
 
   /** 点组内的一个源：再点同一个 = 取消源筛选，回整组（§15.13） */
   const pickFeed = useCallback((folderId: string, feedId: string) => {
-    setView((v) => (v === 'inbox' || v === 'unread' ? v : DEFAULT_VIEW));
+    setView(viewForScope(folderId, feedId));
     setScope((s) => (s.feedId === feedId ? { folderId } : { folderId, feedId }));
-  }, []);
+  }, [viewForScope]);
 
 
+  /**
+   * 打开一条（§15.11）。首次打开同时标记已读。
+   *
+   * v1.17：标记已读之后**就地**把侧栏未读角标减 1（§15.14 修订）。
+   * 条件是 `!d.isRead` —— 打开一条已经读过的不会再减（后端 `is_read`
+   * 是幂等的，`read_count` 才 +1）。
+   *
+   * 不能靠 `refreshStats` 代替：它只更新全局 `/stats`，分组与源的
+   * 两个数字在 `folders` / `feeds` 里，重取要等 `reloadTick`。
+   */
   const open = useCallback(async (id: string) => {
     setOpenId(id);
     setDetail(null);
@@ -527,13 +606,14 @@ function Main(props: { user: User; onLogout: () => void }) {
       if (!d.isRead) {
         await api.markRead(id);
         setItems((prev) => prev.map((x) => (x.id === id ? { ...x, isRead: true } : x)));
+        adjustUnread(d.feedId ?? null, -1);
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : '打开失败');
     } finally {
       setDetailLoading(false);
     }
-  }, []);
+  }, [adjustUnread, refreshStats]);
 
   const toggleStar = useCallback(async (id: string) => {
     try {
@@ -554,16 +634,20 @@ function Main(props: { user: User; onLogout: () => void }) {
   const toggleRead = useCallback(async (id: string) => {
     const cur = detail?.id === id ? detail : items.find((x) => x.id === id);
     if (!cur) return;
+    const feedId = cur.feedId ?? null;
     try {
       if (cur.isRead) {
         await api.markUnread(id);
         setDetail((d) => (d && d.id === id ? { ...d, isRead: false } : d));
         setItems((prev) => prev.map((x) => (x.id === id ? { ...x, isRead: false } : x)));
+        // v1.17：标回未读 → 角标 +1（与 open 的 -1 对称）
+        adjustUnread(feedId, +1);
         refreshStats();
       } else {
         await api.markRead(id);
         setDetail((d) => (d && d.id === id ? { ...d, isRead: true } : d));
         setItems((prev) => prev.map((x) => (x.id === id ? { ...x, isRead: true } : x)));
+        adjustUnread(feedId, -1);
         refreshStats();
       }
     } catch { /* ignore */ }
@@ -575,7 +659,7 @@ function Main(props: { user: User; onLogout: () => void }) {
       if (next && next.id !== id) void open(next.id);
       else { setOpenId(null); setDetail(null); }
     }
-  }, [detail, items, view, open, refreshStats]);
+  }, [detail, items, view, open, refreshStats, adjustUnread]);
 
   /** 新标签打开原文（§15.11，快捷键 v）。没有 URL 时不打开空白页。 */
   const openOriginal = useCallback((url?: string | null) => {
@@ -651,6 +735,56 @@ function Main(props: { user: User; onLogout: () => void }) {
     const feed = folderFeeds.find((x) => x.id === scope.feedId);
     return feed ? `${base} · ${feed.title ?? hostOf(feed.url) ?? '该源'}` : base;
   }, [scope.folderId, scope.feedId, folders, folderFeeds, current.label]);
+
+  /** 当前范围的未读数。feed 优先于 folder（选了源时用户看的是那个源） */
+  const scopeUnread = scope.feedId
+    ? (feeds.find((f) => f.id === scope.feedId)?.unread ?? 0)
+    : scope.folderId
+      ? (folders.find((f) => f.id === scope.folderId)?.unread ?? 0)
+      : 0;
+
+  /**
+   * 把当前范围（分组 / 单个源）的未读一次清空（§15.21，v1.17）。
+   *
+   * 三件事按顺序做，顺序不能反：
+   *   1. 先问 —— 这个动作没有撤销入口（批量标未读得一条条来），
+   *      所以必须确认，且确认文案里要写明**多少条**会消失。
+   *   2. 再写库，拿后端返回的真实条数（不是本地那个可能已经过时的角标）。
+   *   3. 最后同步本地状态并重取列表 —— 重取而不是本地过滤：后端可能
+   *      还有本页没加载的未读，本地过滤会留下一个和标题数字矛盾的列表。
+   *
+   * 不清阅读历史（后端不写 first_read_at/last_read_at），所以「历史」页
+   * 不会凭空多出这些条目 —— 见 routes/entries.ts 里那段注释。
+   */
+  const markScopeRead = useCallback(async () => {
+    if (!scope.feedId && !scope.folderId) return;
+    const n = scopeUnread;
+    if (n === 0) return; // 已经是空的，不必弹一个"清 0 条"的确认框
+    const yes = window.confirm(
+      `把「${listTitle}」里的 ${n} 条未读全部标为已读？\n\n`
+      + `它们不会进入「历史」（那里记录的是你真的打开过的）。\n`
+      + `这个操作没有撤销按钮。`,
+    );
+    if (!yes) return;
+    try {
+      const r = await api.markAllRead({ feedId: scope.feedId, folderId: scope.folderId });
+      if (scope.feedId) {
+        // 单个源：全局、分组、源三处都能精确减
+        adjustUnread(scope.feedId, -Math.min(r.count, n));
+      } else {
+        // 整个分组：全局减 r.count，分组角标归零；组内各源拿不到逐条数字，
+        // 交给 reloadTick 触发的 /feeds 重取去校正（否则展开组时子行还是旧数字）
+        setStats((s) => (s ? { ...s, unread: Math.max(0, s.unread - r.count) } : s));
+        setFolders((prev) => prev.map((f) => (
+          f.id === scope.folderId ? { ...f, unread: 0 } : f
+        )));
+        setReloadTick((t) => t + 1);
+      }
+      await load(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '标记失败');
+    }
+  }, [scope.feedId, scope.folderId, scopeUnread, listTitle, adjustUnread, load]);
 
   return (
     <div className="app">
@@ -835,6 +969,19 @@ function Main(props: { user: User; onLogout: () => void }) {
       {/* ── 列表栏 ───────────────────────────────────────── */}
       <section className={`list-pane ${openId ? 'narrow' : ''}`}>
         <header className="pane-head">
+          {/* 标题行（§15.22，v1.17 重构）。
+              原来这一行是「h1 + 计数 + × + 分段控件 + 刷新」五个东西挤在
+              一个 baseline 对齐的 flex 里，各自用 align-self 找位置 ——
+              结果三样东西三种光学高度：文字坐在基线上、控件坐在中线上，
+              中间栏看起来一行是歪的。而且分段控件在收藏/历史视图下隐藏，
+              `margin-left: auto` 一消失，刷新按钮就贴着计数往左跳。
+
+              现在拆成两段，语义上也就是两件事：
+                · 左边「我在看什么」：标题 + 条数
+                · 右边「能对它做什么」：分段 / 全部已读 / 清除范围 / 刷新
+              右段整块 `margin-left: auto`，里面匀速 gap，任何一个按钮
+              显隐都不会让其余的跳位。全部 align-items: center + 统一
+              22px 行高，中线就是行高的一半，不再靠 align-self 逐个纠正。 */}
           <div className="pane-title">
             <h1>{listTitle}</h1>
             {/* 计数不再挂在 stats 上：数字来自 listEntries 的 total，
@@ -855,57 +1002,76 @@ function Main(props: { user: User; onLogout: () => void }) {
                 {`${total ?? items.length} 条${debounced ? '结果' : ''}`}
               </span>
             )}
-            {/* 清除筛选：从一整块实心按钮改成标题行里的小 ×（§15.12）。
-                原来的 129×40 实心块夹在搜索框和列表之间，视觉重量和
-                "取消一个筛选"这件小事完全不匹配 —— 它只是按钮基样式的副作用。 */}
-            {(scope.folderId || scope.feedId) && (
+
+            <div className="pane-actions">
+              {/* 全部 / 未读 分段控件 + 刷新（§15.14）。
+                  放进已经存在的标题行，垂直成本为 0 —— 单独占一行要吃掉
+                  约 34px，按 §15.2 每屏 8~10 条的预算，那等于每屏少一条。
+
+                  分段控件只在"条目列表"里有意义：收藏/历史本身已经是
+                  另一种筛选，在它们上面再叠一层"只没读的收藏"会把
+                  两个正交条件混成一个控件。所以非 inbox/unread 视图隐藏。 */}
+              {(view === 'inbox' || view === 'unread') && (
+                <div className="seg pane-seg" role="group" aria-label="阅读范围">
+                  <button
+                    className={`seg-btn sm ${view === 'inbox' ? 'on' : ''}`}
+                    aria-pressed={view === 'inbox'}
+                    onClick={() => { if (view !== 'inbox') { setView('inbox'); setOpenId(null); } }}
+                    title="显示全部条目（已读的也在）"
+                  >
+                    全部
+                  </button>
+                  <button
+                    className={`seg-btn sm ${view === 'unread' ? 'on' : ''}`}
+                    aria-pressed={view === 'unread'}
+                    onClick={() => { if (view !== 'unread') { setView('unread'); setOpenId(null); } }}
+                    title="只显示未读"
+                  >
+                    未读
+                  </button>
+                </div>
+              )}
+
+              {/* 清除这个范围的未读（§15.21，v1.17）。
+                  按钮只在"有范围 + 确实有未读"时出现：范围是全库时不显示
+                  （需求方只要求分组和单源两档），未读为 0 时显示则是一个
+                  按下去什么都不会发生的按钮。 */}
+              {(scope.folderId || scope.feedId) && scopeUnread > 0 && (
+                <button
+                  className="icon-btn tiny mark-read-btn"
+                  onClick={() => void markScopeRead()}
+                  title={`把「${listTitle}」的 ${scopeUnread} 条未读全部标为已读`}
+                  aria-label="清除未读"
+                >
+                  <IconCheckCheck size={14} />
+                </button>
+              )}
+
+              {/* 清除筛选：从一整块实心按钮改成标题行里的小 ×（§15.12）。
+                  原来的 129×40 实心块夹在搜索框和列表之间，视觉重量和
+                  "取消一个筛选"这件小事完全不匹配 —— 它只是按钮基样式的副作用。 */}
+              {(scope.folderId || scope.feedId) && (
+                <button
+                  className="icon-btn tiny scope-clear"
+                  onClick={() => { setScope({}); setExpanded(new Set()); }}
+                  title="清除分组与源筛选"
+                  aria-label="清除筛选"
+                >
+                  <IconClose size={13} />
+                </button>
+              )}
+
               <button
-                className="scope-clear"
-                onClick={() => { setScope({}); setExpanded(new Set()); }}
-                title="清除分组与源筛选"
-                aria-label="清除筛选"
+                className={`icon-btn tiny refresh-btn ${refreshing ? 'spinning' : ''}`}
+                onClick={() => void refresh()}
+                disabled={refreshing}
+                title="刷新当前列表"
+                aria-label="刷新当前列表"
+                data-refreshing={refreshing ? '1' : '0'}
               >
-                <IconClose size={13} />
+                <IconRefresh size={14} />
               </button>
-            )}
-
-            {/* 全部 / 未读 分段控件 + 刷新（§15.14）。
-                放进已经存在的标题行，垂直成本为 0 —— 单独占一行要吃掉
-                约 34px，按 §15.2 每屏 8~10 条的预算，那等于每屏少一条。
-
-                分段控件只在"条目列表"里有意义：收藏/历史本身已经是
-                另一种筛选，在它们上面再叠一层"只没读的收藏"会把
-                两个正交条件混成一个控件。所以非 inbox/unread 视图隐藏。 */}
-            {(view === 'inbox' || view === 'unread') && (
-              <div className="seg pane-seg" role="group" aria-label="阅读范围">
-                <button
-                  className={`seg-btn sm ${view === 'inbox' ? 'on' : ''}`}
-                  aria-pressed={view === 'inbox'}
-                  onClick={() => { if (view !== 'inbox') { setView('inbox'); setOpenId(null); } }}
-                  title="显示全部条目（已读的也在）"
-                >
-                  全部
-                </button>
-                <button
-                  className={`seg-btn sm ${view === 'unread' ? 'on' : ''}`}
-                  aria-pressed={view === 'unread'}
-                  onClick={() => { if (view !== 'unread') { setView('unread'); setOpenId(null); } }}
-                  title="只显示未读"
-                >
-                  未读
-                </button>
-              </div>
-            )}
-            <button
-              className={`icon-btn tiny refresh-btn ${refreshing ? 'spinning' : ''}`}
-              onClick={() => void refresh()}
-              disabled={refreshing}
-              title="刷新当前列表"
-              aria-label="刷新当前列表"
-              data-refreshing={refreshing ? '1' : '0'}
-            >
-              <IconRefresh size={14} />
-            </button>
+            </div>
           </div>
           <div className="search-box">
             <IconSearch size={15} className="search-icon" />
@@ -925,13 +1091,20 @@ function Main(props: { user: User; onLogout: () => void }) {
         <div className="list-scroll">
           {err && <div className="alert error inset">{err}</div>}
 
-          {!loading && items.length === 0 && view !== 'history' && (
+          {/* 空态要等两份数据都到位才渲染（v1.17）。
+              「未读清零」还是「还没有订阅」取决于库里有没有源，而源列表
+              与条目列表是并行发的两个请求 —— 少了 `feedsLoaded`，源列表
+              慢一拍的那一瞬间会先画一帧「收件箱是空的 / 还没有订阅任何源」，
+              一个已经订阅了 12 个源的用户会看到它闪一下。 */}
+          {!loading && feedsLoaded && items.length === 0 && view !== 'history' && (
             <EmptyState
               hasQuery={Boolean(debounced)}
               view={view}
               scopeLabel={scope.folderId ? listTitle : null}
+              hasFeeds={feeds.length > 0}
               onGoFeeds={() => { setSettingsSection('feeds'); setSettingsOpen(true); }}
-              onClearScope={scope.folderId ? () => { setScope({}); setExpanded(new Set()); } : undefined}
+              onClearScope={() => { setScope({}); setExpanded(new Set()); }}
+              onShowAll={() => setView('inbox')}
             />
           )}
 
@@ -1020,6 +1193,13 @@ function Main(props: { user: User; onLogout: () => void }) {
                             onClick={(e) => {
                               if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
                                 e.preventDefault();
+                                // 必须 stopPropagation：行本身也有 onClick，
+                                // 不拦就会 **调用两次 open()**。第一次打开了、
+                                // 标了已读、角标减一；第二次拿到的详情说
+                                // "已经读过"（不重复减），但两次都在飞，
+                                // 期间任何一次 setState 都会叠加 ——
+                                // 实测未读角标从 2 直接掉到 0（§15.22）。
+                                e.stopPropagation();
                                 void open(it.id);
                               }
                             }}
@@ -1115,6 +1295,9 @@ function Main(props: { user: User; onLogout: () => void }) {
                       // 由浏览器在新标签打开 —— 这正是用户要的行为。
                       if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
                         e.preventDefault();
+                        // 必须 stopPropagation：行本身也有 onClick，不拦就会
+                        // **调用两次 open()**（详见移动端那份注释）。
+                        e.stopPropagation();
                         void open(it.id);
                       }
                     }}
@@ -1222,30 +1405,20 @@ function EmptyState(props: {
   view: View;
   /** 当前是否在按分组/源筛选；有值时空态文案要说明"是这个范围里没有" */
   scopeLabel?: string | null;
+  /** 库里到底有没有订阅源。没有源时的空态是"去添加"，不是"看全部" */
+  hasFeeds?: boolean;
   onGoFeeds?: () => void;
+  /** 清掉分组与源筛选（回到全库） */
   onClearScope?: () => void;
+  /**
+   * 看**当前范围**的全部（保留分组/源，只把「未读」切成「全部」）。
+   *
+   * 与 onClearScope 是两个不同的动作，v1.17 之前只有一个按钮包办了
+   * 前者：在某个源里读完了最后一条，空态上写着「看全部条目」，点下去
+   * 却跳到了全库 —— 用户想看的是"这个源里都读过什么"。见 §15.20。
+   */
+  onShowAll?: () => void;
 }) {
-  // 分组内为空 ≠ 没有订阅。这两种情况的引导动作完全不同：
-  // 前者应该"看全部"，后者应该"去添加订阅"。
-  if (props.scopeLabel && !props.hasQuery) {
-    return (
-      <div className="empty">
-        <div className="ph-art"><IconFolder size={26} /></div>
-        <h2>「{props.scopeLabel}」里还没有条目</h2>
-        <p>
-          这个分组下的源暂时没有新内容，或者刚添加还没抓到。
-        </p>
-        <div className="empty-actions">
-          {props.onClearScope && (
-            <button className="btn" onClick={props.onClearScope}>看全部条目</button>
-          )}
-          {props.onGoFeeds && (
-            <button className="btn" onClick={props.onGoFeeds}>管理订阅</button>
-          )}
-        </div>
-      </div>
-    );
-  }
   if (props.hasQuery) {
     return (
       <div className="empty">
@@ -1270,6 +1443,64 @@ function EmptyState(props: {
         <div className="ph-art"><IconClock size={26} /></div>
         <h2>还没有阅读记录</h2>
         <p>读过的文章会按时间出现在这里。</p>
+      </div>
+    );
+  }
+
+  // 「未读」清零 ≠ 收件箱里什么都没有（§15.20，v1.17）。
+  //
+  // 改之前这里落到最后一个 return，文案是「收件箱是空的 / 还没有订阅任何源」——
+  // 一个已经把 300 篇都读完的用户会被告知"你还没有订阅"，而他明明有 12 个源。
+  // 空态必须区分"这个范围没有未读"和"这个范围没有条目"，因为下一步动作不同：
+  // 前者是"去看读过的"，后者才是"去添加订阅"。
+  //
+  // 库里真的一条源都没有时不能走这里：新装用户要的是「去添加订阅」。
+  if (props.view === 'unread' && props.hasFeeds !== false) {
+    return (
+      <div className="empty">
+        <div className="ph-art"><IconCircle size={26} /></div>
+        <h2>{props.scopeLabel ? `「${props.scopeLabel}」里没有未读` : '未读已经清零'}</h2>
+        <p>
+          {props.scopeLabel
+            ? '这个范围里的文章都读过了，或者刚添加还没抓到。'
+            : '所有订阅里的文章都读过了。新的内容会自动出现在这里。'}
+        </p>
+        <div className="empty-actions">
+          {props.onShowAll && (
+            <button
+              className="btn"
+              onClick={props.onShowAll}
+              title="只切换读/全部，不改当前的分组与源筛选"
+            >
+              看全部
+            </button>
+          )}
+          {props.onGoFeeds && (
+            <button className="btn" onClick={props.onGoFeeds}>管理订阅</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // 分组内为空 ≠ 没有订阅。这两种情况的引导动作完全不同：
+  // 前者应该"看全部"，后者应该"去添加订阅"。
+  if (props.scopeLabel) {
+    return (
+      <div className="empty">
+        <div className="ph-art"><IconFolder size={26} /></div>
+        <h2>「{props.scopeLabel}」里还没有条目</h2>
+        <p>
+          这个范围下的源暂时没有新内容，或者刚添加还没抓到。
+        </p>
+        <div className="empty-actions">
+          {props.onClearScope && (
+            <button className="btn" onClick={props.onClearScope}>看全库条目</button>
+          )}
+          {props.onGoFeeds && (
+            <button className="btn" onClick={props.onGoFeeds}>管理订阅</button>
+          )}
+        </div>
       </div>
     );
   }

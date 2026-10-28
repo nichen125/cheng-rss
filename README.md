@@ -545,7 +545,7 @@ node scripts/verify-all.mjs
 输出汇总：
 
 ```
-验收汇总  31 个脚本，耗时 323s
+验收汇总  34 个脚本，耗时 400s
   PASS  docker-path.mjs            3.8s
   PASS  m0-01-toolchain.mjs        1.3s
   ...
@@ -568,11 +568,14 @@ node scripts/verify-all.mjs
   PASS  m1-18-sidebar-tree.mjs     15.5s
   PASS  m1-19-density.mjs          14.3s
   PASS  m1-20-reader-toc.mjs       78.9s
-  PASS  m1-21-default-unread.mjs   17.1s
-全部通过 31/31
+  PASS  m1-21-default-unread.mjs   17.5s
+  PASS  m1-22-empty-scope.mjs      34.6s
+  PASS  m1-23-mark-scope-read.mjs   9.3s
+  PASS  m1-24-pane-head.mjs        11.9s
+全部通过 34/34
 ```
 
-> 加 `--no-docker-path`（跳过 Docker 产物验证）时是 30 个脚本、318s。
+> 加 `--no-docker-path`（跳过 Docker 产物验证）时是 33 个脚本、395s。
 > 本机没下载 linux node 时用这个更快；产物验证在 CI 里跑。
 
 单独跑某一步：
@@ -597,7 +600,7 @@ node scripts/verify/m0-09-ui.mjs         # 真实浏览器验布局（需 Chromi
 | `m1-01-feed-parse` | 34 | RSS2.0 / Atom / RDF 解析、content:encoded 优先、坏日期钳制 |
 | `m1-02-opml` | 16 | 文件夹层级、导出导入往返、属性大小写容错 |
 | `m1-03-sanitize` | 37 | XSS 白名单：script/iframe/svg/onerror/javascript: 全拦；链接出口分三类且清洗幂等 |
-| `m1-04-feeds` | 47 | 订阅/发现/条件请求 304/404 置 broken/删订阅保留已读/清洗落库 |
+| `m1-04-feeds` | 56 | 订阅/发现/条件请求 304/404 一次即 broken/删订阅保留已读/清洗落库、**瞬时失败 5 次仍 active**、「重试失效源」只复活 broken 且 error_count 归零、next_fetch_at 立刻到期 |
 | `m1-05-mobile` | 28 | 底部 tab bar（第 5 格是「配置」）、触摸目标 44px、字号 16px、安全区、横屏 |
 | `m1-06-feeds-ui` | 31 | 30+ 源行高一致、长标题截断、操作不越界、头部吸顶（弹窗内滚动容器）、手机操作可点、图标降级 |
 | `m1-07-folders` | 35 | 分组 CRUD、重名拒绝、按组过滤、删组不删源、编辑生效、OPML 保留分组 |
@@ -611,6 +614,9 @@ node scripts/verify/m0-09-ui.mjs         # 真实浏览器验布局（需 Chromi
 | `m1-19-density` | 27 | 1440 下侧栏 196px / 列表 368px / 阅读区 ≥870px、正文宽度实测 + 两侧留白 40~90px、1180 下正文 ≥594px、组内有源时头部不增高、长分组名不压角标、首屏 ≥9 条、手机变量仍是 0/100% |
 | `m1-20-reader-toc` | 56 | 纸与桌面不同色/圆角/阴影 + 三个阅读主题各自成立且标题与正文同色、纸宽随 `--reader-width` 变、1440 不渲染目录、1600 渲染且正文列宽**不变**、无标题/单标题不渲染、点目录跳转且 URL 不变、滚动高亮唯一、长标题省略号、375px 取消纸 |
 | `m1-21-default-unread` | 31 | 冷启动请求 URL 就带 `view=unread`、默认「未读」激活且列表无已读、侧栏两处状态一致、点「全部」放回已读并换侧栏高亮、刷新回未读（不持久化）、分组/单源同样只看未读、375px 底部导航一致 |
+| `m1-22-empty-scope` | 47 | 点进 0 未读的源/分组直接进「全部」且条数=该范围（不是全库）、有未读的范围不被拉成全部、手动选全部后不被覆盖、读完一篇三处角标（侧栏/分组行/源子行）同时 -1 且未刷新、空态分四档文案、「看全部」只切读/全部不改范围、「看全库条目」才清范围、0 个源时空态是「去添加订阅」 |
+| `m1-23-mark-scope-read` | 34 | 按源清只动该源、按分组清只动组内、不带范围 400 且一条未改、**不写阅读历史**（`first_read_at` 仍空、`read_count` 和为 0）、重复条目不算进 count、幂等、不存在的范围 200+0、UI 按钮只在「有范围+未读>0」出现且必须先确认 |
+| `m1-24-pane-head` | 18 | 标题行内所有可见控件垂直中线极差 ≤1.5px、h1 与「N 条」中线差 ≤1.0px（旧实现 1.2px，阈值是量出来收的）、右段贴边且间距=4px、分段隐藏后刷新按钮位移 ≤1px（旧实现 82px）、六控件同排不重叠不出界、375px 不溢出 |
 | `docker-path` | 12 | Dockerfile 结构 + 真产出 linux ELF |
 
 **写新断言前先跑一次确认它会红** —— 永远绿的断言没有价值。

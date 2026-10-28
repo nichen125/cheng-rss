@@ -40,6 +40,8 @@ export interface FeedsStore {
   grouped: [string, { name: string | null; items: FeedItem[] }][];
   unfiledCount: number;
   totalUnread: number;
+  /** 标记为「失效」的源数（§15.23 v1.17）：>0 时订阅页顶部出现「重试失效源」 */
+  brokenCount: number;
 }
 
 const Ctx = createContext<FeedsStore | null>(null);
@@ -109,11 +111,12 @@ export function FeedsProvider(props: { children: ReactNode; onChanged?: () => vo
 
   const unfiledCount = useMemo(() => feeds.filter((f) => !f.folderId).length, [feeds]);
   const totalUnread = useMemo(() => feeds.reduce((n, f) => n + f.unread, 0), [feeds]);
+  const brokenCount = useMemo(() => feeds.filter((f) => f.status === 'broken').length, [feeds]);
 
   const value: FeedsStore = {
     feeds, folders, loading, err, notice, busy,
     filter, setFilter, setErr, setNotice, setBusy,
-    reload, fail, visible, grouped, unfiledCount, totalUnread,
+    reload, fail, visible, grouped, unfiledCount, totalUnread, brokenCount,
   };
 
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>;

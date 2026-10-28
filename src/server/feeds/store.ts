@@ -37,7 +37,13 @@ export interface FeedRow {
 /** 新建订阅时的默认抓取间隔：30 分钟。多数个人订阅源更新频率远低于此 */
 export const DEFAULT_INTERVAL = 1800;
 
-/** 连续失败多少次后置 broken。3 次约等于 3 个抓取周期（约 1.5 小时） */
+/**
+ * 退避曲线上的饱和点（v1.17 起只用于计算退避，不再用于判 broken）。
+ *
+ * 历史上它是"连续失败多少次后置 broken"。那条规则已经在
+ * recordFetchError 里被撤掉（详见那里的注释：一次网络抖动就会把源判死），
+ * 常量保留是因为 §7.1 的退避公式要引用这个数：失败 3 次后退避到 8 倍。
+ */
 export const BROKEN_AFTER = 3;
 
 export const newId = (prefix: string): string =>
@@ -305,8 +311,22 @@ export function scheduleNextFetch(db: DatabaseSync, feed: FeedRow, now = Date.no
 /**
  * 抓取失败记账。
  *
- * 只有 retryable 的失败才累加 error_count 并退避；404/410 这类永久失效
- * 直接置 broken —— 让用户看到一个明确的"这个源没了"，而不是永远重试。
+ * 只有 `retryable === false` 的失败才置 broken；瞬时失败（网络错误、超时、
+ * 5xx、429、站点临时返回 HTML）一律留在 active，只靠退避放慢。
+ *
+ * 这条规则在 v1.17 改过一次，原因是一次真实事故：原来的判据是
+ * `!retryable || count >= BROKEN_AFTER`，于是"连续三次网络不通"就把源
+ * 判成永久失效，而 broken 是**终态** —— sweep 只认 active，它再也不会被
+ * 自动抓取。实测 21 个源里有 15 个落到 broken，其中 11 个的失败原因全是
+ * `网络错误: fetch failed` / `请求超时（30s）`（那段时间整机网络在抖），
+ * 点一下手动重试就全好了。
+ *
+ * 判据改成"确凿的永久失效"之后，一次网络抖动最多让源慢下来（退避上限
+ * 8 倍 = 4 小时），不会把它从时间线上摘掉。真正死掉的源（404/410、
+ * 域名没了）仍会在第一次就明确标记，用户能看到一个诚实的"这个源没了"。
+ *
+ * `BROKEN_AFTER` 保留但不再参与判定：它是"退避到 8 倍"的饱和点，
+ * 保留常量是为了让 §7.1 里那条退避曲线仍有一个可引用的名字。
  */
 export function recordFetchError(
   db: DatabaseSync,
@@ -314,8 +334,9 @@ export function recordFetchError(
   err: { message: string; retryable: boolean },
   now = Date.now(),
 ): { status: FeedStatus; errorCount: number } {
-  const count = feed.error_count + 1;
-  const broken = !err.retryable || count >= BROKEN_AFTER;
+  // error_count 只用于退避与"这个源最近老失败"的提示，不封顶会溢出显示
+  const count = Math.min(feed.error_count + 1, 999);
+  const broken = !err.retryable;
   const status: FeedStatus = broken ? 'broken' : 'active';
   const next = now + feed.fetch_interval * 1000 * (1 + Math.min(count, 3) * 2);
 

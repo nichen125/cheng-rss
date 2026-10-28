@@ -39,6 +39,19 @@ const INBOX_NAV: NavItem = {
   key: 'inbox', label: '收件箱', icon: <IconInbox />, count: 'unread',
 };
 
+/**
+ * 打开应用时的视图（§15.19，v1.16）。
+ *
+ * 从 'inbox' 改成 'unread'：用户打开应用最常见的目的是看新内容，
+ * 而不是"再读一遍读过的"。默认值等于最常见的那次操作 —— 否则每次
+ * 都要先手动筛掉已读。
+ *
+ * 抽成常量而不是在 useState 里写字面量：这个值在 `pickFolder` /
+ * `pickFeed` 里也要用（切分组时不能把「未读」悄悄改成「全部」），
+ * 写两处迟早会不一致。
+ */
+const DEFAULT_VIEW: View = 'unread';
+
 const NAV: NavItem[] = [
   INBOX_NAV,
   { key: 'unread', label: '未读', icon: <IconCircle />, count: 'unread' },
@@ -225,7 +238,12 @@ interface Stats { entries: number; feeds: number; unread: number; starred: numbe
 function Main(props: { user: User; onLogout: () => void }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('feeds');
-  const [view, setView] = useState<View>('inbox');
+  // 默认只看未读（§15.19，v1.16）。改之前是 'inbox' —— 打开就把读过的
+  // 一起塞进来，用户得先手动筛掉。默认值应该等于最常见的那次操作。
+  //
+  // 刻意**不持久化**：把"上次点了全部"记住，下次打开又是混着的列表，
+  // 与这条需求相反。刷新回未读才是对的。
+  const [view, setView] = useState<View>(DEFAULT_VIEW);
   const [scope, setScope] = useState<Scope>({});
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [query, setQuery] = useState('');
@@ -473,10 +491,16 @@ function Main(props: { user: User; onLogout: () => void }) {
    * 三件事必须一起发生，少一件用户都会困惑：
    *   1. 选中整组（scope = {folderId}）—— 取消可能存在的源筛选
    *   2. 展开这一组 —— 否则点了分组却看不到组内的源
-   *   3. 切回 inbox —— 否则在「历史」视图点分组什么也不会发生
+   *   3. 离开「收藏 / 历史」—— 否则点分组什么也不会发生
+   *
+   * 第 3 条（§15.19，v1.16）：原来是无条件 `setView('inbox')`，在默认值
+   * 还是 inbox 的年代看不出问题。现在默认是未读，无条件设 inbox 会把
+   * "只看未读"悄悄改成"全部" —— 用户切个分组，读过的条目突然全冒出来。
+   * 所以只在当前视图不是列表型（starred / history）时才改，且改到**默认值**
+   * 而不是硬编码 inbox。
    */
   const pickFolder = useCallback((folderId: string) => {
-    setView('inbox');
+    setView((v) => (v === 'inbox' || v === 'unread' ? v : DEFAULT_VIEW));
     setScope({ folderId });
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -488,7 +512,7 @@ function Main(props: { user: User; onLogout: () => void }) {
 
   /** 点组内的一个源：再点同一个 = 取消源筛选，回整组（§15.13） */
   const pickFeed = useCallback((folderId: string, feedId: string) => {
-    setView('inbox');
+    setView((v) => (v === 'inbox' || v === 'unread' ? v : DEFAULT_VIEW));
     setScope((s) => (s.feedId === feedId ? { folderId } : { folderId, feedId }));
   }, []);
 
@@ -1265,6 +1289,24 @@ function EmptyState(props: {
 
 // ── 阅读页 ─────────────────────────────────────────────────
 
+/** 目录项：正文里一个 h2/h3 的锚点（§15.18） */
+interface TocItem {
+  id: string;
+  text: string;
+  /** 2 = h2，3 = h3，用来做缩进 */
+  level: 2 | 3;
+}
+
+/**
+ * 目录右侧需要的空间（px）：目录 190 + 与正文的间距 20。
+ *
+ * 目录**只放在正文右侧的空白里**，不参与排版。所以判断"放不放得下"要用
+ * 实际的右侧空白 `(面板宽 − 纸宽) / 2`，而不是写一个视口断点 —— 后者会
+ * 在用户把正文宽度调到 96ch 之后失效（纸变宽、空白变窄，断点却还成立，
+ * 于是目录压到正文上）。
+ */
+const TOC_NEED = 210;
+
 function Reader(props: {
   detail: EntryDetail | null;
   loading: boolean;
@@ -1282,6 +1324,17 @@ function Reader(props: {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [progress, setProgress] = useState(0);
   const reportedRef = useRef(0);
+
+  // ── 侧边目录（§15.18）─────────────────────────────────────
+  /** 正文里的小标题。从 DOM 读，不在服务端另解析一份 */
+  const [toc, setToc] = useState<TocItem[]>([]);
+  /** 面板右侧空白够不够放目录。不够就整个不渲染 */
+  const [tocFits, setTocFits] = useState(false);
+  /** 当前所在的小节 id —— 滚动时更新，目录里对应项高亮 */
+  const [tocActive, setTocActive] = useState<string | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  /** 「舞台」：包住纸与目录的那层，用来量右侧还剩多少空白 */
+  const stageRef = useRef<HTMLDivElement>(null);
 
   // 阅读进度（§15.11）：滚动时节流上报，1 次 / 2s。
   //
@@ -1320,6 +1373,102 @@ function Reader(props: {
   // 用户会以为"这篇没有摘要"
   useEffect(() => { setAiOpen(true); }, [detail?.id]);
 
+  // ── 目录：从 DOM 读小标题（§15.18）────────────────────────
+  //
+  // 为什么不叫服务端在详情接口里多返回一份 toc：
+  //   ① 要为 10 万条历史正文回填，成本远大于收益；
+  //   ② 清洗后的 HTML 才是唯一真相（§11.2 的同一原则），
+  //      从别处再解析一遍会漂移 —— 清洗规则一改，两份就不同步。
+  //
+  // 依赖里必须有 loading（而不只是 contentHtml）：
+  // 详情接口返回时 `detail` 与 `loading=false` 不保证在同一次提交里生效。
+  // 如果 effect 在 `loading` 还是 true 的那次提交后跑，组件返回的是
+  // loading 占位，`.article-body` 根本没挂上，bodyRef.current 是 null ——
+  // 目录就永远静默为空。把 loading 放进依赖，等它转 false 时再跑一次。
+  //
+  // 同理，依赖里放 contentHtml：同一篇文章的 HTML 变了（重新提取）也要重算。
+  useEffect(() => {
+    if (loading) return;
+    const root = bodyRef.current;
+    if (!root) { setToc([]); setTocActive(null); return; }
+
+    const heads = [...root.querySelectorAll('h2, h3')] as HTMLElement[];
+    // ≥2 个才出目录：1 个标题没有导航价值，0 个是空栏。
+    // 实测 20 篇真实文章里绝大多数（短讯/日报/通稿）是 0 个。
+    if (heads.length < 2) { setToc([]); setTocActive(null); return; }
+
+    const items: TocItem[] = heads.map((h, i) => {
+      // 没 id 的补一个。用下标而不是文本做 id：标题可能重复、可能含
+      // 空格与标点，拼成 id 后 querySelector 还得再转义一次。
+      if (!h.id) h.id = `sec-${i}`;
+      return {
+        id: h.id,
+        text: (h.textContent ?? '').trim(),
+        level: h.tagName === 'H2' ? 2 : 3,
+      };
+    });
+    setToc(items);
+    setTocActive(items[0]?.id ?? null);
+  }, [loading, detail?.id, detail?.contentHtml]);
+
+  // ── 目录：放得下就显示（§15.18）──────────────────────────
+  //
+  // 判据是**实际可用宽度**，不是一个写死的视口断点。写断点的话，
+  // 用户把正文宽度调到 96ch 之后纸变宽，断点却还成立，目录就压到正文上。
+  //
+  // 用 stage.clientWidth（内容宽，不含 padding）而不是 scrollWidth：
+  // 后者会把已经溢出的内容算进去，一旦显示目录就永远"放得下"。
+  // 不需要每次滚动都算 —— 只有尺寸变化才可能改变结论，交给 ResizeObserver。
+  useEffect(() => {
+    if (loading) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const paperW = () => {
+      const paper = stage.querySelector('.reader') as HTMLElement | null;
+      return paper ? paper.getBoundingClientRect().width : 0;
+    };
+    const check = () => {
+      const sw = stage.clientWidth;
+      const pw = paperW();
+      // 纸与目录这一组由 justify-content 居中：显示目录后纸会向左偏，
+      // 但**正文宽度不变**。判据是"扣掉纸之后还剩多少"，不是"两侧各一半"。
+      setTocFits(pw > 0 && sw - pw >= TOC_NEED);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(stage);
+    const paper = stage.querySelector('.reader');
+    if (paper) ro.observe(paper);
+    return () => ro.disconnect();
+  }, [loading, detail?.id, prefs.width, prefs.fontSize]);
+
+  // ── 目录：滚动时高亮当前小节（§15.18）────────────────────
+  //
+  // 判据是"最后一个「顶部已经越过基准线」的标题"，不是"离视口中心最近"：
+  // 后者在一屏只有 2 段时会在两个标题之间来回跳，读起来像故障。
+  useEffect(() => {
+    const el = scrollRef.current;
+    const root = bodyRef.current;
+    if (!el || !root || toc.length === 0) return;
+
+    const onScroll = () => {
+      const heads = [...root.querySelectorAll('h2, h3')] as HTMLElement[];
+      if (heads.length === 0) return;
+      // 基准线 = 滚动容器顶部往下 90px。取 90 而不是 0：标题正好压在
+      // 上边缘时还没"开始读"，再往下 90px 才算是当前小节。
+      const line = el.getBoundingClientRect().top + 90;
+      let current = heads[0]!.id;
+      for (const h of heads) {
+        if (h.getBoundingClientRect().top <= line) current = h.id;
+        else break;
+      }
+      setTocActive(current);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [toc]);
+
   if (loading || !detail) {
     return (
       <div className="reader-loading">
@@ -1330,6 +1479,17 @@ function Reader(props: {
 
   const a = detail.analysis;
   const hasSite = Boolean(detail.feedSiteUrl);
+  const showToc = tocFits && toc.length >= 2;
+
+  /** 点目录项：滚到标题。用 scrollIntoView 不用算 y —— 算出来的 y 会被
+   *  图片懒加载改变（图片撑开时高度在变），滚不到位。 */
+  const jumpTo = (id: string) => {
+    const root = bodyRef.current;
+    const target = root?.querySelector(`#${CSS.escape(id)}`) as HTMLElement | null;
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTocActive(id);
+  };
 
   return (
     <div className="reader-wrap">
@@ -1395,10 +1555,14 @@ function Reader(props: {
       </div>
 
       <div className="reader-scroll" ref={scrollRef}>
-        <article className="reader">
-          {/* 标题可点：新标签打开原文。用户在阅读区看到标题想"这篇我要发给别人"
-              时，第一个动作是点标题。 */}
-          <h1 className="reader-title">
+        {/* 「舞台」包住纸与目录（§15.18）：纸居中，目录挂在纸右侧的空白里。
+            目录用 position: fixed 会跟随滚动而错位，所以在 stage 里用
+            绝对定位 + sticky 的容器，目录自己吸顶。 */}
+        <div className="reader-stage" ref={stageRef}>
+          <article className="reader">
+            {/* 标题可点：新标签打开原文。用户在阅读区看到标题想"这篇我要发给别人"
+                时，第一个动作是点标题。 */}
+            <h1 className="reader-title">
             <a
               href={detail.url}
               target="_blank"
@@ -1462,6 +1626,7 @@ function Reader(props: {
           {detail.contentHtml ? (
             <div
               className="article-body"
+              ref={bodyRef}
               // 正文来自我们自己抓取并清洗的 HTML（sanitize.ts 白名单 + 链接新标签）
               dangerouslySetInnerHTML={{ __html: detail.contentHtml }}
             />
@@ -1483,7 +1648,34 @@ function Reader(props: {
               </a>
             )}
           </div>
-        </article>
+          </article>
+
+          {/* 侧边目录（§15.18）：只吃纸右侧的空白，不参与排版。
+              面板不够宽或文章没有小标题时整个不渲染 —— 不是渲染成空的。 */}
+          {showToc && (
+            <nav className="reader-toc" aria-label="文章目录">
+              <div className="toc-inner">
+                <div className="toc-head">目录</div>
+                <ul className="toc-list">
+                  {toc.map((it) => (
+                    <li key={it.id} className={`toc-item lv${it.level}`}>
+                      <button
+                        className={`toc-link ${tocActive === it.id ? 'on' : ''}`}
+                        // aria-current 给读屏用，同时是验收脚本的判据 ——
+                        // 只看 class 的话，样式改了测试就跟着失效
+                        aria-current={tocActive === it.id ? 'true' : undefined}
+                        onClick={() => jumpTo(it.id)}
+                        title={it.text}
+                      >
+                        {it.text}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </nav>
+          )}
+        </div>
       </div>
     </div>
   );

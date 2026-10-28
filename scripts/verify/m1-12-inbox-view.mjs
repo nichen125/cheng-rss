@@ -358,24 +358,48 @@ await ev(`(() => {
   return true;
 })()`);
 
-// ── ① 分段控件存在，默认「全部」 ──────────────────────────
+// ── ① 分段控件存在，默认「未读」（v1.16，§15.19）──────────
 const init = await snapshot();
 check('标题行里有「全部 / 未读」分段控件（2 个按钮，文案对得上）', () => {
   return ok(init.segCount === 2
     && init.segLabels.includes('全部') && init.segLabels.includes('未读'),
     `segCount=${init.segCount} labels=${JSON.stringify(init.segLabels)}`);
 });
-check('默认「全部」激活、侧栏「收件箱」高亮', () => {
-  return ok(init.segOn.length === 1 && init.segOn[0] === '全部' && init.navInboxActive,
-    `segOn=${JSON.stringify(init.segOn)} navInbox=${init.navInboxActive}`);
+check('默认「未读」激活、侧栏「未读」高亮（v1.16：默认只看未读）', () => {
+  return ok(init.segOn.length === 1 && init.segOn[0] === '未读'
+    && init.navUnreadActive === true && init.navInboxActive === false,
+    `segOn=${JSON.stringify(init.segOn)} navUnread=${init.navUnreadActive} navInbox=${init.navInboxActive}`);
 });
-check('默认列表是全库 8 条，其中 3 条是已读态', () => {
+check('默认列表只有那 5 条未读，且一条已读都没有', () => {
   const read = init.rows.filter((r) => r.read).length;
-  return ok(init.rows.length === 8 && read === 3,
+  return ok(init.rows.length === 5 && read === 0,
     `${init.rows.length} 条，已读 ${read} 条`);
 });
 
-// ── ② 点「未读」→ 只剩未读 ───────────────────────────────
+// ── ② 点「全部」→ 已读条目回来 ───────────────────────────
+const clickedAll = await clickSeg('全部');
+check('点「全部」能点中', () => ok(clickedAll === true, '找不到「全部」分段按钮'));
+const allView = await snapshot();
+check('「全部」把 8 条都放出来（已读的也在）', () => {
+  return ok(allView.rows.length === 8, `${allView.rows.length} 条`);
+});
+check('「全部」里那 3 条是已读外观（不是被当成未读显示）', () => {
+  const read = allView.rows.filter((r) => r.read).length;
+  return ok(read === 3, `已读 ${read} 条，期望 3`);
+});
+check('「全部」下侧栏高亮转到「收件箱」，「未读」熄灭（两处状态一致）', () => {
+  return ok(allView.navInboxActive === true && allView.navUnreadActive === false,
+    `navInbox=${allView.navInboxActive} navUnread=${allView.navUnreadActive}`);
+});
+check('「全部」下分段控件只有「全部」是激活态', () => {
+  return ok(allView.segOn.length === 1 && allView.segOn[0] === '全部',
+    `segOn=${JSON.stringify(allView.segOn)}`);
+});
+check('「全部」的「N 条」是 8（不是未读的 5）', () => {
+  return ok(/^8 条/.test(allView.count), JSON.stringify(allView.count));
+});
+
+// ── ③ 点「未读」→ 只剩未读 ───────────────────────────────
 const clickedUnread = await clickSeg('未读');
 check('点「未读」能点中', () => ok(clickedUnread === true, '找不到「未读」分段按钮'));
 const unreadView = await snapshot();

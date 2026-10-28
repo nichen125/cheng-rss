@@ -339,6 +339,24 @@ const clickNav = async (text) => {
   return r;
 };
 
+// v1.16：默认视图是「未读」（§15.19），本脚本验的是"分组/源筛选"，
+// 不是"读/全部"。先切到「全部」，让所有条数断言回到"该范围内全部条目"，
+// 这样脚本的意图与断言才是一回事（否则每条都得先换算成未读数）。
+const clickAllSeg = async () => {
+  const r = await ev(`(() => {
+    const b = [...document.querySelectorAll('.pane-seg .seg-btn')]
+      .find((x) => (x.textContent || '').trim() === '全部');
+    if (!b) return false;
+    b.click();
+    return true;
+  })()`);
+  await sleep(1400);
+  return r;
+};
+// check() 的回调必须同步（harness 的约定），所以 await 放在外面
+const switchedToAll = await clickAllSeg();
+check('（前置）切到「全部」视图（v1.16 默认是未读）', () => ok(switchedToAll === true));
+
 // 读当前列表 + 侧栏分组树 + 标题
 //
 // v1.13 起分组与源的选择从"列表头部一行 chip"搬到了**侧栏分组树**（§15.13）。
@@ -456,6 +474,9 @@ check('组内视图显示清除按钮（×）', () => ok(groupA.scopeClear === t
 check('标题旁的「N 条」等于组内命中总数（不是本页加载条数）', () => {
   // 这个组只有 9 条，items.length 恰好等于 total，所以这条**抓不住**
   // "用本页条数当总数"的 bug。真正能抓的是 ⑪ 的 45 条大组。
+  //
+  // v1.16：默认视图改成「未读」（§15.19），所以这里必须先点「全部」——
+  // 否则量到的是"该组未读数 5"，与这条断言要问的"组内命中总数"不是一回事。
   return ok(/^9 条/.test(groupA.count), JSON.stringify(groupA.count));
 });
 

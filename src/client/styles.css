@@ -35,6 +35,13 @@
   --radius-xs: 4px;
   /* 胶囊写成 999px 而不是固定 14px：高度变化时不会露出直角（§15.12） */
   --radius-pill: 999px;
+  /* 「纸」的三件套（§15.18）。底色只比 --bg 亮一阶 —— 差太多会变成卡片，
+     与 §15.0 的三栏平铺冲突；阴影在暗色下必须几乎看不见，
+     否则就是 2005 年的投影。两个值都在各自的主题块里覆盖。 */
+  --paper-bg: #12151b;
+  --paper-line: #1c212b;
+  --paper-shadow: 0 1px 3px rgba(0, 0, 0, 0.28), 0 10px 30px rgba(0, 0, 0, 0.22);
+  --desk-bg: #0b0d11;
   /* 三栏宽度（§15.16，v1.13 实测收敛）。
    *
    * 218/400 是按"最坏情况"定的：侧栏按最长的分组名定宽，但那个名字本来
@@ -71,6 +78,12 @@
     --normal: #a8b0bd;
     --noise: #cbd2dc;
     --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(16, 24, 40, 0.08);
+    /* 亮色下的"纸"：正文区背景已经是纯白 #fff，纸必须**暗**一阶才看得见。
+       与暗色相反，这不算不统一 —— 目标是"纸与桌面有区别"，不是"纸更亮"。 */
+    --paper-bg: #ffffff;
+    --paper-line: #e8ecf2;
+    --paper-shadow: 0 1px 3px rgba(16, 24, 40, 0.05), 0 10px 30px rgba(16, 24, 40, 0.07);
+    --desk-bg: #f1f4f8;
     color-scheme: light;
   }
 }
@@ -702,7 +715,18 @@ input::placeholder { color: var(--fg-faint); }
 .reader-pane {
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  /* 「桌面」的底色（§15.18）：纸要浮在它上面，所以它必须与纸**不同**。
+   * 不能直接用 --bg —— 亮色主题下 --bg 是纯白，纸也是纯白，边缘就消失了。
+   * 每个主题块各自给 --desk-bg（见下面的主题定义），漏一个就会退化成
+   * "纸和桌面同色"，那时只剩阴影在撑边缘，暗色下几乎看不见。 */
+  background: var(--desk-bg, var(--bg));
+  /* 注意这里必须显式写 color（§15.18 顺带修的既有缺陷）：
+   * 阅读区主题只覆盖了 `--fg` 这个**变量**，而 `color` 是在 body 上算好
+   * 再继承下来的。切到"暗色"时 --fg 变成浅色，但 .reader-title /
+   * .reader-meta 这些没写 color 的元素继承的仍是 body 那个深色 ——
+   * 标题在深底上变成深字，等于看不见。正文没事，因为 .article-body
+   * 自己写了 color: var(--fg)，所以这个缺陷只在标题与 meta 上露出。 */
+  color: var(--fg);
   min-width: 0;
   overflow: hidden;
 }
@@ -753,6 +777,28 @@ input::placeholder { color: var(--fg-faint); }
 
 .reader-scroll { flex: 1; overflow-y: auto; }
 
+/* ── 「纸」与侧边目录（§15.18，v1.15）─────────────────────
+ *
+ * 舞台 = 纸 + 右侧空白里的目录。用 flex 居中**纸与目录这一组**，
+ * 而不是各自居中：
+ *   · 只有纸时 —— 组 = 纸，纸张居中（和 v1.14 完全一样）
+ *   · 有目录时 —— 组 = 纸 + 目录，整组居中，纸会向左偏 ~100px
+ *
+ * 为什么允许纸偏左：另一种做法是"纸永远居中、目录塞进右侧空白"，
+ * 那样 1440 屏只剩 53px、1600 屏剩 133px，都放不下一个能读的目录，
+ * 于是要等到 1750px 才出现 —— 实际就等于这个功能对 16:9 的笔记本不可见。
+ * 让纸偏 100px 换来 1540px 就能用，而**正文宽度一个字没少**（这是底线）。
+ *
+ * 注意 `.reader` 的 `margin: 0 auto` 在 flex 下不起作用 —— 居中由
+ * `justify-content` 负责。留着它不会出错（flex 项的 auto margin 会把
+ * 可用空间吃掉导致贴边），所以必须删掉，见下面的 `.reader`。 */
+.reader-stage {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 16px 0 20px;
+}
+
 .reader {
   /* 正文宽度默认 80ch（§15.3，v1.14 从 72ch 放宽）。
    *
@@ -770,20 +816,90 @@ input::placeholder { color: var(--fg-faint); }
    * max-width 只是**上限**：窄屏时正文宽度由阅读栏可用宽度决定，
    * 这时 80ch 不起作用（1180 笔记本上看到 596px 就是这个原因）。
    *
-   * §15.11：字号与宽度改由 CSS 变量驱动（阅读偏好），默认 16.5px / 80ch。 */
+   * 但**只有 max-width 是不够的**（v1.15 实测发现）：这个元素是 flex 项，
+   * 没有 width 时会收缩到内容宽度 —— 短文章（几段话）的纸只有 521px，
+   * 长文章才 770px。同一屏上翻两篇，纸的宽度来回跳。
+   * 所以要显式给 width，让纸宽与文章长短无关。
+   * `max-width: calc(100% - 58px)` 的 58 = 左右内边距 56 + 边框 2：
+   * content-box 下 100% 只是文字宽度，不减去这 58px 就会横向溢出。
+   *
+   * flex-shrink 必须是 1（默认值，这里显式写出来）：目录是 flex-shrink:0
+   * 的兄弟节点，窄屏下要挤的是纸，不是目录 —— 目录挤窄了就没法读。
+   *
+   * §15.11：字号与宽度改由 CSS 变量驱动（阅读偏好），默认 16.5px / 80ch。
+   * §15.18：这一层同时也是那张"纸" —— 底色 / 圆角 / 阴影都加在这里，
+   * 所以纸的宽度自动等于「正文宽度 + 内边距」，用户调宽度时纸跟着变。 */
   box-sizing: content-box;
+  flex-shrink: 1;
+  min-width: 0;
   font-size: var(--reader-font, 16.5px);
-  max-width: calc(var(--reader-width, 80) * 1ch);
-  margin: 0 auto;
+  width: calc(var(--reader-width, 80) * 1ch);
+  max-width: calc(100% - 58px);
   /* 34/28/120 → 24/28/88（§15.3，v1.14）：标题上方那 34px 是全页最大
      的一块死空间，而 .reader-bar 与正文本身已经有分隔感，不需要再垫。
      底部 120px 是"滚到底还能再往上带一点"的余量，88 足够。 */
   padding: 24px 28px 88px;
+  background: var(--paper-bg);
+  border: 1px solid var(--paper-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--paper-shadow);
   transition: font-size 120ms, max-width 120ms;
 }
 
+/* 侧边目录：吸顶跟随，只吃纸右侧的空白。
+   显隐由 JS 按**实际剩余宽度**决定（见 Reader 里的 ResizeObserver），
+   不用媒体查询 —— 用户把正文调到 96ch 后纸变宽、空白变窄，
+   写死的断点会失效并让目录压到正文上。 */
+.reader-toc {
+  flex-shrink: 0;
+  position: sticky;
+  top: 20px;
+  align-self: flex-start;
+  width: 180px;
+  /* 与纸之间留 20px。左边距而不是 margin-left：让它贴着组的边缘，
+     这样目录与纸的间距恒定，不随空白变宽而漂远。 */
+  padding-left: 20px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.toc-inner { border-left: 1px solid var(--border); padding-left: 14px; }
+.toc-head {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  margin-bottom: 8px;
+}
+.toc-list { list-style: none; margin: 0; padding: 0; }
+.toc-item { margin: 0; }
+/* h3 缩进一级：目录里要能看出层级，否则 12 个条目是平铺的，看不出结构 */
+.toc-item.lv3 { padding-left: 10px; }
+.toc-link {
+  display: block;
+  width: 100%;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  border-radius: var(--radius-xs);
+  color: var(--fg-faint);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+  /* 单行省略号：标题可能很长，两行会让目录比自己要导航的文章还高 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 100ms;
+}
+.toc-link:hover { color: var(--fg-dim); }
+.toc-link.on { color: var(--accent); font-weight: 500; }
+
 /* 阅读区主题（§15.11）：只作用于阅读区，不动全局主题 ——
-   白天用亮色、晚上躺着看用米色，这个选择与"整个应用什么颜色"是两件事。 */
+   白天用亮色、晚上躺着看用米色，这个选择与"整个应用什么颜色"是两件事。
+   每个主题都要带上「纸」的三件套（§15.18）：漏一组的话，切到那个主题后
+   纸会退回到根节点的颜色，与阅读区背景糊成一片，边缘就白做了。 */
 .reader-pane[data-reader-theme='light'] {
   --bg: #ffffff;
   --bg-elev: #f7f8fa;
@@ -794,6 +910,11 @@ input::placeholder { color: var(--fg-faint); }
   --border: #e3e7ed;
   --border-soft: #eef1f5;
   --accent: #2563eb;
+  /* 亮色下阅读区背景是 #fff，纸必须暗一阶才看得出边缘 */
+  --paper-bg: #ffffff;
+  --paper-line: #e8ecf2;
+  --paper-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 10px 30px rgba(16, 24, 40, 0.08);
+  --desk-bg: #f1f4f8;
   color-scheme: light;
 }
 .reader-pane[data-reader-theme='sepia'] {
@@ -806,8 +927,12 @@ input::placeholder { color: var(--fg-faint); }
   --border: #ddd0ba;
   --border-soft: #e8dcc7;
   --accent: #a8622a;
+  /* 米色底上纸要更亮一点（像一页新纸压在牛皮桌面上） */
+  --paper-bg: #fdf8ec;
+  --paper-line: #e6dac2;
+  --paper-shadow: 0 1px 3px rgba(90, 74, 48, 0.10), 0 10px 30px rgba(90, 74, 48, 0.10);
+  --desk-bg: #eee3d0;
   color-scheme: light;
-  background: var(--bg);
 }
 .reader-pane[data-reader-theme='dark'] {
   --bg: #0b0d11;
@@ -819,11 +944,18 @@ input::placeholder { color: var(--fg-faint); }
   --border: #222834;
   --border-soft: #1a1f28;
   --accent: #5b9dff;
+  --paper-bg: #12151b;
+  --paper-line: #1c212b;
+  --paper-shadow: 0 1px 3px rgba(0, 0, 0, 0.28), 0 10px 30px rgba(0, 0, 0, 0.22);
+  --desk-bg: #0b0d11;
   color-scheme: dark;
 }
+/* 三个主题都自带 --desk-bg（§15.18）。这里**不再**用 `background: var(--bg)`：
+   阅读区背景已经不是"底色"而是"桌面"，用 --bg 的话亮色主题下桌面与纸
+   都是 #fff，纸的边缘只剩 1px 边框。 */
 .reader-pane[data-reader-theme='light'],
 .reader-pane[data-reader-theme='dark'],
-.reader-pane[data-reader-theme='sepia'] { background: var(--bg); }
+.reader-pane[data-reader-theme='sepia'] { background: var(--desk-bg); }
 
 /* 阅读进度条（§15.11）。2px 贴在阅读栏下沿，用 transform 而不是 width ——
    width 每帧触发重排，滚动时整页都在动。 */

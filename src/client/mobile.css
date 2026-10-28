@@ -437,13 +437,24 @@
   .search-box input { font-size: 16px; }
   input, textarea { font-size: 16px; }
 
-  /* 阅读区：手机上 72ch 必然被视口约束，改为铺满 + 合适边距 */
+  /* 阅读区：手机上 80ch 必然被视口约束，改为铺满 + 合适边距 */
   .reader {
+    /* width 必须一起重置：桌面那条是 `width: calc(80 * 1ch)`（v1.15 为了
+       让纸宽与文章长短无关），只清 max-width 的话手机上会是 712px */
+    width: auto;
     max-width: none;
     box-sizing: border-box;
     padding: 20px 18px 80px;
     font-size: 16.5px;
+    /* 手机上取消「纸」（§15.18）：屏宽已经贴到内容，圆角 + 阴影只会
+       切掉两角、白占 2px。目录本来就不显示（宽度不够）。 */
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: none;
   }
+  /* 舞台在手机上不需要浮动留白，也不需要网格 */
+  .reader-stage { padding: 0; display: block; }
   .reader-title { font-size: 21px; line-height: 1.34; }
   .article-body { font-size: 16px; line-height: 1.75; }
 

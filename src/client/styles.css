@@ -5,7 +5,7 @@
  * 构建链路，而本项目最终只用到 8 个组件。手写 500 行 CSS 换来零构建
  * 依赖 + 首屏 14KB 样式，这个交换在小项目里更划算。
  *
- * 设计约束：暗色优先、正文 72ch、列表一屏 8~10 条、动效不超过 200ms。
+ * 设计约束：暗色优先、正文默认 80ch（可调到 64/96）、列表一屏 8~10 条、动效不超过 200ms。
  */
 
 :root {
@@ -40,7 +40,7 @@
    * 218/400 是按"最坏情况"定的：侧栏按最长的分组名定宽，但那个名字本来
    * 就有 ellipsis；列表栏按"标题能排满 2 行"定宽，实测平均 1.4 行。
    * 收到 196/368 之后，最长标签与 2 行标题仍然排得下，多出来的宽度
-   * 全部让给正文区（72ch 是硬指标，不该跟着变）。
+   * 全部让给正文区（正文宽度是阅读体验的核心，不该跟着导航变）。
    *
    * 下限不能无限压：368 + 196 = 564px，加上正文 72ch ≈ 594px 共需 1158px，
    * 所以 <1200px 时另有规则（见 mobile.css），否则 1180px 的笔记本上
@@ -754,20 +754,31 @@ input::placeholder { color: var(--fg-faint); }
 .reader-scroll { flex: 1; overflow-y: auto; }
 
 .reader {
-  /* 72ch 是可读性硬指标（PLAN §15.3）：宽屏铺满会明显降低阅读速度。
-     font-size 必须定在这里而不是 .article-body —— ch 是相对当前元素
-     字号计算的，只有当「量宽度的字号」等于「正文的字号」时，
-     72ch 才真的等于 72 个正文字符宽。
-     content-box：让 72ch 约束的是文字宽度，padding 加到外面。
-     用默认的 border-box 会变成「含 padding 共 72ch」，文字少 8%。
-
-     §15.11：字号与宽度改由 CSS 变量驱动（阅读偏好），默认值就是原来的
-     16.5px / 72ch —— 没设置过的用户看到的和之前完全一样。 */
+  /* 正文宽度默认 80ch（§15.3，v1.14 从 72ch 放宽）。
+   *
+   * 为什么改：72ch 在 1440 屏下只剩 640px 文字列，两侧各空 118px；
+   * 1920 屏下各空 358px —— 空白比列表栏还宽。§15.16 刚把两栏收窄
+   * 让出来的宽度，全被这里又变回留白，等于白改。
+   * 80ch ≈ 712px 仍在长文的可接受范围内（超过 90ch 回扫成本明显上升）。
+   *
+   * 两个实现约束没变，改宽度时不能忘：
+   *   · font-size 必须定在这里而不是 .article-body —— ch 相对当前元素
+   *     字号，只有「量宽度的字号」=「正文字号」时，80ch 才是 80 个正文字符；
+   *   · content-box：让 80ch 约束文字宽度，padding 加到外面。默认的
+   *     border-box 会变成「含 padding 共 80ch」，文字少 8%。
+   *
+   * max-width 只是**上限**：窄屏时正文宽度由阅读栏可用宽度决定，
+   * 这时 80ch 不起作用（1180 笔记本上看到 596px 就是这个原因）。
+   *
+   * §15.11：字号与宽度改由 CSS 变量驱动（阅读偏好），默认 16.5px / 80ch。 */
   box-sizing: content-box;
   font-size: var(--reader-font, 16.5px);
-  max-width: calc(var(--reader-width, 72) * 1ch);
+  max-width: calc(var(--reader-width, 80) * 1ch);
   margin: 0 auto;
-  padding: 34px 28px 120px;
+  /* 34/28/120 → 24/28/88（§15.3，v1.14）：标题上方那 34px 是全页最大
+     的一块死空间，而 .reader-bar 与正文本身已经有分隔感，不需要再垫。
+     底部 120px 是"滚到底还能再往上带一点"的余量，88 足够。 */
+  padding: 24px 28px 88px;
   transition: font-size 120ms, max-width 120ms;
 }
 
@@ -844,7 +855,9 @@ input::placeholder { color: var(--fg-faint); }
 .reader-meta {
   color: var(--fg-faint);
   font-size: 12.5px;
-  margin-bottom: 26px;
+  /* 26 → 18（§15.3，v1.14）：这 26px 加上 AI 卡的 30px，会让标题到正文
+     之间出现 60px 的空隙，像是"另一段内容开始了"。18 足以区分元信息与正文。 */
+  margin-bottom: 18px;
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
@@ -921,8 +934,10 @@ input::placeholder { color: var(--fg-faint); }
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-top: 34px;
-  padding-top: 20px;
+  /* 34/20 → 26/16（§15.3，v1.14）：正文已经结束，这里是出口区，
+     仍然要能"划清界限"，但不需要一整屏的间隔。 */
+  margin-top: 26px;
+  padding-top: 16px;
   border-top: 1px solid var(--border-soft);
 }
 /* 文末出口的两个 <a class="btn"> 已由基样式统一成 32px / inline-flex。
@@ -939,7 +954,9 @@ input::placeholder { color: var(--fg-faint); }
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  margin-bottom: 30px;
+  /* 30 → 22（§15.3，v1.14）：AI 卡与正文是"摘要 → 原文"的连续关系，
+     30px 的间隔会让它们看起来像两个独立区块。 */
+  margin-bottom: 22px;
   overflow: hidden;
 }
 .ai-head {
@@ -1003,7 +1020,10 @@ input::placeholder { color: var(--fg-faint); }
   color: var(--fg);
   overflow-wrap: break-word;
 }
-.article-body p { margin: 0 0 1.15em; }
+/* 段距 1.15em → 1.05em（§15.3，v1.14）。1.15em 配 1.78 行高，相当于
+   段间 21px 而段内行距 29px，"空行比行大"的观感偏松。1.05em = 17px，
+   仍明显大于 0，段落边界不会糊成一片。 */
+.article-body p { margin: 0 0 1.05em; }
 .article-body h2, .article-body h3 {
   font-size: 18px;
   margin: 1.7em 0 0.6em;

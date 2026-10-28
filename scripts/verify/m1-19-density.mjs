@@ -12,15 +12,15 @@
 //
 //   ① 「变小了」不是判据。218→196 和 218→100 都叫变小。
 //      必须断言**具体数值**（196 / 368 / ≥870）。
-//   ② 收窄基座最容易顺手牺牲正文。72ch 是 §15.3 的硬指标（可读性），
+//   ② 收窄基座最容易顺手牺牲正文。正文宽度是 §15.3 的可读性指标，
 //      如果 1.19 的实现方式是"正文跟着窄一点"，这条会红。
 //   ③ 1180px 的笔记本才是真实场景：1440 换到 1180 时正文若被压到
 //      55ch，那收窄的收益全被吃掉了。③ 专门盯这个宽度。
 //
 // 判据（对应 §19.3 的 1.19 行）：
 //   ① 1440px 下侧栏 196px、列表 368px、阅读区 ≥ 870px
-//   ② 阅读区正文仍是 72ch（收窄基座不许动正文宽度）
-//   ③ 1180px 下正文列宽 ≥ 594px（不被压到 72ch 以下）
+//   ② 正文列宽 = 偏好字符数（默认 80ch，v1.14），两侧留白 ≤90px
+//   ③ 1180px 下正文列宽 ≥ 594px
 //   ④ 组内有源时列表头部高度与无分组时**完全相等**（chip 行不占位）
 //   ⑤ 侧栏最长分组名能完整显示或走省略号，不压在角标上
 //   ⑥ 1440×960 下首屏条目数 ≥ 9
@@ -253,9 +253,12 @@ await send('Network.setCookie', {
 /**
  * 量一次布局。
  *
- * 72ch 必须现量：ch 是字体相对单位，getComputedStyle 给的是解析后的 px，
- * 写死 "72ch = 594px" 在换了字号（阅读偏好可调）之后就是错的。
+ * 字符宽度必须现量：ch 是字体相对单位，getComputedStyle 给的是解析后的 px，
+ * 写死 "80ch = 712px" 在换了字号（阅读偏好可调）之后就是错的。
  * 量的是 .article-body（正文列）而不是 .reader 外框 —— 后者含 padding。
+ *
+ * v1.14：正文默认从 72ch 放宽到 80ch，所以期望值也从 CSS 变量里读，
+ * 不在测试里写死一个数（写死就得跟着实现改测试，§19.1）。
  */
 const MEASURE = `(() => {
   const box = (s) => {
@@ -266,9 +269,12 @@ const MEASURE = `(() => {
   };
   const body = document.querySelector('.article-body');
   const reader = document.querySelector('.reader');
+  const pane = document.querySelector('.reader-pane');
+  const wantCh = Number(getComputedStyle(pane ?? document.body)
+    .getPropertyValue('--reader-width').trim() || 80) || 80;
   const probe = document.createElement('div');
-  probe.style.cssText = 'position:absolute;visibility:hidden;width:72ch;font-size:16.5px;'
-    + 'font-family:' + getComputedStyle(reader ?? document.body).fontFamily;
+  probe.style.cssText = 'position:absolute;visibility:hidden;width:' + wantCh
+    + 'ch;font-size:16.5px;font-family:' + getComputedStyle(reader ?? document.body).fontFamily;
   document.body.appendChild(probe);
   const want72 = Math.round(probe.getBoundingClientRect().width);
   probe.remove();
@@ -318,6 +324,18 @@ const MEASURE = `(() => {
     paneHead: box('.pane-head'),
     colW: body ? Math.round(body.getBoundingClientRect().width) : 0,
     want72,
+    wantCh,
+    // 正文两侧的空白：v1.14 的 §15.3 改动就是把这两个数压下去
+    sideGapL: (() => {
+      const pr = pane ? pane.getBoundingClientRect() : null;
+      const br = body ? body.getBoundingClientRect() : null;
+      return pr && br ? Math.round(br.left - pr.left) : null;
+    })(),
+    sideGapR: (() => {
+      const pr = pane ? pane.getBoundingClientRect() : null;
+      const br = body ? body.getBoundingClientRect() : null;
+      return pr && br ? Math.round(pr.right - br.right) : null;
+    })(),
     visibleRows: vis.length,
     totalRows: items.length,
     rowHMin: heights.length ? Math.min(...heights) : 0,
@@ -381,10 +399,15 @@ check('① 两栏合计比 v1.12 的 618px 窄（收窄方向没写反）', () =
   const sum = (at1440.sidebar?.w ?? 0) + (at1440.list?.w ?? 0);
   return ok(sum <= 618 - W_LIST_MAX_OK, `两栏合计 ${sum}px，v1.12 是 618px`);
 });
-check('② 正文列宽仍是 72ch（收窄基座没顺手改正文宽度）', () => {
+check('② 正文列宽 = 偏好字符数的实测宽度（收窄基座没顺手改正文宽度）', () => {
   const diff = Math.abs(at1440.colW - at1440.want72);
   return ok(diff <= 4,
-    `正文列 ${at1440.colW}px，72ch = ${at1440.want72}px，差 ${diff}px`);
+    `正文列 ${at1440.colW}px，${at1440.wantCh}ch = ${at1440.want72}px，差 ${diff}px`);
+});
+check('② 正文两侧留白 ≤ 90px（v1.14 §15.3：改前两侧各 118px）', () => {
+  return ok(at1440.sideGapL !== null && at1440.sideGapL >= 40 && at1440.sideGapL <= 90
+    && at1440.sideGapR >= 40 && at1440.sideGapR <= 90,
+    `左 ${at1440.sideGapL}px / 右 ${at1440.sideGapR}px`);
 });
 check(`⑥ 1440×960 首屏条目数 ≥ ${MIN_ROWS_1440}（收窄 + 行距共赢回来的那一行）`, () => {
   return ok(at1440.visibleRows >= MIN_ROWS_1440,
@@ -431,11 +454,11 @@ check('⑤ 分组行宽度 = 侧栏内容宽度（没有被长名字撑宽）', 
     `行宽 ${rowW}px，侧栏 ${sideW}px`);
 });
 
-// ── ③ 1180px：正文不能被压到 72ch 以下太多 ────────────────
+// ── ③ 1180px：正文不能被压得太窄 ─────────────────────────
 //
 // 1180 是这一步唯一真正有风险的宽度：
 // 1440 有富余，1024 以下本来就走平板规则。1180 恰好是"三栏还成立
-// 但已经不够 72ch"的那一段，也是最常见的笔记本外接屏缩放后的宽度。
+// 但已经不够宽"的那一段，也是最常见的笔记本外接屏缩放后的宽度。
 await setSize(1180, 800);
 await send('Page.navigate', { url: origin });
 await sleep(2600);
@@ -443,9 +466,9 @@ await ev(`document.querySelector('.entry-item')?.click()`);
 await sleep(1600);
 const at1180 = await measure();
 
-check('③ 1180px 下正文列宽 ≥ 594px（72ch 只被压 7%，不是压到 55ch）', () => {
+check(`③ 1180px 下正文列宽 ≥ ${MIN_COL_1180}px（不是被压到 55ch）`, () => {
   return ok(at1180.colW >= MIN_COL_1180,
-    `正文列 ${at1180.colW}px，门槛 ${MIN_COL_1180}px（72ch = ${at1180.want72}px）`);
+    `正文列 ${at1180.colW}px，门槛 ${MIN_COL_1180}px（偏好 ${at1180.wantCh}ch = ${at1180.want72}px）`);
 });
 check('③ 1180px 下两栏确实各让了宽度（196/368 → 更窄，而不是原样挤正文）', () => {
   return ok(at1180.sidebar?.w < W_SIDEBAR && at1180.list?.w < W_LIST,

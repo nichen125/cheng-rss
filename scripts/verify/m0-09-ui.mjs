@@ -4,11 +4,14 @@
 // 判据（PLAN §15）：
 //   ① 三栏：侧栏 + 列表 + 阅读区同时存在（点开条目列表不消失）
 //   ② 列表项一屏 8~10 条（信息密度：标题 + 一行摘要 + 元信息）
-//   ③ 阅读区正文最大宽度 72ch
+//   ③ 正文列宽 = 偏好的字符数（默认 80ch），且 1440 屏下两侧留白 ≤90px
 //   ④ 暗色是默认（不是可选主题）
 //   ⑤ 空态有引导按钮/文案
 //   ⑥ 键盘可达（/ 聚焦搜索，Esc 返回）
 //   ⑦ 窄屏阅读区浮层化，不挤成两栏
+//
+// ③ 的断言不写死字符数，而是从 CSS 变量 `--reader-width` 读出来再量 ——
+// 写死 80 的话以后调默认值又要改测试，改测试去迁就实现等于没测（§19.1）。
 //
 // 做法：用本机 Edge 无头模式走真实浏览器 + DOM 断言。
 // 为什么不用 jsdom：jsdom 不做布局，拿不到 offsetWidth / 媒体查询，
@@ -271,17 +274,29 @@ const after = await evaluate(`(() => {
   const box = (s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { w: Math.round(r.width), x: Math.round(r.left) }; };
   const body = document.querySelector('.article-body');
   const reader = document.querySelector('.reader');
+  const pane = document.querySelector('.reader-pane');
+
   // ch 是字体相对单位，getComputedStyle 返回的是解析后的 px。
-  // 要验"是不是 72ch"，就用同样的字号量一下 72ch 再比。
+  // 要验"是不是 N ch"，就用同样的字号量一下 N ch 再比。
   // 量的是正文列（.article-body）而不是 .reader 的外框 —— 后者含 padding，
   // 用它比会把"文字列宽"和"盒子宽"混为一谈。
+  //
+  // v1.14：正文默认宽度从 72ch 改成 80ch，但**断言不写死这个数** ——
+  // 从 CSS 变量 --reader-width 读出来再量。写死 80 的话，以后调默认值
+  // 又要改一遍测试，而测试改实现就等于没测（§19.1）。
+  const wantCh = Number(getComputedStyle(pane ?? document.body)
+    .getPropertyValue('--reader-width').trim() || 80) || 80;
   const probe = document.createElement('div');
-  probe.style.cssText = 'position:absolute;visibility:hidden;width:72ch;font-size:16.5px;font-family:'
+  probe.style.cssText = 'position:absolute;visibility:hidden;width:' + wantCh
+    + 'ch;font-size:16.5px;font-family:'
     + getComputedStyle(reader ?? document.body).fontFamily;
   document.body.appendChild(probe);
-  const want72 = Math.round(probe.getBoundingClientRect().width);
+  const wantW = Math.round(probe.getBoundingClientRect().width);
   probe.remove();
+
   const bw = body?.getBoundingClientRect().width;
+  const pr = pane?.getBoundingClientRect();
+  const br = body?.getBoundingClientRect();
   return {
     sidebar: box('.sidebar'),
     list: box('.list-pane'),
@@ -291,7 +306,11 @@ const after = await evaluate(`(() => {
     hasAiCard: Boolean(document.querySelector('.ai-card')),
     colWidth: bw ? Math.round(bw) : 0,
     bodyFontSize: body ? getComputedStyle(body).fontSize : null,
-    want72,
+    wantCh,
+    want72: wantW,   // 名字沿用（下游断言用），语义变成"wantCh 个字符的实测宽度"
+    // 正文两侧的空白：v1.14 的改动就是把这两个数压下去
+    sideGapL: pr && br ? Math.round(br.left - pr.left) : null,
+    sideGapR: pr && br ? Math.round(pr.right - br.right) : null,
     placeholderGone: !document.querySelector('.reader-placeholder'),
   };
 })()`);
@@ -303,11 +322,24 @@ check('点开条目后列表仍在（不是跳页）', () => {
 check('阅读区显示正文', () => ok(after.hasBody, '正文为空'));
 check('阅读区显示 AI 摘要卡', () => ok(after.hasAiCard, '没有 .ai-card'));
 check('阅读区占位已消失', () => ok(after.placeholderGone));
-check('正文列宽等于 72ch（§15.3 硬指标）', () => {
+check('正文列宽等于偏好的字符数（§15.3，默认可调）', () => {
   // 允差 4px：ch 的实测受字体回退影响
   const diff = Math.abs(after.colWidth - after.want72);
   return ok(diff <= 4,
-    `实际列宽 ${after.colWidth}px，72ch = ${after.want72}px，差 ${diff}px`);
+    `实际列宽 ${after.colWidth}px，${after.wantCh}ch = ${after.want72}px，差 ${diff}px`);
+});
+check('正文默认不是 72ch 时代的老宽度（v1.14 明确放宽过）', () => {
+  // 这条防的是"改文档没改代码"：PLAN 说默认 80ch，代码还是 72ch。
+  // 80ch 与 72ch 差 71px，远超 4px 允差，不会误判。
+  return ok(after.wantCh >= 76 && after.wantCh <= 96,
+    `--reader-width = ${after.wantCh}ch，应在 76~96 之间（§15.3 默认 80）`);
+});
+check('1440 屏下正文两侧各留白 ≤ 90px（改前是 118px）', () => {
+  // 空白要"合理"而不是"消失"：40~90px 是排版上的呼吸区，
+  // 0 会让正文贴边、>118 就是改之前被吐槽的那种
+  return ok(after.sideGapL !== null && after.sideGapL >= 40 && after.sideGapL <= 90
+    && after.sideGapR >= 40 && after.sideGapR <= 90,
+    `左 ${after.sideGapL}px / 右 ${after.sideGapR}px`);
 });
 
 // ── ④ 暗色是默认 ──────────────────────────────────────────────

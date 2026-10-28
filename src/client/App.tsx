@@ -671,21 +671,11 @@ function Main(props: { user: User; onLogout: () => void }) {
           })}
         </nav>
 
-        <div className="nav-section">订阅源</div>
-        <nav className="nav">
-          {/* 保留在侧栏，但语义变成"打开配置并停在订阅分类"（§15.15）。
-              删除它会让"我想加个源"多一步（先进配置再选分类）；
-              而它不再切换主界面，读与配置的层级关系是清楚的。 */}
-          <button
-            className={`nav-item ${settingsOpen && settingsSection === 'feeds' ? 'active' : ''}`}
-            onClick={() => { setSettingsSection('feeds'); setSettingsOpen(true); }}
-            title="管理订阅（打开配置）"
-          >
-            <span className="nav-icon"><IconRss /></span>
-            <span className="nav-label">订阅</span>
-            {stats && stats.feeds > 0 && <span className="badge">{stats.feeds}</span>}
-          </button>
-        </nav>
+        {/* 「订阅源」这一块原先挂在侧栏（一个「订阅」入口 + 一个「分组」标题）。
+            v1.13 之后两样都不需要了：
+              · 订阅管理本来就在配置弹窗里（§15.15），留着入口等于有两个门；
+              · 分组树自带「分组」标题，再挂一个同名标题是重复。
+            唯一的配置入口是右下角那个齿轮 —— 一个入口比两个清楚。 */}
 
         {/* 分组树（§15.13 v1.13）：分组行就地展开，组内源作为子行挂在下面。
             改之前是"列表头部一行横向滚动的 chip" —— 组里 11 个源时那行
@@ -1185,14 +1175,18 @@ function Main(props: { user: User; onLogout: () => void }) {
             </button>
           );
         })}
-        {/* 订阅入口改成"打开配置并停在订阅分类"（§15.15）：位置不变，
-            但它现在打开的是弹窗，不再切换主界面 —— 读和配置分开了。 */}
+        {/* 配置入口（§15.15 v1.13）：手机上侧栏是隐藏的，这一格是**唯一**
+            能打开配置的地方，所以不能跟着桌面那个「订阅」一起删。
+            改名成「配置」+ 齿轮，是为了让名字和行为对上 —— 它打开的是
+            整个配置弹窗（订阅/分组/账户），不是"订阅页"。 */}
         <button
-          className={`tab ${settingsOpen && settingsSection === 'feeds' ? 'active' : ''}`}
-          onClick={() => { setSettingsSection('feeds'); setSettingsOpen(true); setOpenId(null); }}
+          className={`tab ${settingsOpen ? 'active' : ''}`}
+          onClick={() => { setSettingsOpen(true); setOpenId(null); }}
+          title="配置（订阅 / 分组 / 账户）"
+          aria-label="打开配置"
         >
-          <span className="tab-icon"><IconRss size={18} /></span>
-          <span className="tab-label">订阅</span>
+          <span className="tab-icon"><IconSettings size={18} /></span>
+          <span className="tab-label">配置</span>
         </button>
       </nav>
     </div>

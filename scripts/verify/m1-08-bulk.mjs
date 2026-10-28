@@ -425,14 +425,21 @@ async function uiChecks() {
     body:JSON.stringify({email:'bulk@test.local',password:'bulktest12345'}),
     credentials:'include'}).then(r=>r.ok)`);
   await goto(origin);
-  // 直接跳到订阅页：App 用的是单页状态而非路由，点侧栏最稳
+  // 打开配置 → 订阅分类（v1.13：侧栏的「订阅」入口已删，唯一入口是齿轮）
   await ev(`(() => {
-    const b = [...document.querySelectorAll('.nav-item')]
-      .find((x) => (x.innerText||'').trim().startsWith('订阅'));
+    const gear = [...document.querySelectorAll('.icon-btn')]
+      .find((x) => (x.getAttribute('title') || '').includes('配置'));
+    if (gear) { gear.click(); return 'ok'; }
+    return 'miss';
+  })()`);
+  await sleep2(1300);
+  await ev(`(() => {
+    const b = [...document.querySelectorAll('.settings-nav-item')]
+      .find((x) => (x.textContent || '').trim().includes('订阅'));
     if (b) { b.click(); return 'ok'; }
     return 'miss';
   })()`);
-  await sleep2(1500);
+  await sleep2(900);
 
   const enter = await ev(`(() => {
     const b = [...document.querySelectorAll('.feeds-actions .btn')]

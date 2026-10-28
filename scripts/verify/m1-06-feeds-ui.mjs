@@ -213,7 +213,13 @@ await send('Network.setCookie', {
   domain: '127.0.0.1', path: '/',
 });
 
-/** 打开订阅页 */
+/**
+ * 打开订阅管理（v1.13：它在配置弹窗的「订阅」分类里）。
+ *
+ * 桌面点侧栏齿轮、手机点底部导航的「配置」—— 两者都进同一个弹窗，
+ * 再点左侧分类栏的「订阅」。改之前是直接点侧栏的「订阅」入口，
+ * 那个入口 v1.13 已经删了（需求：「删除主页的订阅源按钮」）。
+ */
 const openFeeds = async (width, height, mobile) => {
   await send('Emulation.setDeviceMetricsOverride', {
     width, height, deviceScaleFactor: mobile ? 2 : 1, mobile,
@@ -224,13 +230,24 @@ const openFeeds = async (width, height, mobile) => {
     await sleep(150);
   }
   await sleep(900);
-  const sel = mobile ? '.tab' : '.nav-item';
   const clicked = await evaluate(`(() => {
-    const b = [...document.querySelectorAll('${sel}')].find((x) => x.textContent.includes('订阅'));
-    if (b) { b.click(); return true; }
-    return false;
+    const b = ${mobile
+      ? `[...document.querySelectorAll('.tab')].find((x) => (x.textContent || '').includes('配置'))`
+      : `[...document.querySelectorAll('.icon-btn')]
+          .find((x) => (x.getAttribute('title') || '').includes('配置'))`};
+    if (!b) return false;
+    b.click();
+    return true;
   })()`);
-  await sleep(900);
+  await sleep(1200);
+  // 配置弹窗默认停在「订阅」分类（settingsSection 初值就是 'feeds'），
+  // 但这里仍显式点一次 —— 免得以后改了默认值，这个脚本红得莫名其妙。
+  await evaluate(`(() => {
+    const b = [...document.querySelectorAll('.settings-nav-item')]
+      .find((x) => (x.textContent || '').trim().includes('订阅'));
+    if (b) b.click();
+  })()`);
+  await sleep(800);
   return clicked;
 };
 

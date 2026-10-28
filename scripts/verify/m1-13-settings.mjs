@@ -6,7 +6,7 @@
 //
 // 这一节最容易假绿的地方（每条都写了"为什么这么验"）：
 //
-//   ① 「侧栏点订阅能打开弹窗」很容易绿 —— 但如果弹窗打开时**背后仍可点**，
+//   ① 「点齿轮能打开弹窗」很容易绿 —— 但如果弹窗打开时**背后仍可点**，
 //      用户会点到列表里的条目，看起来像"弹窗穿透"。必须真的派发一次点击
 //      给遮罩层背后的元素，确认它没被触发。
 //   ② 「切分类内容变了」也会绿 —— 而如果每次切换都重挂组件，用户
@@ -18,9 +18,12 @@
 //      这里顺带验"关闭后弹窗 DOM 真的没了"，而不只是看不见。
 //   ⑤ 占位分类最容易做成"点了没反应"或"点了空白"。必须断言点开之后
 //      有内容（≥3 条清单项 + 明确的「待接入」标签）。
+//   ⑥ 「侧栏只剩一个入口」不能靠数按钮 —— 侧栏本来就还有 4 个固定视图
+//      和 5 个分组行。必须断言侧栏里**没有任何**能打开订阅管理的东西
+//      （.nav-section 只剩「分组」「即将支持」两个标题，没有「订阅源」）。
 //
 // 判据：
-//   ① 侧栏「订阅」打开配置弹窗并停在订阅分类（不再是独立页）
+//   ① 桌面唯一配置入口是侧栏齿轮；打开后停在「订阅」分类（v1.13 收敛）
 //   ② 六个分类都在，M2/M3/M6 三个标「待接入」
 //   ③ 分类切换不重挂：输入到一半的内容保留
 //   ④ 遮罩挡点击：背后元素收不到点击
@@ -28,7 +31,7 @@
 //   ⑥ 分组下拉：≥3 个分组时是 <select>，选「未分组」只显示 folderId=null
 //   ⑦ 分组页能改名/删除，删完源退回未分组且订阅页同步
 //   ⑧ 弹窗里改分组后，关闭弹窗时侧栏分组列表已同步
-//   ⑨ 手机上弹窗铺满视口，分类栏变横向
+//   ⑨ 手机上弹窗铺满视口，分类栏变横向；底部导航那格叫「配置」
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,6 +39,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
+import { openSettings as openSettingsShared } from '../lib/ui.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -295,16 +299,10 @@ const snapshot = () => ev(`(() => {
 })()`);
 
 const openSettings = async (fromTab = false) => {
-  const r = await ev(`(() => {
-    const sel = ${fromTab ? "'.tab'" : "'.nav-item'"};
-    const b = [...document.querySelectorAll(sel)]
-      .find((x) => (x.textContent || '').includes('订阅'));
-    if (!b) return 'miss';
-    b.click();
-    return 'ok';
-  })()`);
-  await sleep(1500);
-  return r;
+  // v1.13：桌面的侧栏「订阅」入口已删除（§15.15 规格修订），
+  // 桌面唯一入口是侧栏底部的齿轮；手机是底部导航的「配置」。
+  const r = await openSettingsShared(ev, { mobile: fromTab, sleep });
+  return r.opened ? 'ok' : 'miss';
 };
 
 const closeByEsc = async () => {
@@ -329,12 +327,46 @@ const clickNavSection = async (label) => {
   return r;
 };
 
-// ── ① 侧栏「订阅」打开配置弹窗 ───────────────────────────
+// ── ⓪ 侧栏已经没有订阅入口了（v1.13 规格修订）────────────
+//
+// 需求方原话：「删除主页的订阅源按钮，全部放到配置里面」。
+// 这条必须**先量**：如果侧栏还留着那个「订阅」按钮，后面的 ①
+// 照样能通过（齿轮也能开弹窗），于是"没搬干净"这件事一次都抓不到。
+const sidebarEntries = await ev(`(() => {
+  const sb = document.querySelector('.sidebar');
+  if (!sb) return null;
+  return {
+    sections: [...sb.querySelectorAll('.nav-section')].map((x) => (x.textContent || '').trim()),
+    // 侧栏里任何能打开订阅管理的按钮：文案含「订阅」，或 title 提到订阅管理
+    subscribeButtons: [...sb.querySelectorAll('button')].filter((b) =>
+      (b.textContent || '').trim() === '订阅'
+      || /管理订阅/.test(b.getAttribute('title') || '')).length,
+    // 齿轮是唯一允许剩下的配置入口
+    gearCount: [...sb.querySelectorAll('.icon-btn')]
+      .filter((b) => (b.getAttribute('title') || '').includes('配置')).length,
+  };
+})()`);
+check('（前提）页面已渲染出侧栏（否则下面两条空转）', () => {
+  return ok(sidebarEntries !== null, '找不到 .sidebar');
+});
+check('⓪ 侧栏不再有「订阅源」标题（整块已删除，不是只藏起来）', () => {
+  return ok(!sidebarEntries.sections.includes('订阅源'),
+    JSON.stringify(sidebarEntries.sections));
+});
+check('⓪ 侧栏里没有任何能打开订阅管理的按钮', () => {
+  return ok(sidebarEntries.subscribeButtons === 0,
+    `仍有 ${sidebarEntries.subscribeButtons} 个「订阅」入口`);
+});
+check('⓪ 侧栏的配置入口只剩齿轮这 1 个', () => {
+  return ok(sidebarEntries.gearCount === 1, `齿轮 ${sidebarEntries.gearCount} 个`);
+});
+
+// ── ① 齿轮打开配置弹窗 ──────────────────────────────────
 const opened = await openSettings(false);
-check('侧栏「订阅」能点中', () => ok(opened === 'ok', String(opened)));
+check('侧栏齿轮能点中', () => ok(opened === 'ok', String(opened)));
 const s1 = await snapshot();
 
-check('点「订阅」打开的是配置弹窗（不是切换到独立整页）', () => {
+check('点齿轮打开的是配置弹窗（不是切换到独立整页）', () => {
   return ok(s1.backdrop === true && s1.modal !== null && s1.rows.length === 5,
     `backdrop=${s1.backdrop} modal=${JSON.stringify(s1.modal)} rows=${s1.rows.length}`);
 });

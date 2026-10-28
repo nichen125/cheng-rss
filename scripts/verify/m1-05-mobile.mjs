@@ -218,10 +218,12 @@ check('手机上侧栏不可见', () => {
 });
 check('底部 tab bar 可见', () => ok(shell.tabbar && shell.tabbar.h > 40, JSON.stringify(shell.tabbar)));
 check('tab bar 有 5 个入口', () => ok(shell.tabCount === 5, `实际 ${shell.tabCount}: ${JSON.stringify(shell.tabLabels)}`));
-check('tab 覆盖收件箱/未读/收藏/历史/订阅', () => {
-  const want = ['收件箱', '未读', '已收藏', '历史', '订阅'];
+check('tab 覆盖收件箱/未读/收藏/历史/配置', () => {
+  // v1.13：第 5 格从「订阅」改名「配置」—— 它打开的是整个配置弹窗
+  // （订阅/分组/账户），订阅管理只是其中一分类。名字得对上行为。
+  const want = ['收件箱', '未读', '已收藏', '历史', '配置'];
   const missing = want.filter((w) => !shell.tabLabels.includes(w));
-  return ok(missing.length === 0, `缺 ${JSON.stringify(missing)}`);
+  return ok(missing.length === 0, `缺 ${JSON.stringify(missing)}，实际 ${JSON.stringify(shell.tabLabels)}`);
 });
 check('tab bar 在最底部', () => {
   return ok(shell.tabbar && Math.abs(shell.tabbar.y + shell.tabbar.h - shell.vh) <= 40,
@@ -332,15 +334,28 @@ await evaluate(`(() => {
 })()`);
 await sleep(700);
 
-// ── ⑥ 订阅页在手机上可用 ─────────────────────────────────
+// ── ⑥ 配置在手机上可用 ───────────────────────────────────
+//
+// v1.13：底部导航那一格从「订阅」改名成「配置」（齿轮图标），
+// 因为它打开的是整个配置弹窗（订阅/分组/账户），不是"订阅页"。
+// 手机侧栏是隐藏的，所以这一格是移动端**唯一**的配置入口 ——
+// 它不能跟着桌面的「订阅源」整块一起被删掉。
 const toFeeds = await evaluate(`(() => {
-  const t = [...document.querySelectorAll('.tab')].find((x) => x.textContent.includes('订阅'));
+  const t = [...document.querySelectorAll('.tab')].find((x) => x.textContent.includes('配置'));
   if (!t) return false;
   t.click();
   return true;
 })()`);
-check('可从底部导航进入订阅页', () => ok(toFeeds));
+check('可从底部导航进入配置', () => ok(toFeeds));
 await sleep(900);
+
+// 订阅管理现在在配置弹窗的「订阅」分类里，点进去再量
+await evaluate(`(() => {
+  const b = [...document.querySelectorAll('.settings-nav-item')]
+    .find((x) => (x.textContent || '').trim().includes('订阅'));
+  if (b) b.click();
+})()`);
+await sleep(700);
 
 const feedsPage = await evaluate(`(() => {
   const fp = document.querySelector('.feeds-page');

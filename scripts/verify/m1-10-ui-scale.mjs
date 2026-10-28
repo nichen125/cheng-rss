@@ -304,13 +304,21 @@ const collect = async () => {
   await sleep(500);
   pages.reader = await evaluate(PROBE);
 
-  // D. 订阅页（chip + toolbar + 行内操作）
+  // D. 订阅管理（v1.13：在配置弹窗的「订阅」分类里，不再是侧栏的一个页）
   await evaluate(`(() => {
-    const b = [...document.querySelectorAll('.nav-item')].find((x) => x.textContent.includes('订阅'));
+    const gear = [...document.querySelectorAll('.icon-btn')]
+      .find((x) => (x.getAttribute('title') || '').includes('配置'));
+    if (gear) gear.click();
+    return Boolean(gear);
+  })()`);
+  await sleep(1300);
+  await evaluate(`(() => {
+    const b = [...document.querySelectorAll('.settings-nav-item')]
+      .find((x) => (x.textContent || '').trim().includes('订阅'));
     if (b) b.click();
     return Boolean(b);
   })()`);
-  await sleep(1600);
+  await sleep(900);
   pages.feeds = await evaluate(PROBE);
 
   return { pages, leafCount, scopeClear };

@@ -626,15 +626,30 @@ const moveOut = await j('POST', '/feeds/bulk/folder', {
 });
 check('（准备）把雷锋网移出分组A', () => ok(moveOut.data?.done === 1, JSON.stringify(moveOut.data)));
 
-// 触发一次源列表重取：去订阅页再回来。
+// 触发一次源列表重取：打开配置 → 订阅分类 → 再回来。
 //
 // 关键细节：回程**不能点侧栏的分组行** —— 那行代码自己会 setScope({folderId})
 // 把 feedId 清掉，于是"自愈"一次都没执行，断言恒绿。第一版就是这么假绿的，
 // 把 setScope({}) 写进实现照样通过。
 //
-// 正确回程是订阅页底部的「去看条目」：它只关弹窗，不碰 scope。
+// 正确回程是订阅分类底部的「去看条目」：它只关弹窗，不碰 scope。
 // 这样回来时 scope 里还带着已被移走的 feedId，才真正走到自愈分支。
-await clickNav('订阅');
+//
+// v1.13：侧栏那个「订阅」入口删了，改从齿轮进配置再点「订阅」分类。
+// 这条**回程路径本身**没变（还是「去看条目」），变的只是怎么走到它。
+await ev(`(() => {
+  const gear = [...document.querySelectorAll('.icon-btn')]
+    .find((x) => (x.getAttribute('title') || '').includes('配置'));
+  if (gear) gear.click();
+  return Boolean(gear);
+})()`);
+await sleep(1300);
+await ev(`(() => {
+  const b = [...document.querySelectorAll('.settings-nav-item')]
+    .find((x) => (x.textContent || '').trim().includes('订阅'));
+  if (b) b.click();
+  return Boolean(b);
+})()`);
 await sleep(900);
 const backByFoot = await ev(`(() => {
   const b = [...document.querySelectorAll('.feeds-foot .btn')]
@@ -643,7 +658,7 @@ const backByFoot = await ev(`(() => {
   b.click();
   return true;
 })()`);
-check('订阅页有「去看条目」可回列表（自愈场景的回程路径）', () => ok(backByFoot === true));
+check('订阅分类里有「去看条目」可回列表（自愈场景的回程路径）', () => ok(backByFoot === true));
 await sleep(1400);
 const healed = await snapshot();
 

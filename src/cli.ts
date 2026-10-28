@@ -344,8 +344,14 @@ async function cmdServe(args: Args): Promise<void> {
   // 结果是 514 条条目永远停在 pending、正文只有 feed 给的几十个字。
   // 修上游只能保证以后不再新增，存量要有人认领。
   //
-  // 每小时一轮、每轮 200 条：一场升级留下的积压在一小时内收敛，
-  // 而正常运行时这个查询是 0 命中（0.16ms，比一次抓取便宜得多）。
+  // 频率是 5 分钟而不是 1 小时：实测本机库积压 514 条，每轮 200 条的话
+  // 每小时一轮要 3 小时才收敛完，用户在这个窗口里看到的仍是"旧文章没正文"。
+  // 5 分钟一轮 → 15 分钟吃完，而排队中的任务本身还能被并发上限（4）
+  // 压住，不会一次往网络上打几百个请求。
+  //
+  // 稳态成本：正常运行时这个查询 0 命中，0.16ms。它比一次抓取便宜三个
+  // 数量级，所以"跑得勤"不构成性能问题 —— 真正的成本是命中时的抓取，
+  // 而命中意味着确实有活没干。
   const backfill = () => {
     try {
       const n = enqueueOrphanExtracts(h.db);
@@ -357,10 +363,10 @@ async function cmdServe(args: Args): Promise<void> {
       log.warn('补录待提取条目失败', { err: (e as Error).message });
     }
   };
-  // 启动 30 秒后先跑一轮：积压不该等一个小时
+  // 启动 30 秒后先跑一轮：积压不该等一个周期
   const firstBackfill = setTimeout(backfill, 30_000);
   firstBackfill.unref?.();
-  const backfillTimer = setInterval(backfill, 3600_000);
+  const backfillTimer = setInterval(backfill, 5 * 60_000);
   backfillTimer.unref?.();
 
   // 每日维护：清掉过期的去重向量（PLAN §7.1 L2）。

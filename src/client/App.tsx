@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   api, ApiFailure, type EntryDetail, type EntrySummary, type FeedItem, type FolderItem,
-  type HistoryGroup, type User,
+  type HistoryEntry, type HistoryGroup, type User,
 } from './api.ts';
 import {
   IconArrowLeft, IconBookmark, IconCheck, IconCheckCheck, IconChevronRight, IconCircle,
@@ -51,6 +51,16 @@ const INBOX_NAV: NavItem = {
  * 写两处迟早会不一致。
  */
 const DEFAULT_VIEW: View = 'unread';
+
+/**
+ * 分割线下面先补多少条已读（§15.24，v1.18）。
+ *
+ * 与主列表的 30 不同，这里用 40：分割线之后的内容是"上下去看"，用户
+ * 通常在翻两下之内就决定要不要继续；40 条足够覆盖一个中等源的全部存量
+ * （独库实测：21 个源里 17 个源的存量都不到 40 条），一次就把界面上
+ * "看完了"的错觉消掉，不用先看到一条分割线再点加载更多。
+ */
+const READ_TAIL_LIMIT = 40;
 
 const NAV: NavItem[] = [
   INBOX_NAV,
@@ -250,6 +260,26 @@ function Main(props: { user: User; onLogout: () => void }) {
   const [debounced, setDebounced] = useState('');
   const [items, setItems] = useState<EntrySummary[]>([]);
   const [total, setTotal] = useState<number | null>(null);
+  /**
+   * 「未读读光了」之后补在分割线下面的已读条目（§15.24，v1.18）。
+   *
+   * null = 不该有分割线（还有未读 / 没有范围 / 有搜索词 / 全库）。
+   * 数组 = 该范围剩下的已读条目，按 published_at 倒序，接在未读部分后面。
+   *
+   * 为什么用 null 而不是空数组：空数组会让 "正在取" 和 "取到了 0 条"
+   * 都渲染成没有分割线，但前者需要的是等一下，后者需要的是显示
+   * 「更早的 N 条已读」都不存在的那种真空——两者在界面上不该一样。
+   */
+  const [readTail, setReadTail] = useState<EntrySummary[] | null>(null);
+  const [readTailTotal, setReadTailTotal] = useState(0);
+  const [readTailCursor, setReadTailCursor] = useState<string | null>(null);
+  const [tailLoading, setTailLoading] = useState(false);
+  /**
+   * 尾段正在取。与 `tailLoading` 分开：那个是"翻下一页"，
+   * 这个是"该不该画分割线还不确定"。空态要等它 —— 否则读光的源会先闪
+   * 一帧「未读已经清零」，然后才被尾段顶掉（§15.24）。
+   */
+  const [tailFetching, setTailFetching] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
@@ -323,6 +353,61 @@ function Main(props: { user: User; onLogout: () => void }) {
   }, [view, debounced, cursor, scope]);
 
   useEffect(() => { void load(true); /* eslint-disable-next-line */ }, [view, debounced, scope]);
+
+  /**
+   * 分割线下补出来的已读条目（§15.24，v1.18）。
+   *
+   * 需求方原话：「我切换未读之后，如果某一个里面没有未读…是指在列表栏中
+   * 分割线，补充上全部的列表，可以参考 huntly 实现」。
+   *
+   * 五个准入条件，每一条都有具体的反例：
+   *   1. `view === 'unread'` —— 「全部」视图本来就没有东西要补。
+   *   2. `!debounced` —— 用户搜"xx"是在找含这个词的未读，补已读等于
+   *      把搜索意图改掉（搜到 0 条时应说 0 条，而不是铺一堆不相关的）。
+   *   3. `scoped` —— 有分组/源才有"这个范围里的上下文"可言；全库补出来
+   *      等于把整个阅读历史铺进列表（几百上千条）。
+   *   4. `total === 0` —— **只在未读为 0 时补**。还有未读时补上已读，
+   *      会让「未读」这个分段控件和列表内容对不上。
+   *   5. `cursor === null && !loading` —— 未读本身还没翻完页时不能插分割线，
+   *      否则分割线后面还有未读，位置是错的。
+   *
+   * 失败时静默置 null：分割线是锦上添花，取不到就当没有，不该让整个列表
+   * 变成错误状态。
+   */
+  useEffect(() => {
+    const scoped = Boolean(scope.folderId || scope.feedId);
+    const eligible = view === 'unread' && !debounced && scoped
+      && total === 0 && cursor === null && !loading;
+    if (!eligible) {
+      setReadTail(null);
+      setReadTailTotal(0);
+      setReadTailCursor(null);
+      setTailFetching(false);
+      return;
+    }
+    let alive = true;
+    setTailFetching(true);
+    api.listEntries({
+      view: 'read',
+      limit: READ_TAIL_LIMIT,
+      feedId: scope.feedId ?? null,
+      folderId: scope.folderId ?? null,
+    })
+      .then((r) => {
+        if (!alive) return;
+        setReadTail(r.items);
+        setReadTailTotal(typeof r.total === 'number' ? r.total : r.items.length);
+        setReadTailCursor(r.nextCursor);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setReadTail(null);
+      })
+      .finally(() => {
+        if (alive) setTailFetching(false);
+      });
+    return () => { alive = false; };
+  }, [view, debounced, scope, total, cursor, loading]);
 
   /**
    * 历史视图的数据（PLAN §7.4）。
@@ -521,36 +606,22 @@ function Main(props: { user: User; onLogout: () => void }) {
   }, []);
 
   /**
-   * 从分组树里选中一个范围后，决定用哪个读/全部状态（§15.20，v1.17）。
+   * 从分组树里选中一个范围后用哪个读/全部状态（§15.20 / §15.24，v1.18 改）。
    *
-   * 规则：**如果这个范围一条未读都没有，就直接显示它的「全部」。**
-   * 场景是"点进一个已经读完的源"——进去看到「未读已经清零」再点「看全部」，
-   * 是两次点击换一次信息。用户点的是一个源，他要看的就是这个源的文章；
-   * 而这个源里只剩读过的，那"文章"就等于"全部"。
+   * **每次点选都按这个范围重新判断，不沿用上一个范围的选择。**
    *
-   * 三处刻意的取舍：
-   *   1. **只在点选时判断，不在列表空了之后判断。** 读完最后一条的那一刻
-   *      仍会显示空态（带「看全部」按钮）—— 因为"读完这一篇"和"我要看
-   *      读过的"是两件事，自动跳过去会让「未读」这个视图在读完最后一篇时
-   *      静默消失，用户会以为未读还有内容。
-   *   2. **判据是未读数 0，不是列表为空。** 列表空可能是搜索词没命中，
-   *      那时切「全部」也不会变出内容，只是把用户的搜索意图改掉。
-   *   3. **已经手动选了「全部」就不动。** 用户点「全部」是一次明确表态，
-   *      再点别的地方不该把它改回去。
+   * v1.17 的写法是 `if (base === 'inbox') return 'inbox'` —— 一旦进过
+   * 「全部」，之后再点任何分组都还是「全部」。需求方报的就是这个：
+   * 「从长知识的无未读，切换到其他分组（有未读）还是在全部里面」。
+   * 那个 if 的本意是"尊重用户手动选的全部"，但它把**状态**当成了
+   * **范围的属性**：用户在一个分组里点「全部」，表达的是"这一组我想看全部"，
+   * 不是"以后所有分组都看全部"。
+   *
+   * 现在规则只有一条：点选范围 = 回到默认的「未读」。0 未读的情况不再靠
+   * 切视图处理，而是由列表底部的分割线补出已读部分（§15.24）——
+   * 所以这里不需要看未读数，也就不存在"判断错了就跳到全部"的隐患。
    */
-  const viewForScope = useCallback((folderId: string | null, feedId: string | null): View => {
-    // 从收藏/历史进来：先回到列表型视图，再由下面的未读判断决定具体是哪个
-    const base: View = view === 'inbox' || view === 'unread' ? view : DEFAULT_VIEW;
-    if (base === 'inbox') return 'inbox'; // 已经是全部，没有可切的
-    const unread = feedId
-      ? feeds.find((f) => f.id === feedId)?.unread
-      : folders.find((f) => f.id === folderId)?.unread;
-    // 查不到（源/组刚被删，或列表还没取回来）→ 不动态度。
-    // 这里**不能**用 `?? 0` 兜底：那等于"未知就当没未读"，会把一个还有
-    // 200 条未读的源判成"读完了"，直接跳到全部 —— 错得毫无痕迹。
-    if (unread === undefined) return base;
-    return unread === 0 ? 'inbox' : 'unread';
-  }, [view, feeds, folders]);
+  const viewForScope = useCallback((): View => DEFAULT_VIEW, []);
 
   /**
    * 点侧栏的一个分组（§15.13）。
@@ -563,13 +634,12 @@ function Main(props: { user: User; onLogout: () => void }) {
    * 第 3 条（§15.19，v1.16）：原来是无条件 `setView('inbox')`，在默认值
    * 还是 inbox 的年代看不出问题。现在默认是未读，无条件设 inbox 会把
    * "只看未读"悄悄改成"全部" —— 用户切个分组，读过的条目突然全冒出来。
-   * 所以只在当前视图不是列表型（starred / history）时才改，且改到**默认值**
-   * 而不是硬编码 inbox。
    *
-   * v1.17 再补一层（§15.20）：这个组已经 0 未读时，直接进「全部」。
+   * v1.18 起第 3 条简化成"回默认值"（§15.24）：不再看当前是不是 inbox。
+   * 原因见 viewForScope —— 那个判断把"视图状态"当成了"范围的属性"。
    */
   const pickFolder = useCallback((folderId: string) => {
-    setView(viewForScope(folderId, null));
+    setView(viewForScope());
     setScope({ folderId });
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -581,7 +651,10 @@ function Main(props: { user: User; onLogout: () => void }) {
 
   /** 点组内的一个源：再点同一个 = 取消源筛选，回整组（§15.13） */
   const pickFeed = useCallback((folderId: string, feedId: string) => {
-    setView(viewForScope(folderId, feedId));
+    // 再点同一个 = 取消源筛选。此时范围"变了"（变回整组），所以也要
+    // 重新判断读/全部 —— 用户在一个源里点了「全部」，取消筛选后回到
+    // 整组时应该是那个组默认的「未读」，否则同一个位置两副面孔。
+    setView(viewForScope());
     setScope((s) => (s.feedId === feedId ? { folderId } : { folderId, feedId }));
   }, [viewForScope]);
 
@@ -744,6 +817,52 @@ function Main(props: { user: User; onLogout: () => void }) {
       : 0;
 
   /**
+   * 渲染用的尾段：`null` = 不画分割线，数组 = 画分割线并接上这些已读条目。
+   *
+   * 抽成变量而不是在 JSX 里写 `readTail && readTail.length > 0 &&`：空数组
+   * 和 null 在 JSX 里都需要"什么都不画"，但语义不同（前者是"取到了 0 条"）。
+   * 统一在这里收敛成一个判断，读的人不需要追问"那 0 条到底画不画"。
+   */
+  const tail = readTail && readTail.length > 0 ? readTail : null;
+
+  /**
+   * 标题行显示的条数（§15.24）。
+   *
+   * 补了尾段之后，列表里实际有 `未读 + 已读` 两段，而 `total` 只是未读的
+   * 命中数（此时为 0）。继续显示「0 条」会和眼睛看到的 4 条直接矛盾 ——
+   * 用户会以为界面坏了。所以有尾段时用尾段的 total 顶上。
+   *
+   * 这不改变 `total` 本身的语义（它仍是"当前筛选的命中数"），只是标题行
+   * 这一处要回答的问题是"这个范围里有多少条"，答案不是未读数。
+   */
+  const displayCount = tail ? readTailTotal : total;
+
+  /**
+   * 尾段翻页（§15.24）。
+   *
+   * 与 `load` 分开而不是复用它：`load` 会把结果 append 到 `items` 并把
+   * `cursor` 往前推 —— 那会污染主列表的游标，下一次 `load(true)` 重取时
+   * 从尾段的位置开始，主列表就少了一截。两个列表有各自的游标，就该是
+   * 两个函数。
+   */
+  const loadMoreTail = useCallback(async () => {
+    if (!readTailCursor) return;
+    setTailLoading(true);
+    try {
+      const r = await api.listEntries({
+        view: 'read',
+        cursor: readTailCursor,
+        limit: READ_TAIL_LIMIT,
+        feedId: scope.feedId ?? null,
+        folderId: scope.folderId ?? null,
+      });
+      setReadTail((prev) => [...(prev ?? []), ...r.items]);
+      setReadTailCursor(r.nextCursor);
+    } catch { /* 尾段翻页失败保持现状，主列表不受影响 */ }
+    finally { setTailLoading(false); }
+  }, [readTailCursor, scope.feedId, scope.folderId]);
+
+  /**
    * 把当前范围（分组 / 单个源）的未读一次清空（§15.21，v1.17）。
    *
    * 三件事按顺序做，顺序不能反：
@@ -785,6 +904,8 @@ function Main(props: { user: User; onLogout: () => void }) {
       setErr(e instanceof Error ? e.message : '标记失败');
     }
   }, [scope.feedId, scope.folderId, scopeUnread, listTitle, adjustUnread, load]);
+
+  const scopeHasEntries = readTailTotal > 0 || items.length > 0;
 
   return (
     <div className="app">
@@ -987,7 +1108,7 @@ function Main(props: { user: User; onLogout: () => void }) {
             {/* 计数不再挂在 stats 上：数字来自 listEntries 的 total，
                 stats 只是侧栏角标的来源。让两者脱钩之后，即使 /stats
                 慢一拍或失败，列表自己的条数照常显示。 */}
-            {(total !== null || items.length > 0) && (
+            {(displayCount !== null || items.length > 0) && (
               <span className="pane-count">
                 {/* 数字统一来自后端的 `total`（命中总数），不是 items.length。
                     第一版用 items.length，截图里就出现过「科技IT 30 条」
@@ -998,8 +1119,13 @@ function Main(props: { user: User; onLogout: () => void }) {
                     这个条件就是错的 —— 切到「未读」时既没有搜索词也没有分组，
                     于是标题仍显示全库条数，而列表只有未读那几条。一律用
                     total 之后，「当前这个视图有多少条」天然成立，
-                    不需要为每个新筛选再补一个分支。 */}
-                {`${total ?? items.length} 条${debounced ? '结果' : ''}`}
+                    不需要为每个新筛选再补一个分支。
+
+                    v1.18 再收一层（§15.24）：补了已读尾段时，`total` 是
+                    未读的命中数（0），而列表里有未读+已读两段。继续显示
+                    「0 条」会和眼睛看到的 4 条直接矛盾。此时改用尾段的
+                    total，答案才是"这个范围里有多少条"。 */}
+                {`${displayCount ?? items.length} 条${debounced ? '结果' : ''}`}
               </span>
             )}
 
@@ -1095,13 +1221,19 @@ function Main(props: { user: User; onLogout: () => void }) {
               「未读清零」还是「还没有订阅」取决于库里有没有源，而源列表
               与条目列表是并行发的两个请求 —— 少了 `feedsLoaded`，源列表
               慢一拍的那一瞬间会先画一帧「收件箱是空的 / 还没有订阅任何源」，
-              一个已经订阅了 12 个源的用户会看到它闪一下。 */}
-          {!loading && feedsLoaded && items.length === 0 && view !== 'history' && (
+              一个已经订阅了 12 个源的用户会看到它闪一下。
+
+              还要等分割线尾段（`tail`）：v1.18 起"这个范围的未读读光了"
+              不等于列表要空 —— 已读部分会被补在分割线下面。少了这一条，
+              读光的源会先闪一帧「未读已经清零」，然后才被已读列表顶掉。 */}
+          {!loading && feedsLoaded && items.length === 0 && tail === null
+            && !tailFetching && view !== 'history' && (
             <EmptyState
               hasQuery={Boolean(debounced)}
               view={view}
               scopeLabel={scope.folderId ? listTitle : null}
               hasFeeds={feeds.length > 0}
+              scopeHasEntries={scopeHasEntries}
               onGoFeeds={() => { setSettingsSection('feeds'); setSettingsOpen(true); }}
               onClearScope={() => { setScope({}); setExpanded(new Set()); }}
               onShowAll={() => setView('inbox')}
@@ -1124,93 +1256,14 @@ function Main(props: { user: User; onLogout: () => void }) {
                   </h2>
                   <ul className="entry-list">
                     {g.items.map((it) => (
-                      <li key={it.id}>
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          className={`entry-item ${it.isRead ? 'read' : ''} ${openId === it.id ? 'active' : ''}`}
-                          data-tier={it.tier ?? 'normal'}
-                          onClick={() => void open(it.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              void open(it.id);
-                            }
-                          }}
-                        >
-                          <div className="entry-top">
-                            {it.faviconUrl
-                              ? <img className="favicon" src={it.faviconUrl} alt="" loading="lazy"
-                                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-                              : <span className="favicon fallback">{(it.siteName ?? hostOf(it.url) ?? '?').slice(0, 1).toUpperCase()}</span>}
-                            <span className="entry-site">{it.siteName ?? hostOf(it.url)}</span>
-                            <span className="dot">·</span>
-                            {/* 读的时间在前，发布多久以前放在 title 里 ——
-                                历史页的坐标是"我什么时候读的" */}
-                            <span className="entry-time" title={`发布于 ${timeAgo(it.publishedAt)}`}>
-                              {timeAgo(it.readAt)}
-                            </span>
-                            {/* 读过多次：回看过的文章值得一个角标，它说明
-                                "这篇我后来又翻过一次"，是收藏之外的另一个信号 */}
-                            {it.readCount > 1 && (
-                              <span className="meta read-count" title={`读过 ${it.readCount} 次`}>
-                                ×{it.readCount}
-                              </span>
-                            )}
-                            {it.readProgress !== null && it.readProgress > 0 && it.readProgress < 0.95 && (
-                              <span className="meta read-progress" title={`读到 ${Math.round(it.readProgress * 100)}%`}>
-                                {Math.round(it.readProgress * 100)}%
-                              </span>
-                            )}
-                            <span className="grow" />
-                            <span className="entry-ops">
-                              <button
-                                type="button"
-                                className={`icon-btn tiny ${it.isStarred ? 'on' : ''}`}
-                                title={it.isStarred ? '取消收藏' : '收藏'}
-                                aria-pressed={it.isStarred}
-                                onClick={(e) => { e.stopPropagation(); void toggleStar(it.id); }}
-                              >
-                                <IconStar size={13} filled={it.isStarred} />
-                              </button>
-                              <a
-                                className="icon-btn tiny"
-                                href={it.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="在新标签打开原文"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <IconExternal size={13} />
-                              </a>
-                            </span>
-                          </div>
-                          <a
-                            className="entry-title"
-                            href={it.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => {
-                              if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-                                e.preventDefault();
-                                // 必须 stopPropagation：行本身也有 onClick，
-                                // 不拦就会 **调用两次 open()**。第一次打开了、
-                                // 标了已读、角标减一；第二次拿到的详情说
-                                // "已经读过"（不重复减），但两次都在飞，
-                                // 期间任何一次 setState 都会叠加 ——
-                                // 实测未读角标从 2 直接掉到 0（§15.22）。
-                                e.stopPropagation();
-                                void open(it.id);
-                              }
-                            }}
-                          >
-                            {it.title}
-                          </a>
-                          {(it.summary || it.excerpt) && (
-                            <p className="entry-summary">{it.summary ?? it.excerpt}</p>
-                          )}
-                        </div>
-                      </li>
+                      <EntryRow
+                        key={it.id}
+                        it={it}
+                        active={openId === it.id}
+                        onOpen={() => void open(it.id)}
+                        onStar={() => void toggleStar(it.id)}
+                        meta={<HistoryMeta it={it} />}
+                      />
                     ))}
                   </ul>
                 </section>
@@ -1221,96 +1274,60 @@ function Main(props: { user: User; onLogout: () => void }) {
           {view !== 'history' && (
           <ul className="entry-list">
             {items.map((it) => (
-              <li key={it.id}>
-                {/* 行元素从 <button> 改成 div[role=button]（§15.11）：
-                    <a> 不能嵌在 <button> 里（HTML 内容模型禁止交互元素嵌套），
-                    而"标题可中键/Ctrl+点击在新标签打开"必须是一个真 <a>。
-                    改完之后按钮语义要手工补：role + tabindex + Enter/Space。 */}
-                <div
-                  role="button"
-                  tabIndex={0}
-                  className={`entry-item ${it.isRead ? 'read' : ''} ${openId === it.id ? 'active' : ''}`}
-                  data-tier={it.tier ?? 'normal'}
-                  onClick={() => void open(it.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      void open(it.id);
-                    }
-                  }}
-                >
-                  <div className="entry-top">
-                    {it.faviconUrl
-                      ? <img className="favicon" src={it.faviconUrl} alt="" loading="lazy"
-                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-                      : <span className="favicon fallback">{(it.siteName ?? hostOf(it.url) ?? '?').slice(0, 1).toUpperCase()}</span>}
-                    <span className="entry-site">{it.siteName ?? hostOf(it.url)}</span>
-                    <span className="dot">·</span>
-                    <span className="entry-time">{timeAgo(it.publishedAt)}</span>
-                    {/* tier 徽标放在元信息行里，不再单独占一行 ——
-                        一屏 8~10 条（§15.2）靠的是每项不超过 ~100px */}
-                    {it.tier && it.tier !== 'normal' && (
-                      <span className={`tier tier-${it.tier}`}>{tierLabel(it.tier)}</span>
-                    )}
-                    {it.highlightCount > 0 && <span className="meta">{it.highlightCount} 高亮</span>}
-                    <span className="grow" />
-                    {/* hover 才出现：收藏 / 新标签打开原文。
-                        不常驻是因为列表页的任务是"扫过去"（§15.2），
-                        常驻两个图标会让每行多 24px 的视觉噪声。
+              <EntryRow
+                key={it.id}
+                it={it}
+                active={openId === it.id}
+                onOpen={() => void open(it.id)}
+                onStar={() => void toggleStar(it.id)}
+              />
+            ))}
+            {/* 分割线 + 已读尾段（§15.24，v1.18）。
+                需求方原话：「我切换未读之后，如果某一个里面没有未读…
+                是指在列表栏中分割线，补充上全部的列表」。
 
-                        收藏状态**只由这颗星表达**（`filled` 就是它的状态）。
-                        v1.9 之前这里还额外渲染了一个 `star-mark` 装饰星，
-                        结果是"点完收藏出现两颗星"（§15.14）。同一个信息
-                        说两遍不是冗余，是让人怀疑自己点错了。 */}
-                    <span className="entry-ops">
-                      <button
-                        type="button"
-                        className={`icon-btn tiny ${it.isStarred ? 'on' : ''}`}
-                        title={it.isStarred ? '取消收藏' : '收藏'}
-                        aria-pressed={it.isStarred}
-                        onClick={(e) => { e.stopPropagation(); void toggleStar(it.id); }}
-                      >
-                        <IconStar size={13} filled={it.isStarred} />
-                      </button>
-                      <a
-                        className="icon-btn tiny"
-                        href={it.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="在新标签打开原文"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <IconExternal size={13} />
-                      </a>
-                    </span>
-                  </div>
-                  {/* 标题是真链接：左键拦截掉（走阅读区），中键与 Ctrl+点击交给浏览器 */}
-                  <a
-                    className="entry-title"
-                    href={it.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => {
-                      // 只拦"普通左键"。中键、Ctrl/Cmd/Shift+左键都放行，
-                      // 由浏览器在新标签打开 —— 这正是用户要的行为。
-                      if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-                        e.preventDefault();
-                        // 必须 stopPropagation：行本身也有 onClick，不拦就会
-                        // **调用两次 open()**（详见移动端那份注释）。
-                        e.stopPropagation();
-                        void open(it.id);
-                      }
-                    }}
-                  >
-                    {it.title}
-                  </a>
-                  {(it.summary || it.excerpt) && (
-                    <p className="entry-summary">{it.summary ?? it.excerpt}</p>
-                  )}
-                </div>
+                为什么和主列表放在**同一个 <ul>** 里、而不是第二个列表：
+                它表达的是"同一个列表继续往下"，分割线是列表内部的分节。
+                拆成两个 <ul> 会多出一层块级边界，行距在分割线两侧对不上，
+                而且"加载更多"该挂在哪一个上会变成一个问题。
+
+                为什么保留「未读」分段不动：用户点的就是"未读"，被偷偷
+                改成「全部」会让人以为自己点错了。分割线把这个变化说在
+                明面上 —— 上面是未读，下面是更早读过的。 */}
+            {tail && (
+              <li className="list-divider" data-count={String(readTailTotal)} role="separator">
+                <span className="list-divider-text">
+                  {readTailTotal > tail.length
+                    ? `更早的 ${readTailTotal} 条已读`
+                    : `更早的 ${tail.length} 条已读`}
+                </span>
               </li>
+            )}
+            {tail?.map((it) => (
+              <EntryRow
+                key={it.id}
+                it={it}
+                active={openId === it.id}
+                onOpen={() => void open(it.id)}
+                onStar={() => void toggleStar(it.id)}
+              />
             ))}
           </ul>
+          )}
+
+          {/* 尾段没取全时单独给一个"加载更多"（§15.24）。
+              与主列表的 `cursor` 分开：主列表此时已经到底（total=0），
+              它那个加载更多不会出现；尾段自己还有下一页。 */}
+          {tail && readTailCursor && (
+            <div className="load-more">
+              <button
+                className="btn"
+                disabled={tailLoading}
+                onClick={() => void loadMoreTail()}
+              >
+                {tailLoading ? '加载中…' : `继续加载更早的 ${Math.max(0, readTailTotal - tail.length)} 条`}
+              </button>
+            </div>
           )}
 
           {cursor && view !== 'history' && (
@@ -1407,6 +1424,15 @@ function EmptyState(props: {
   scopeLabel?: string | null;
   /** 库里到底有没有订阅源。没有源时的空态是"去添加"，不是"看全部" */
   hasFeeds?: boolean;
+  /**
+   * 当前范围里有没有条目（不区分读没读过）。
+   *
+   * v1.18 之前不需要这个输入：0 未读会被自动切到「全部」，于是"真空范围"
+   * 自然落到「还没有条目」那一档。现在分段控件恒为「未读」，空态必须自己
+   * 区分"都读过了"和"一条都没有"—— 两者下一步动作不同（看读过的 vs
+   * 去添加/离开）。判据见主组件里的 `scopeHasEntries`。
+   */
+  scopeHasEntries?: boolean;
   onGoFeeds?: () => void;
   /** 清掉分组与源筛选（回到全库） */
   onClearScope?: () => void;
@@ -1443,6 +1469,35 @@ function EmptyState(props: {
         <div className="ph-art"><IconClock size={26} /></div>
         <h2>还没有阅读记录</h2>
         <p>读过的文章会按时间出现在这里。</p>
+      </div>
+    );
+  }
+
+  // 「真空范围」排在「未读清零」**前面**（§15.24，v1.18 调整）。
+  //
+  // 顺序在这里是有语义的：v1.17 按 view 分档，"0 未读"一律说成「未读已经
+  // 清零」。那在自动切「全部」的年代成立 —— 真空范围根本走不到未读空态。
+  // v1.18 取消自动切换之后，一个刚添加、还没抓到的源也会停在「未读」，
+  // 于是它会被告知"这个范围里的文章都读过了"，而它一条都没有。
+  //
+  // 判据是 `scopeHasEntries`（已读尾段的 total），不是 items.length ——
+  // items 此刻一定是空的（未读为 0 才进空态），用它判断恒为"没有条目"。
+  if (props.scopeLabel && props.scopeHasEntries === false) {
+    return (
+      <div className="empty">
+        <div className="ph-art"><IconFolder size={26} /></div>
+        <h2>「{props.scopeLabel}」里还没有条目</h2>
+        <p>
+          这个范围下的源暂时没有新内容，或者刚添加还没抓到。
+        </p>
+        <div className="empty-actions">
+          {props.onClearScope && (
+            <button className="btn" onClick={props.onClearScope}>看全库条目</button>
+          )}
+          {props.onGoFeeds && (
+            <button className="btn" onClick={props.onGoFeeds}>管理订阅</button>
+          )}
+        </div>
       </div>
     );
   }
@@ -1485,25 +1540,10 @@ function EmptyState(props: {
 
   // 分组内为空 ≠ 没有订阅。这两种情况的引导动作完全不同：
   // 前者应该"看全部"，后者应该"去添加订阅"。
-  if (props.scopeLabel) {
-    return (
-      <div className="empty">
-        <div className="ph-art"><IconFolder size={26} /></div>
-        <h2>「{props.scopeLabel}」里还没有条目</h2>
-        <p>
-          这个范围下的源暂时没有新内容，或者刚添加还没抓到。
-        </p>
-        <div className="empty-actions">
-          {props.onClearScope && (
-            <button className="btn" onClick={props.onClearScope}>看全库条目</button>
-          )}
-          {props.onGoFeeds && (
-            <button className="btn" onClick={props.onGoFeeds}>管理订阅</button>
-          )}
-        </div>
-      </div>
-    );
-  }
+  // 走到这里只剩最后一种：库里有源，但全库一条条目都没有。
+  // 原来的「分组内为空」分支已经被上面的真空范围档接走了 —— 有 scopeLabel
+  // 就一定进那一档（scopeHasEntries 在空列表时必为 false），留着会是一段
+  // 永远执行不到的代码。
   return (
     <div className="empty">
       <div className="ph-art"><IconInbox size={26} /></div>
@@ -1969,6 +2009,141 @@ function PrefsPanel(props: {
         恢复默认
       </button>
     </div>
+  );
+}
+
+// ── 列表行 ─────────────────────────────────────────────────
+
+/**
+ * 一行的渲染（§15.24 顺手抽出来，v1.18）。
+ *
+ * 抽出来的唯一理由是**分割线要求同一行在两处长得一样**：主列表（未读）和
+ * 尾段（已读）用的是同一个组件，所以不存在"分割线上下行距差 2px"这种
+ * 只有肉眼能发现的问题。历史视图也用同一份 `meta` 插槽换掉时间语义。
+ *
+ * 保留 `role=button` + `div` 而不是 `<button>`（§15.11）：`<a>` 不能嵌在
+ * `<button>` 里，而"标题可中键/Ctrl+点击在新标签打开"必须是一个真 `<a>`。
+ */
+function EntryRow(props: {
+  it: EntrySummary | HistoryEntry;
+  active: boolean;
+  onOpen: () => void;
+  onStar: () => void;
+  /** 元信息行里的时间部分。默认是"发布多久以前"，历史页换成"读多久以前" */
+  meta?: React.ReactNode;
+}) {
+  const { it } = props;
+  // 历史条目没有 highlightCount（服务端的历史接口不返回它）——历史页按
+  // "什么时候读的"组织，不显示高亮数。用 `in` 收窄而不是给 HistoryEntry
+  // 加一个恒为 0 的字段：后者会让类型说谎。
+  const highlights = 'highlightCount' in it ? it.highlightCount : 0;
+  return (
+    <li>
+      <div
+        role="button"
+        tabIndex={0}
+        className={`entry-item ${it.isRead ? 'read' : ''} ${props.active ? 'active' : ''}`}
+        data-tier={it.tier ?? 'normal'}
+        onClick={props.onOpen}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            props.onOpen();
+          }
+        }}
+      >
+        <div className="entry-top">
+          {it.faviconUrl
+            ? <img className="favicon" src={it.faviconUrl} alt="" loading="lazy"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+            : <span className="favicon fallback">{(it.siteName ?? hostOf(it.url) ?? '?').slice(0, 1).toUpperCase()}</span>}
+          <span className="entry-site">{it.siteName ?? hostOf(it.url)}</span>
+          <span className="dot">·</span>
+          {props.meta ?? <span className="entry-time">{timeAgo(it.publishedAt)}</span>}
+          {/* tier 徽标放在元信息行里，不再单独占一行 ——
+              一屏 8~10 条（§15.2）靠的是每项不超过 ~100px */}
+          {it.tier && it.tier !== 'normal' && (
+            <span className={`tier tier-${it.tier}`}>{tierLabel(it.tier)}</span>
+          )}
+          {highlights > 0 && <span className="meta">{highlights} 高亮</span>}
+          <span className="grow" />
+          {/* hover 才出现：收藏 / 新标签打开原文。
+              常驻是因为列表页的任务是"扫过去"（§15.2），
+              常驻两个图标会让每行多 24px 的视觉噪声。
+
+              收藏状态**只由这颗星表达**（`filled` 就是它的状态）。
+              v1.9 之前这里还额外渲染了一个 `star-mark` 装饰星，
+              结果是"点完收藏出现两颗星"（§15.14）。同一个信息
+              说两遍不是冗余，是让人怀疑自己点错了。 */}
+          <span className="entry-ops">
+            <button
+              type="button"
+              className={`icon-btn tiny ${it.isStarred ? 'on' : ''}`}
+              title={it.isStarred ? '取消收藏' : '收藏'}
+              aria-pressed={it.isStarred}
+              onClick={(e) => { e.stopPropagation(); props.onStar(); }}
+            >
+              <IconStar size={13} filled={it.isStarred} />
+            </button>
+            <a
+              className="icon-btn tiny"
+              href={it.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="在新标签打开原文"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <IconExternal size={13} />
+            </a>
+          </span>
+        </div>
+        {/* 标题是真链接：左键拦截掉（走阅读区），中键与 Ctrl+点击交给浏览器。
+            必须 stopPropagation：行本身也有 onClick，不拦就会调用两次 open()
+            （第一次标已读减角标，第二次拿到"已读过"再减一次 —— 实测 2 → 0）。 */}
+        <a
+          className="entry-title"
+          href={it.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => {
+            if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              props.onOpen();
+            }
+          }}
+        >
+          {it.title}
+        </a>
+        {(it.summary || it.excerpt) && (
+          <p className="entry-summary">{it.summary || it.excerpt}</p>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** 历史视图的元信息：读的时间在前，发布时间降级为 title（§7.4） */
+function HistoryMeta(props: { it: HistoryEntry }) {
+  const it = props.it;
+  return (
+    <>
+      <span className="entry-time" title={`发布于 ${timeAgo(it.publishedAt)}`}>
+        {timeAgo(it.readAt)}
+      </span>
+      {/* 读过多次：回看过的文章值得一个角标，它说明
+          "这篇我后来又翻过一次"，是收藏之外的另一个信号 */}
+      {it.readCount > 1 && (
+        <span className="meta read-count" title={`读过 ${it.readCount} 次`}>
+          ×{it.readCount}
+        </span>
+      )}
+      {it.readProgress !== null && it.readProgress > 0 && it.readProgress < 0.95 && (
+        <span className="meta read-progress" title={`读到 ${Math.round(it.readProgress * 100)}%`}>
+          {Math.round(it.readProgress * 100)}%
+        </span>
+      )}
+    </>
   );
 }
 

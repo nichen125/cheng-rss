@@ -548,6 +548,45 @@ input::placeholder { color: var(--fg-faint); }
 
 .entry-list { list-style: none; margin: 0; padding: 0; }
 
+/* ── 列表内部分节线（§15.24，v1.18）─────────────────────────
+
+   把「未读」和"更早读过的"分成两段，而不是靠切换分段控件。
+
+   几何要求（m1-24 那套方法的延伸）：
+     · 上下留白必须**左右对称**（14/14），否则分割线看起来偏上或偏下，
+       会被误读成"上一条的下边框"
+     · 文字与基线之间的距离用手算，而不用 align-items:baseline —— 这一行
+       只有一个子元素，baseline 对齐等于没对齐，行高仍然由 line-height 决定
+
+   为什么不画一条贯穿的横线：列表本身没有分隔线，突然出现一条 1px 的实线
+   会像表格。huntly 的做法是中置的短文字 + 两侧的细线，这里沿用：线条
+   只在文字两侧延伸，视觉上是"这里跳了一段"，不是"表格的行分隔"。
+
+   颜色用 --border 而不是 --border-soft：太淡了在浅色主题下看不见，
+   而这一行的唯一职责就是被看见。 */
+.list-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* 上下对称，见上 */
+  padding: 14px 16px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--fg-faint);
+  user-select: none;
+}
+
+.list-divider::before,
+.list-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.list-divider-text { flex: 0 0 auto; white-space: nowrap; }
+
 /* ── 阅读历史的分组标题（§7.4）─────────────────────────────
    粘性定位：滚动时"今天/昨天/本周/更早"要一直挂在顶上，
    否则滚到第 40 条时用户已经不知道自己在哪个时间段里了。

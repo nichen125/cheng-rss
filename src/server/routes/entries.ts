@@ -49,6 +49,17 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     }
 
     if (view === 'unread') where.push('e.is_read = 0');
+    else if (view === 'read') {
+      // 「已读」是 v1.18 给列表底部分割线用的（§15.24）。
+      // 与 history 的区别：history 要求 last_read_at IS NOT NULL，只认
+      // "真的读过"的；read 只认 is_read = 1 —— 包括被「清除分组未读」
+      // 批量标记的那些（那个接口刻意不写阅读历史，见下文注释）。
+      // 分割线要补的是"这个范围里剩下的条目"，它必须和「全部」视图里
+      // 扣除未读之后的那批**完全一致**，否则会出现"全部里看得到、
+      // 分割线下看不到"的条目。
+      where.push('e.is_read = 1');
+      where.push('e.is_hidden = 0');
+    }
     else if (view === 'starred') where.push('e.is_starred = 1');
     else if (view === 'history') where.push('e.last_read_at IS NOT NULL');
     else where.push('e.is_hidden = 0');

@@ -545,7 +545,7 @@ node scripts/verify-all.mjs
 输出汇总：
 
 ```
-验收汇总  34 个脚本，耗时 400s
+验收汇总  34 个脚本，耗时 428s
   PASS  docker-path.mjs            3.8s
   PASS  m0-01-toolchain.mjs        1.3s
   ...
@@ -558,7 +558,7 @@ node scripts/verify-all.mjs
   PASS  m1-08-bulk.mjs             10.0s
   PASS  m1-09-reader.mjs           20.5s
   PASS  m1-10-ui-scale.mjs         10.8s
-  PASS  m1-11-folder-feeds.mjs     33.4s
+  PASS  m1-11-folder-feeds.mjs     41.7s
   PASS  m1-12-inbox-view.mjs       24.0s
   PASS  m1-13-settings.mjs         28.1s
   PASS  m1-14-extract.mjs          3.2s
@@ -569,7 +569,7 @@ node scripts/verify-all.mjs
   PASS  m1-19-density.mjs          14.3s
   PASS  m1-20-reader-toc.mjs       78.9s
   PASS  m1-21-default-unread.mjs   17.5s
-  PASS  m1-22-empty-scope.mjs      34.6s
+  PASS  m1-22-empty-scope.mjs      45.8s
   PASS  m1-23-mark-scope-read.mjs   9.3s
   PASS  m1-24-pane-head.mjs        11.9s
 全部通过 34/34
@@ -614,7 +614,7 @@ node scripts/verify/m0-09-ui.mjs         # 真实浏览器验布局（需 Chromi
 | `m1-19-density` | 27 | 1440 下侧栏 196px / 列表 368px / 阅读区 ≥870px、正文宽度实测 + 两侧留白 40~90px、1180 下正文 ≥594px、组内有源时头部不增高、长分组名不压角标、首屏 ≥9 条、手机变量仍是 0/100% |
 | `m1-20-reader-toc` | 56 | 纸与桌面不同色/圆角/阴影 + 三个阅读主题各自成立且标题与正文同色、纸宽随 `--reader-width` 变、1440 不渲染目录、1600 渲染且正文列宽**不变**、无标题/单标题不渲染、点目录跳转且 URL 不变、滚动高亮唯一、长标题省略号、375px 取消纸 |
 | `m1-21-default-unread` | 31 | 冷启动请求 URL 就带 `view=unread`、默认「未读」激活且列表无已读、侧栏两处状态一致、点「全部」放回已读并换侧栏高亮、刷新回未读（不持久化）、分组/单源同样只看未读、375px 底部导航一致 |
-| `m1-22-empty-scope` | 47 | 点进 0 未读的源/分组直接进「全部」且条数=该范围（不是全库）、有未读的范围不被拉成全部、手动选全部后不被覆盖、读完一篇三处角标（侧栏/分组行/源子行）同时 -1 且未刷新、空态分四档文案、「看全部」只切读/全部不改范围、「看全库条目」才清范围、0 个源时空态是「去添加订阅」 |
+| `m1-22-empty-scope` | 60 | 点进 0 未读的源/分组**分段控件仍是「未读」**、该范围已读全部补在分割线「更早的 N 条已读」下、有未读的范围**没有**分割线（反面用例）、手动选全部后点别的范围回到未读（v1.17 bug 回归守卫）、读完一篇三处角标（侧栏/分组行/源子行）同时 -1 且未刷新、刚读完那一刻不自动补、全库 0 未读仍是空态不铺满全库、搜索 0 命中不补、真·空范围是「还没有条目」、0 个源时空态是「去添加订阅」 |
 | `m1-23-mark-scope-read` | 34 | 按源清只动该源、按分组清只动组内、不带范围 400 且一条未改、**不写阅读历史**（`first_read_at` 仍空、`read_count` 和为 0）、重复条目不算进 count、幂等、不存在的范围 200+0、UI 按钮只在「有范围+未读>0」出现且必须先确认 |
 | `m1-24-pane-head` | 18 | 标题行内所有可见控件垂直中线极差 ≤1.5px、h1 与「N 条」中线差 ≤1.0px（旧实现 1.2px，阈值是量出来收的）、右段贴边且间距=4px、分段隐藏后刷新按钮位移 ≤1px（旧实现 82px）、六控件同排不重叠不出界、375px 不溢出 |
 | `docker-path` | 12 | Dockerfile 结构 + 真产出 linux ELF |

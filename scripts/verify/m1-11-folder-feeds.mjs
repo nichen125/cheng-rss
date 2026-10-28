@@ -411,6 +411,10 @@ const clickGroup = async (name) => {
     return true;
   })()`);
   await sleep(1400);
+  // v1.18（§15.24）：点选范围一律回到默认的「未读」—— 不再沿用上一个
+  // 范围手动选的「全部」。所以本脚本"看该范围全部条目"的意图必须在
+  // **每次点选之后**重新表态，不能只在开头点一次。
+  await clickAllSeg();
   return r;
 };
 
@@ -424,6 +428,7 @@ const clickLeaf = async (label) => {
     return true;
   })()`);
   await sleep(1400);
+  await clickAllSeg();   // 同上
   return r;
 };
 

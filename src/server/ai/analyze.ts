@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { AiClient, AiFailure, AiUsageRecord } from './client.ts';
 import { EntryAnalysisSchema } from './schema.ts';
 import { ANALYZE_SYSTEM, BODY_CLIP, PROMPT_VERSION, buildAnalyzeUser } from './prompt.ts';
+import { buildFewshotBlock, recentHighlightsForFewshot } from '../highlights/insight.ts';
 import {
   FALLBACK_SLUG, categoryIdMap, ensureDefaultCategories, knownTopics, listCategories,
 } from './taxonomy.ts';
@@ -139,6 +140,9 @@ export async function runAnalyze(
       body: input.body,
       categories,
       knownTopics: knownTopics(db, input.userId),
+      // 高亮 few-shot（§11.4）：用户主动标的段落比隐式阅读行为更能代表
+      // 「什么算重要」。不足 3 条时不注入 —— 见 shouldInjectFewshot 的注释。
+      fewshot: buildFewshotBlock(recentHighlightsForFewshot(db, input.userId, now)),
     }),
     model: client.config.models.strong,
     purpose: 'analyze',

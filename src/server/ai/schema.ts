@@ -151,3 +151,18 @@ function describeType(v: z.ZodTypeAny): string {
     default: return '任意';
   }
 }
+
+/**
+ * 单条高亮解读（§11.4 / M4）。4.4 起使用。
+ *
+ * insight 上限 400 字：`INSIGHT_SYSTEM` 要求 1~3 句、不超过 120 字，
+ * 400 是给模型留的余量。min(1) 拦的是空字符串 —— 空解读落库会让前端
+ * 渲染出一个空白气泡，用户以为功能坏了。
+ */
+export const HighlightInsightSchema = z
+  .object({
+    insight: z.string().min(1).max(400),
+  })
+  .strip();
+
+export type HighlightInsight = z.infer<typeof HighlightInsightSchema>;

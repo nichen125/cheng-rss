@@ -3,13 +3,17 @@
 // 与代码分开的理由：提示词会被反复改（每改一次就是一个 prompt_version），
 // 而 §8.3 的硬性要求需要逐条对照验收。混在调用逻辑里，改一个标点都要
 // 在滚屏里找准位置，也没法在验收脚本里单独断言"这段约束存在"。
+//
+// v2（M4）：user 消息在正文前多了一段可选的高亮 few-shot（§11.4）。
+// 版本号跟着动 —— 黄金测试集回归靠它区分"模型变了"与"提示词变了"，
+// 否则一次 prompt 改动会被误读成模型退化。
 
 /**
  * 提示词版本。每次改动提示词都必须改这里 ——
  * entry_analysis.prompt_version 记的就是它，黄金测试集的回归靠它区分
  * "是模型变了还是提示词变了"。
  */
-export const PROMPT_VERSION = 'analyze-v1';
+export const PROMPT_VERSION = 'analyze-v2';
 
 export const ANALYZE_SYSTEM = `你是一名信息分析编辑。把一篇资讯压缩成结构化情报卡片。
 
@@ -41,6 +45,14 @@ export interface AnalyzePromptInput {
   categories: CategoryHint[];
   /** 库里已有的主题标签，用于「优先复用」 */
   knownTopics?: string[];
+  /**
+   * 高亮 few-shot 段（§11.4「修正 importance」）。
+   *
+   * 由 `highlights/insight.ts` 的 `buildFewshotBlock()` 生成 —— 那段逻辑
+   * 要查库（近期高亮 + 当时的 importance），不该混进这个纯函数。
+   * 空串或不传 = 不注入。
+   */
+  fewshot?: string;
 }
 
 /**
@@ -81,7 +93,7 @@ export function buildAnalyzeUser(input: AnalyzePromptInput): string {
 ${meta ? meta + '\n' : ''}
 可选分类：
 ${cats}
-${topicLine}
+${topicLine}${input.fewshot ?? ''}
 
 正文：
 ${body}`;

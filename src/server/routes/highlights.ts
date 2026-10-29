@@ -3,6 +3,8 @@ import type { AppContext, Variables } from '../app.ts';
 import { requireUserId } from '../auth/require-user.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { makeAnchor, resolveAnchor, insertHighlight, toApi, type HighlightRow } from '../highlights/anchor.ts';
+import { generateInsight, sliceContext } from '../highlights/insight.ts';
+import { aiForUser } from '../ai/service.ts';
 import { unpackText } from '../db/text-blob.ts';
 import { htmlToText } from '../feeds/parse.ts';
 
@@ -200,6 +202,67 @@ export function highlightRoutes(ctx: AppContext): Hono<{ Variables: Variables }>
       })),
       nextCursor: hasMore ? String(page[page.length - 1]?.created_at ?? '') : null,
     });
+  });
+
+  /**
+   * 单条解读（§11.4）。
+   *
+   * **同步**返回，不像简报那样走任务队列：用户点了「解读」就是现在要看，
+   * 排进队列再轮询的体验更差。代价是这次请求要等 1~3 秒。
+   *
+   * 缓存：已算过就直接返回，除非 `force: true`。与 /entries/:id/analyze
+   * 一致 —— 用户可能想重算（换了模型、觉得上次答得不好）。
+   */
+  r.post('/highlights/:id/insight', async (c) => {
+    const uid = requireUserId(c);
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+
+    const h = ctx.dbh.db.prepare(
+      'SELECT * FROM highlights WHERE id = ? AND user_id = ?',
+    ).get(id, uid) as unknown as HighlightRow | undefined;
+    if (!h) throw notFound('高亮不存在');
+
+    if (!body.force && h.ai_insight) {
+      return c.json({ ok: true, insight: h.ai_insight, cached: true, costUsd: 0 });
+    }
+
+    const entry = ctx.dbh.db.prepare(`
+      SELECT e.title AS title, COALESCE(f.title, e.site_name) AS source_name
+        FROM entries e LEFT JOIN feeds f ON f.id = e.feed_id
+       WHERE e.id = ? AND e.user_id = ?
+    `).get(h.entry_id, uid) as { title: string; source_name: string | null } | undefined;
+    if (!entry) throw notFound('条目不存在');
+
+    const text = entryText(ctx, uid, h.entry_id) ?? '';
+    const cx = sliceContext(text, h.pos_start, h.pos_end, h.quote_exact);
+
+    const ai = aiForUser(ctx.dbh.db, uid, ctx.cfg.ai);
+    const r = await generateInsight(ai.client, {
+      quote: h.quote_exact,
+      note: h.note,
+      contextBefore: cx.before,
+      contextAfter: cx.after,
+      entryTitle: entry.title,
+      sourceName: entry.source_name,
+    }, { userId: uid });
+
+    if (!r.ok) {
+      // 失败也返回 200 + ok:false，不用 4xx：没配 key 不是"请求错了"，
+      // 前端要显示的是「去配 key」，而不是一个红色报错。
+      return c.json({
+        ok: false,
+        insight: null,
+        failureKind: r.failure?.kind ?? 'unknown',
+        message: r.failure?.message ?? '解读失败',
+        costUsd: r.costUsd,
+      });
+    }
+
+    ctx.dbh.db.prepare('UPDATE highlights SET ai_insight = ?, updated_at = ? WHERE id = ?')
+      .run(r.insight, Date.now(), id);
+
+    return c.json({ ok: true, insight: r.insight, cached: false, costUsd: r.costUsd });
   });
 
   return r;

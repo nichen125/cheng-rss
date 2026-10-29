@@ -11,6 +11,7 @@ import {
 } from '../cluster/index.ts';
 import { summarizeCluster, saveCluster, clearWindowClusters, type ClusterMember } from '../cluster/summarize.ts';
 import { digestDue, recordAttempt, recordSkip, parseDigestConfig, localDayStart } from './schedule.ts';
+import { listDayHighlights, renderDigestHighlightSection } from '../highlights/insight.ts';
 
 // 简报的端到端流水线：取窗口 → 聚类 → 归约 → 生成 → 落库。
 //
@@ -163,6 +164,14 @@ export async function runDigest(
         fb.map((f) => `${f.index}. ${f.title}`).join('\n');
     }
   }
+
+  // 「你今天标记的要点」（§11.4 / M4）。
+  //
+  // 原文照列，**不交给模型**：这一节的判据是"我今天标了什么"，而模型会
+  // 概括、会漏、会改措辞，对不上用户记忆里的那一段。位置放在引用索引
+  // 之后、保存之前 —— 追加的是 Markdown 尾部，不影响正文的引用编号。
+  const dayHl = listDayHighlights(db, userId, dayKey, now);
+  md += renderDigestHighlightSection(dayHl);
 
   const body = { ...gen.body, body_md: md };
   const id = saveDigest(db, {

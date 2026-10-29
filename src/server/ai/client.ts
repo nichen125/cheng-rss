@@ -126,7 +126,8 @@ export type AiFailureKind =
   | 'bad-json'
   | 'schema'
   | 'empty'
-  | 'budget';
+  | 'budget'
+  | 'dim-mismatch';
 
 export interface AiFailure {
   kind: AiFailureKind;

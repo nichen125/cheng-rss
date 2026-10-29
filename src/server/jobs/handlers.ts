@@ -147,6 +147,49 @@ export function buildHandlers(ctx: HandlerContext): Record<string, JobHandler> {
       entryId, skipped: r.skipped, called: r.called,
       category: r.categorySlug ?? undefined,
     });
+
+    // 分析成功 → 立刻把向量化排上（PLAN §7.1 L3 → L4）。
+    //
+    // 为什么在 handler 里排而不是在 runAnalyze 内部排：runAnalyze 也被
+    // 手动重跑接口同步调用，在那里排队会让"点一下重跑"变成"顺手多打一次
+    // embedding" —— 而用户点重跑通常只是想刷新摘要。
+    //
+    // skip 时也排：向量可能是上次失败没写成的，让它再试一次。
+    // dedupe_key 保证不会重复排队。
+    enqueue(db, {
+      kind: 'embed',
+      payload: { entryId },
+      dedupeKey: `embed:${entryId}`,
+    });
+  };
+
+  // ── 向量化（PLAN §7.1 L4 / §19.4 2.4）───────────────────
+  //
+  // 失败**吃掉**，与 extract 同策略：向量是可选增强（没有它照样能读、
+  // 能按分类筛），为一个 embedding 的 500 重试 3 次会白占 4 个槽位。
+  // 失败原因由 client 记进 ai_usage，条目 stage 不动。
+  handlers['embed'] = async (job, db: DatabaseSync) => {
+    const p = safeParse(job.payload);
+    const entryId = String(p.entryId ?? '');
+    if (!entryId) throw new Error('embed 缺少 entryId');
+    if (!ctx.app) throw new Error('embed 需要 AppContext（仅 serve 模式可用）');
+
+    const { aiForUser, runtimeAiBase } = await import('../ai/service.ts');
+    const { runEmbed } = await import('../ai/embed.ts');
+
+    const row = db.prepare('SELECT user_id FROM entries WHERE id = ?').get(entryId) as
+      { user_id: string } | undefined;
+    if (!row) {
+      ctx.log?.('embed: 条目已不存在，跳过', { entryId });
+      return;
+    }
+
+    const { client } = aiForUser(db, row.user_id, runtimeAiBase(ctx.app.cfg));
+    const r = await runEmbed(db, client, entryId, { force: p.force === true });
+    ctx.log?.(r.ok ? 'embed 完成' : 'embed 失败', {
+      entryId, skipped: r.skipped, dim: r.dim,
+      failure: r.ok ? undefined : `${r.failure.kind}: ${r.failure.message}`.slice(0, 160),
+    });
   };
 
   return handlers;

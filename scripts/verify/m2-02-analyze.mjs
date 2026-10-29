@@ -45,7 +45,7 @@ const ARTICLES = JSON.parse(readFileSync(join(root, 'tests/fixtures/ai/articles.
 // 行为由「喂进来的标题」决定，而不是由调用顺序决定 —— 顺序相关的 mock
 // 在并发下（analyze 并发 2）会串号，那时"20 篇都成功"仍然成立，
 // 但它们对应的文章全错。
-const ai = { calls: 0, okCalls: 0, failFor: [], missingFor: [], log: [] };
+const ai = { calls: 0, okCalls: 0, embedCalls: 0, failFor: [], missingFor: [], log: [] };
 
 const aiSrv = createServer((req, res) => {
   let raw = '';
@@ -53,17 +53,31 @@ const aiSrv = createServer((req, res) => {
   req.on('end', () => {
     if (req.url === '/_ctl') {
       const c = JSON.parse(raw || '{}');
-      ai.calls = 0; ai.okCalls = 0; ai.log = [];
+      ai.calls = 0; ai.okCalls = 0; ai.embedCalls = 0; ai.log = [];
       ai.failFor = Array.isArray(c.failFor) ? c.failFor : [];
       ai.missingFor = Array.isArray(c.missingFor) ? c.missingFor : [];
       res.writeHead(200); return res.end('{}');
     }
     if (req.url === '/_state') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ calls: ai.calls, okCalls: ai.okCalls, log: ai.log }));
+      return res.end(JSON.stringify({ calls: ai.calls, okCalls: ai.okCalls, embedCalls: ai.embedCalls, log: ai.log }));
     }
-    if (!req.url || !req.url.endsWith('/chat/completions')) {
+    if (!req.url || (!req.url.endsWith('/chat/completions') && !req.url.endsWith('/embeddings'))) {
       res.writeHead(404); return res.end('no');
+    }
+
+    // embedding 端点：返回一个确定性的向量（维度由请求里的 model 决定）
+    if (req.url.endsWith('/embeddings')) {
+      ai.embedCalls++;
+      const dim = 64;
+      const vec = Array.from({ length: dim }, (_, i) => Math.sin(i + 1) * 0.1);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({
+        object: 'list',
+        data: [{ object: 'embedding', index: 0, embedding: vec }],
+        model: 'mock-embed',
+        usage: { prompt_tokens: 20, total_tokens: 20 },
+      }));
     }
 
     ai.calls++;
@@ -278,6 +292,23 @@ check('cost_usd 总和 > 0（真的记账，不是占位 0）', () => {
 check('ai_usage 里有 20 条 analyze 记录', () => {
   const c = one(`SELECT COUNT(*) c FROM ai_usage WHERE purpose='analyze' AND ok=1`);
   return eq(Number(c?.c), ARTICLES.length);
+});
+// 分析成功之后向量化应当自动排上并被消费（§7.1 L3 → L4）。
+// 断言的是**产物**：库里有 20 条向量，且维度 = mock 返回的 64。
+// 只断言"排了队"会被一个排队后 handler 直接 return 的实现骗过。
+check('分析完成后 20 条都自动产出了向量', () => {
+  const c = one('SELECT COUNT(*) c FROM embeddings');
+  return eq(Number(c?.c), ARTICLES.length);
+});
+check('向量维度 = 模型返回的 64，且字节 = 64×4', () => {
+  const r = one('SELECT dim, length(vec) AS bytes FROM embeddings LIMIT 1');
+  return ok(Number(r?.dim) === 64 && Number(r?.bytes) === 256,
+    `dim=${r?.dim} bytes=${r?.bytes}`);
+});
+check('向量表的写入没有污染去重指纹表（entry_vectors 仍是 256 维）', () => {
+  const r = one(`SELECT COUNT(*) AS n, MAX(dim) AS dim FROM entry_vectors`);
+  return ok(Number(r?.n) > 0 && Number(r?.dim) === 256,
+    `n=${r?.n} dim=${r?.dim}`);
 });
 check('category_id 落成了外键（category 表里查得到 industry）', () => {
   const withCat = analyzed.filter((r) => r.category_id);

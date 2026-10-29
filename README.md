@@ -584,7 +584,7 @@ node scripts/verify-all.mjs
   PASS  m1-23-mark-scope-read.mjs   9.3s
   PASS  m1-24-pane-head.mjs        11.9s
   PASS  m2-01-ai-client.mjs         0.7s
-  PASS  m2-02-analyze.mjs          19.0s
+  PASS  m2-02-analyze.mjs          19.3s
   PASS  m2-03-classify.mjs          0.4s
   PASS  m2-04-embed.mjs             0.3s
   PASS  m2-05-budget.mjs            7.2s
@@ -634,7 +634,7 @@ node scripts/verify/m0-09-ui.mjs         # 真实浏览器验布局（需 Chromi
 | `m1-23-mark-scope-read` | 34 | 按源清只动该源、按分组清只动组内、不带范围 400 且一条未改、**不写阅读历史**（`first_read_at` 仍空、`read_count` 和为 0）、重复条目不算进 count、幂等、不存在的范围 200+0、UI 按钮只在「有范围+未读>0」出现且必须先确认 |
 | `m1-24-pane-head` | 18 | 标题行内所有可见控件垂直中线极差 ≤1.5px、h1 与「N 条」中线差 ≤1.0px（旧实现 1.2px，阈值是量出来收的）、右段贴边且间距=4px、分段隐藏后刷新按钮位移 ≤1px（旧实现 82px）、六控件同排不重叠不出界、375px 不溢出 |
 | `m2-01-ai-client` | 54 | 裸文本/围栏 JSON/合法 JSON/前后带客套话四种都能解析、zod 失败回灌重试一次且只一次、降级链 `json_schema → json_object → text` 且**判据看报文不看状态码**（写错的模型名不能被当成"不支持 schema"吞掉）、429/5xx 退 2 次、401/404/422 一次都不重试、`Retry-After` 优先、超时判 timeout、无 key 时不发请求、每次调用（含重试）各一条 usage、未知模型按 `default` 计不记 0 |
-| `m2-02-analyze` | 39 | 20 篇全部产出摘要**且每篇对应它自己**（mock 把标题写进摘要，串号即红）、缺字段 → failed 且原因说得出哪个字段、重跑不重复计费（一次请求都不发）、`force` 才重算、正文更新后重分析、空正文不调模型、失败不覆盖已有好结果、摘要进 FTS、tier 落库、**没配 key 不把整库打成 failed**、分析完自动产向量 |
+| `m2-02-analyze` | 44 | 20 篇全部产出摘要**且每篇对应它自己**（mock 把标题写进摘要，串号即红）、缺字段 → failed 且原因说得出哪个字段、重跑不重复计费（一次请求都不发）、`force` 才重算、正文更新后重分析、空正文不调模型、失败不覆盖已有好结果、摘要进 FTS、tier 落库、**没配 key 不把整库打成 failed**、分析完自动产向量 |
 | `m2-03-classify` | 42 | tier 边界成对断言 39/40、69/70、89/90（只测 40/70/90 的话 `>` 与 `>=` 测不出来）、NaN 判 noise、slug 自造→other、大小写容错、**英文近义词不做模糊匹配**、落库层用假客户端真跑后查库：库里的分类行数不变、没有 category_id 为 NULL 的分析行 |
 | `m2-04-embed` | 33 | 维度 = 配置值、BLOB 字节 = dim×4（不是"存进去了"）、带 offset 的视图不抄错、输入含标题+摘要+首段且**不含正文第二段**、总长夹到 2000 字、换模型重算、与 `entry_vectors` 互不覆盖、维度不符不落库、1000 条 1536 维余弦 3.9ms |
 | `m2-05-budget` | 35 | 每次调用都记账（含失败与重试）、日门降级**且请求照发、模型换成 fast**、月门停止且**一个请求都不发**、本地日历日边界、`0`=不限额、embedding 日门不降级月门一起停、闸门可注入、真实浏览器里「已暂停」与原因可见、没配 key 时 UI 明确提示 |

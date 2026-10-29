@@ -343,6 +343,43 @@ check('命中数不超过 20（不是"全部条目"）', () => ok(
   `total=${hit.body?.total}`,
 ));
 
+// ── ⑪ 分析结果走通了 API 到 UI 的整条路 ────────────────────
+//
+// 前面那些断言都直接读库。库里有摘要不等于用户在界面上看得到 ——
+// 一个忘了 JOIN entry_analysis 的详情接口同样让"库里有 20 条摘要"成立，
+// 而用户点开每篇都是空的。这一节逐个查视图实际依赖的字段。
+group('2.2 单篇分析 · API 与视图');
+
+const listOne = await api('/entries?view=unread&limit=50');
+const firstItem = listOne.body?.items?.find((x) => x.summary);
+check('列表接口每条都带 summary（不是 null）', () => ok(
+  Boolean(firstItem?.summary) && String(firstItem.summary).length > 20,
+  `summary=${String(firstItem?.summary ?? '').slice(0, 60)}`,
+));
+check('列表接口的 tier 与库一致（不是硬编码 normal）', () => {
+  const fromDb = one('SELECT tier FROM entry_analysis WHERE entry_id = ?', firstItem?.id);
+  return ok(firstItem?.tier === fromDb?.tier && firstItem?.tier === 'worth',
+    `api=${firstItem?.tier} db=${fromDb?.tier}`);
+});
+
+const detailOne = await api(`/entries/${firstItem?.id}`);
+check('详情接口返回 analysis 对象', () => ok(
+  detailOne.body?.analysis && typeof detailOne.body.analysis.summary === 'string',
+  JSON.stringify(detailOne.body?.analysis)?.slice(0, 120),
+));
+check('详情接口的 analysis 带 keyPoints 数组与 readingTime', () => ok(
+  Array.isArray(detailOne.body?.analysis?.keyPoints)
+  && detailOne.body.analysis.keyPoints.length >= 2
+  && Number.isInteger(detailOne.body?.analysis?.readingTime),
+  JSON.stringify({
+    kp: detailOne.body?.analysis?.keyPoints?.length,
+    rt: detailOne.body?.analysis?.readingTime,
+  }),
+));
+check('详情接口的 analysis 里 tier 是四级之一', () =>
+  ok(['must_read', 'worth', 'normal', 'noise'].includes(String(detailOne.body?.analysis?.tier)),
+    String(detailOne.body?.analysis?.tier)));
+
 // ── ③ 重跑不重复计费 ──────────────────────────────────────
 group('2.2 单篇分析 · 幂等');
 const target = q(`SELECT id, title FROM entries ORDER BY published_at DESC LIMIT 1`)[0];

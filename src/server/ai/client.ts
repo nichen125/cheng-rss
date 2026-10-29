@@ -127,7 +127,8 @@ export type AiFailureKind =
   | 'schema'
   | 'empty'
   | 'budget'
-  | 'dim-mismatch';
+  | 'dim-mismatch'
+  | 'rate-limited';
 
 export interface AiFailure {
   kind: AiFailureKind;
@@ -136,6 +137,20 @@ export interface AiFailure {
   retryable: boolean;
   status?: number;
 }
+
+/**
+ * 调用前的闸门。返回 allow / downgrade / block。
+ *
+ * 为什么做成注入的回调而不是在 client 里直接查库：
+ *   · client 因此不需要知道数据库（它现在只有 config 与 key）
+ *   · 验收脚本可以注入一个固定返回 block 的 guard，断言"一个请求都没发"
+ *     而不用先把库里的花费造假
+ *   · 将来加"单次 max_tokens 上限"之类策略只改 guard 的实现
+ */
+export type CallGuard = (req: { purpose: string; model: string }) =>
+  | { action: 'allow' }
+  | { action: 'downgrade'; model: string; reason: string }
+  | { action: 'block'; reason: string };
 
 export interface AiUsageRecord {
   purpose: string;
@@ -176,6 +191,8 @@ export interface AiClientOptions {
   sleepImpl?: (ms: number) => Promise<void>;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  /** 调用前闸门（预算/限流）。缺省即永不拦截 */
+  guard?: CallGuard;
 }
 
 /** 传输层最多重试几次（首发 + 2 次重试 = 3 个请求） */
@@ -211,6 +228,8 @@ export class AiClient {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
+  /** 调用前闸门。null = 不拦截 */
+  private readonly guard?: CallGuard;
 
   /**
    * 已经确认不支持某种 response_format 的 baseURL+model。
@@ -233,6 +252,7 @@ export class AiClient {
     this.sleep = opts.sleepImpl ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.now = opts.now ?? Date.now;
+    this.guard = opts.guard;
   }
 
   hasKey(): boolean {
@@ -257,6 +277,22 @@ export class AiClient {
           retryable: false,
         },
       };
+    }
+
+    // 闸门必须在**第一个请求之前**问，而不是在拿到 200 之后。
+    // 位置错了就等于"先花钱再检查额度"，闸门形同虚设。
+    const verdict = this.guard?.({ purpose: opts.purpose, model: opts.model }) ?? { action: 'allow' };
+    if (verdict.action === 'block') {
+      return {
+        ok: false,
+        usage: null,
+        failure: { kind: 'budget', message: verdict.reason, retryable: false },
+      };
+    }
+    if (verdict.action === 'downgrade') {
+      // 降级只换模型名，不换 schema 与提示词 —— 提示词是按能力写的，
+      // 换个小模型配大提示词反而更容易输出不合规。
+      opts = { ...opts, model: verdict.model };
     }
 
     let mode = this.initialFormat(opts.model);
@@ -578,6 +614,14 @@ export class AiClient {
     }
 
     const m = model ?? this.config.models.embed;
+
+    // 闸门同样要拦 embedding。embed 在 fast_only 档不会被降级
+    // （向量模型没有"更便宜的同族"），但月门 stop 时一样要停。
+    const verdict = this.guard?.({ purpose: 'embed', model: m }) ?? { action: 'allow' };
+    if (verdict.action === 'block') {
+      return { ok: false, usage: null, failure: { kind: 'budget', message: verdict.reason, retryable: false } };
+    }
+
     const url = `${this.config.baseURL.replace(/\/+$/, '')}/embeddings`;
     const t0 = this.now();
 

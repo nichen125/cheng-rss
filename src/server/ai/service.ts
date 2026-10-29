@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { AiClient, resolveAiConfig, type AiConfig } from './client.ts';
 import { recordUsage } from './usage.ts';
+import { budgetGuard, budgetState, type BudgetState } from './budget.ts';
 import type { RuntimeConfig } from '../config.ts';
 
 // 每用户的 AI 客户端装配（PLAN §8.1）。
@@ -158,6 +159,10 @@ export function aiForUser(
           // 记账失败不能连累分析：分析结果已经拿到了，丢掉它更糟
         }
       },
+      // 预算闸门（2.5）。放在这里而不是各调用点：调用点有三处
+      // （job handler / 手动重跑接口 / M3 的简报），任何一处漏挂闸门
+      // 就是"那条路径可以无限花钱"。
+      guard: budgetGuard(db, userId, config),
     });
     cache.set(key, client);
     // 同一用户的旧配置条目可以清掉，避免设置页反复改导致缓存无限增长
@@ -167,6 +172,21 @@ export function aiForUser(
   }
 
   return { client, config, hasKey: client.hasKey(), source };
+}
+
+/**
+ * 该用户当前的预算状态。UI 与 /stats 读它。
+ *
+ * 每次重新算而不读缓存 —— 与 guard 的理由相同：它是闸门的依据，
+ * 缓 60 秒就等于允许超支 60 秒。
+ */
+export function aiBudgetFor(
+  db: DatabaseSync,
+  userId: string,
+  base?: RuntimeAiBase,
+): BudgetState {
+  const config = composeAiConfig(base, readAiConfigRaw(db, userId));
+  return budgetState(db, userId, config);
 }
 
 /** 测试与「换了 key 想立刻生效」的出口 */

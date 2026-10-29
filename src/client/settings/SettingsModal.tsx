@@ -24,6 +24,7 @@ import { FeedsProvider } from './store.tsx';
 import { FeedsSection } from './FeedsSection.tsx';
 import { FoldersSection } from './FoldersSection.tsx';
 import { AccountSection } from './AccountSection.tsx';
+import { AiSection } from './AiSection.tsx';
 
 /** 分类 id。'feeds' / 'folders' / 'account' 已实现，其余是占位 */
 export type SettingsSection =
@@ -42,7 +43,7 @@ const SECTIONS: SecDef[] = [
   { key: 'feeds', label: '订阅', icon: <IconRss size={16} /> },
   { key: 'folders', label: '分组', icon: <IconFolder size={16} /> },
   { key: 'account', label: '账户', icon: <IconSettings size={16} /> },
-  { key: 'ai', label: 'AI 分析', icon: <IconSparkle size={16} />, soon: 'M2' },
+  { key: 'ai', label: 'AI 分析', icon: <IconSparkle size={16} /> },
   { key: 'digest', label: '每日简报', icon: <IconClock size={16} />, soon: 'M3' },
   { key: 'backup', label: '备份与迁移', icon: <IconDatabase size={16} />, soon: 'M6' },
 ];
@@ -127,17 +128,7 @@ export function SettingsModal(props: {
               <AccountSection user={props.user} onLogout={props.onLogout} />
             </SettingsPane>
             <SettingsPane active={props.section === 'ai'}>
-              <SoonSection
-                title="AI 分析"
-                milestone="M2"
-                items={[
-                  '模型服务商与 API Key（OpenAI 兼容 / DeepSeek / 本地 Ollama）',
-                  '每条条目的自动分类与分级（必读 / 值得 / 普通）',
-                  '批量重跑与失败重试的队列视图',
-                  '提示词模板与输出语言',
-                ]}
-                note="分类分级落地后，收件箱的每条会带上色点与一句话摘要。"
-              />
+              <AiSection />
             </SettingsPane>
             <SettingsPane active={props.section === 'digest'}>
               <SoonSection

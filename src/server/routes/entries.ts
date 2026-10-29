@@ -534,7 +534,7 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   });
 
   // ── 统计 ────────────────────────────────────────────────
-  r.get('/stats', (c) => {
+  r.get('/stats', async (c) => {
     const uid = requireUserId(c);
     const one = (sql: string): number => {
       const x = ctx.dbh.db.prepare(sql).get(uid) as { c: number } | undefined;
@@ -542,6 +542,21 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     };
     const q = queueStats(ctx.dbh.db);
     const dup = duplicateStats(ctx.dbh.db, uid);
+
+    // AI 段（2.5）：预算档位、今日/本月花费、未配 key 的提示。
+    // 放在 /stats 而不是单独的 /ai/status：前端本来每轮列表变化就会取一次
+    // /stats，多一个端点等于多一次往返，且两者几乎总是一起看。
+    const { aiBudgetFor, runtimeAiBase } = await import('../ai/service.ts');
+    const budget = aiBudgetFor(ctx.dbh.db, uid, runtimeAiBase(ctx.cfg));
+    const { embedDimensions } = await import('../ai/embed.ts');
+    const analyzed = one(
+      "SELECT COUNT(*) c FROM entry_analysis a JOIN entries e ON e.id=a.entry_id WHERE e.user_id = ?",
+    );
+    const failed = one(
+      "SELECT COUNT(*) c FROM entries WHERE user_id = ? AND stage = 'failed'",
+    );
+    const dims = embedDimensions(ctx.dbh.db, uid);
+
     return c.json({
       entries: one('SELECT COUNT(*) c FROM entries WHERE user_id = ?'),
       feeds: one('SELECT COUNT(*) c FROM feeds WHERE user_id = ?'),
@@ -551,6 +566,13 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       // 去重效果可观测：重复率是 §19.3 1.15 判据 ③（<1%）的运行时数据来源
       duplicates: { count: dup.duplicates, rate: Number(dup.rate.toFixed(4)) },
       queue: { pending: q.pending, running: q.running, dead: q.dead },
+      ai: {
+        analyzed,
+        failed,
+        // 维度分布：换模型后这里会同时出现两种维度，是"该清理旧向量"的信号
+        dims,
+        ...budget,
+      },
     });
   });
 

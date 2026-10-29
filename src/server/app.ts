@@ -7,6 +7,7 @@ import { authRoutes } from './routes/auth.ts';
 import { entryRoutes } from './routes/entries.ts';
 import { feedRoutes } from './routes/feeds.ts';
 import { rsshubRoutes } from './routes/rsshub.ts';
+import { settingsRoutes } from './routes/settings.ts';
 import { getStaticAssets, indexHtml, looksLikeAsset, mimeFor } from './static.ts';
 import type { DbHandle } from './db/client.ts';
 import type { RuntimeConfig } from './config.ts';
@@ -135,6 +136,9 @@ export function createApp(ctx: AppContext): Hono<{ Variables: Variables }> {
 
   // RSSHub 订阅搜索（/rsshub/*）
   v1.route('/', rsshubRoutes(ctx));
+
+  // AI 配置（/settings/ai）
+  v1.route('/', settingsRoutes(ctx));
 
   app.route('/api/v1', v1);
   app.route('/api', compat);

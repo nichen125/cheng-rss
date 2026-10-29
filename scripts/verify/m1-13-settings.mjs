@@ -37,7 +37,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { group, check, ok, summary } from './harness.mjs';
+import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { openSettings as openSettingsShared } from '../lib/ui.mjs';
 
@@ -387,28 +387,34 @@ check('分类覆盖 订阅/分组/账户 + AI/简报/备份', () => {
   const missing = want.filter((w) => !got.includes(w));
   return ok(missing.length === 0, `缺 ${JSON.stringify(missing)}，实际 ${JSON.stringify(got)}`);
 });
-check('M2/M3/M6 三个分类标了「待接入」里程碑', () => {
+// M2 落地后（2.5）「AI 分析」不再是占位分类 —— 它现在是真页面。
+// 这条断言随之改写：只剩 M3/M6 两个占位，且 AI 一栏**必须不再**带
+// 「待接入」标签。留着旧的"三个都标 M2/M3/M6"会让这条断言在 M2 完成后
+// 变成永久红 —— 而它不是发现了 bug，是文档里的里程碑过期了。
+check('M3/M6 两个分类仍标「待接入」，AI 分析已落地不再标', () => {
   const soon = Object.fromEntries(s1.nav.filter((n) => n.soon).map((n) => [n.label, n.soon]));
-  return ok(soon['AI 分析'] === 'M2' && soon['每日简报'] === 'M3'
-    && soon['备份与迁移'] === 'M6',
+  return ok(soon['每日简报'] === 'M3' && soon['备份与迁移'] === 'M6'
+    && soon['AI 分析'] === undefined,
     JSON.stringify(soon));
 });
 const clickedAi = await clickNavSection('AI 分析');
-check('「AI 分析」占位分类能点开', () => ok(clickedAi === true));
+check('「AI 分析」分类能点开', () => ok(clickedAi === true));
 const ai = await ev(`(() => ({
   title: (document.querySelector('.settings-pane:not([hidden]) .settings-sec-head h2')?.textContent ?? '').trim(),
-  items: document.querySelectorAll('.settings-pane:not([hidden]) .soon-list li').length,
+  cards: document.querySelectorAll('.settings-pane:not([hidden]) .settings-card').length,
   soonTag: (document.querySelector('.settings-pane:not([hidden]) .soon-tag-inline')?.textContent ?? '').trim(),
-  hint: (document.querySelector('.settings-pane:not([hidden]) .settings-section .hint')?.textContent ?? '').slice(0, 30),
+  level: document.querySelector('.settings-pane:not([hidden]) .ai-level')?.getAttribute('data-level') ?? '',
+  fields: document.querySelectorAll('.settings-pane:not([hidden]) .field input').length,
 }))()`);
-check('占位分类有标题 + ≥3 条"将来会配什么"的清单', () => {
-  return ok(/AI 分析/.test(ai.title) && ai.items >= 3,
+check('AI 分类有标题 + 运行状态卡 + 连接配置卡（不再是占位清单）', () => {
+  return ok(/AI 分析/.test(ai.title) && ai.cards >= 2,
     JSON.stringify(ai));
 });
-check('占位分类明确标注「待接入 · M2」并说明属于哪个里程碑', () => {
-  return ok(/待接入/.test(ai.soonTag) && /M2/.test(ai.soonTag),
-    JSON.stringify(ai.soonTag));
-});
+check('AI 分类不再带「待接入」标签', () => eq(ai.soonTag, ''));
+check('运行状态卡带 data-level（UI 与后端档位同一份事实）', () =>
+  ok(['ok', 'fast_only', 'stop'].includes(ai.level), `data-level=${ai.level}`));
+check('连接配置有输入框（地址 / 三个模型 / 预算，至少 4 个）', () =>
+  ok(ai.fields >= 4, `输入框 ${ai.fields} 个`));
 
 // ── ③ 分类切换不重挂：输入到一半的内容保留 ───────────────
 //

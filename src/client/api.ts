@@ -362,7 +362,40 @@ export const api = {
     unread: number;
     starred?: number;
     queue: { pending: number; running: number; dead: number };
+    /** M2 起返回；老版本没有这一段，调用方要按可选处理 */
+    ai?: {
+      analyzed: number;
+      failed: number;
+      dims: Record<string, number>;
+      level: 'ok' | 'fast_only' | 'stop';
+      todayUsd: number;
+      monthUsd: number;
+      dailyLimit: number;
+      monthlyLimit: number;
+      todayCalls: number;
+      todayFailures: number;
+      reason: string;
+    };
   }>('/stats'),
+
+  // ── AI 配置（M2）────────────────────────────────────────
+  // GET 返回的是**合成后**的配置 + 来源标记，不是数据库里那条原始 JSON：
+  // 用户要看的是"现在实际连的是哪儿"，而原始 JSON 只知道自己覆盖了哪些字段。
+  getAiConfig: () => request<{
+    baseURL: string;
+    apiKeyEnv: string;
+    models: { fast: string; strong: string; embed: string };
+    budget: { dailyUsd: number; monthlyUsd: number };
+    hasKey: boolean;
+    source: 'settings' | 'deployed';
+  }>('/settings/ai'),
+
+  /** 只提交要改的字段。空/缺省 = 保持部署期配置（见 §8.6 三层合并） */
+  patchAiConfig: (patch: Record<string, unknown>) =>
+    request<{ ok: boolean }>('/settings/ai', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
 
   // ── 订阅 ────────────────────────────────────────────────
   listFeeds: (params: { folderId?: string | null } = {}) => {

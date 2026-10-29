@@ -8,6 +8,7 @@ import { entryRoutes } from './routes/entries.ts';
 import { feedRoutes } from './routes/feeds.ts';
 import { rsshubRoutes } from './routes/rsshub.ts';
 import { settingsRoutes } from './routes/settings.ts';
+import { digestRoutes } from './routes/digests.ts';
 import { getStaticAssets, indexHtml, looksLikeAsset, mimeFor } from './static.ts';
 import type { DbHandle } from './db/client.ts';
 import type { RuntimeConfig } from './config.ts';
@@ -139,6 +140,9 @@ export function createApp(ctx: AppContext): Hono<{ Variables: Variables }> {
 
   // AI 配置（/settings/ai）
   v1.route('/', settingsRoutes(ctx));
+
+  // 简报（/digests/*）
+  v1.route('/', digestRoutes(ctx));
 
   app.route('/api/v1', v1);
   app.route('/api', compat);

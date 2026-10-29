@@ -15,6 +15,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'init', file: '0001_init.sql' },
   { version: 2, name: 'dedupe_vectors', file: '0002_dedupe_vectors.sql' },
   { version: 3, name: 'analysis_fingerprint', file: '0003_analysis_fingerprint.sql' },
+  { version: 4, name: 'digest_day_key', file: '0004_digest_day_key.sql' },
 ];
 
 export const CURRENT_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

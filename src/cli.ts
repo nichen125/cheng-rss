@@ -14,6 +14,9 @@ import { sweepDueFeeds } from './server/routes/feeds.ts';
 import { ensureOwnerUser, countUsers, purgeExpiredSessions } from './server/auth/session.ts';
 import { pruneOldVectors } from './server/dedupe/index.ts';
 import { countOrphanPending, enqueueOrphanExtracts } from './server/extract/backfill.ts';
+import { digestDue, parseDigestConfig } from './server/digest/schedule.ts';
+import { enqueue } from './server/jobs/queue.ts';
+import { listUsersForDigest } from './server/digest/users.ts';
 
 // esbuild 打包时注入（scripts/build-server.mjs）；源码模式走 package.json
 declare const __AI_RSS_VERSION__: string | undefined;
@@ -386,6 +389,44 @@ async function cmdServe(args: Args): Promise<void> {
   firstPrune.unref?.();
   const pruneTimer = setInterval(pruneVectors, 24 * 3600_000);
   pruneTimer.unref?.();
+
+  // 简报调度（PLAN §9.1 / §19.5 3.4）。
+  //
+  // 与 sweepDueFeeds 同一个套路：每分钟查一遍"谁该出简报"，把任务丢进队列，
+  // 真正的生成由 job handler 跑。**不在这个定时器里直接跑**：生成要调十几次
+  // 模型（每簇一次 + 简报一次），几十秒起步，塞进 setInterval 会把主循环卡住。
+  //
+  // 三种否决状态都由 digestDue 判定（未到点 / 今天已做 / 今天已跳过 /
+  // 失败退避中 / 今天失败次数用完），它们各自有持久痕迹，所以这个查询
+  // 每分钟跑一次不会重复触发任何工作 —— 稳态成本就是三条索引查询。
+  const sweepDigests = () => {
+    try {
+      const users = listUsersForDigest(h.db);
+      let queued = 0;
+      for (const u of users) {
+        // manual=false：走完整的时间/幂等判断
+        const due = digestDue(h.db, u.userId, parseDigestConfig(u.config), Date.now());
+        if (!due.due) continue;
+        const id = enqueue(h.db, {
+          kind: 'digest',
+          payload: { userId: u.userId },
+          // dedupeKey 带日期：同一天里前一个还在队列/运行中时不会堆第二个，
+          // 而第二天自然是另一条 key（否则"生成过一次"会让后续永不入队）
+          dedupeKey: `digest:${u.userId}:${due.dayKey}`,
+          priority: 1,
+          maxAttempts: 1,     // 重试由 digest_attempts 的退避管，不走队列的 attempts
+        });
+        if (id !== null) queued++;
+      }
+      if (queued > 0) log.debug(`简报调度: ${queued} 个用户已入队`);
+    } catch (e) {
+      log.warn('简报调度失败', { err: (e as Error).message });
+    }
+  };
+  const firstDigestSweep = setTimeout(sweepDigests, 20_000);
+  firstDigestSweep.unref?.();
+  const digestTimer = setInterval(sweepDigests, 60_000);
+  digestTimer.unref?.();
 
   let runner: JobRunner | null = null;
   if (inlineWorker) {

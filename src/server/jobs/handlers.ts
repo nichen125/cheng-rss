@@ -192,6 +192,35 @@ export function buildHandlers(ctx: HandlerContext): Record<string, JobHandler> {
     });
   };
 
+  // ── 简报（PLAN §9.1 / §19.5 3.4）────────────────────────
+  //
+  // 与 embed 相反：简报失败**要抛**。理由是成本与语义都不同 ——
+  // 向量是可选增强（没有它照样能读），而简报是用户 08:00 打开就想要的东西，
+  // 静默吃掉失败等于"今天没有简报"且没有任何痕迹。
+  //
+  // 但抛出去不代表无限重试：schedule.ts 的 digest_attempts + 退避会把它
+  // 限制在每天 3 次。两层保护各管一件事 —— 队列管"进程崩了还能再试"，
+  // 退避管"不因为一次网络抖动把 3 次配额在 30 秒里烧光"。
+  handlers['digest'] = async (job, db: DatabaseSync) => {
+    const p = safeParse(job.payload);
+    const userId = String(p.userId ?? '');
+    if (!userId) throw new Error('digest 缺少 userId');
+    if (!ctx.app) throw new Error('digest 需要 AppContext（仅 serve 模式可用）');
+
+    const { runDigest } = await import('../digest/run.ts');
+    const r = await runDigest(ctx.app, { userId, kind: p.kind ? String(p.kind) : undefined });
+
+    ctx.log?.(r.ok ? '简报已生成' : '简报未生成', {
+      userId,
+      digestId: r.digestId,
+      clusters: r.clusterCount,
+      entries: r.entryCount,
+      // ok=false 不抛：那是"今天没内容"，是正常结果。
+      // 真正的基础设施失败（DB 挂了）会在上面抛出来。
+      reason: r.reason ?? undefined,
+    });
+  };
+
   return handlers;
 }
 

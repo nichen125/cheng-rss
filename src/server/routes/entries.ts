@@ -395,6 +395,49 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   });
 
   // ── 标记已读（幂等，PLAN §7.4）───────────────────────────
+  // ── 手动重跑分析（PLAN §18 / §19.4 2.2）──────────────────
+  //
+  // 两种语义刻意分开：
+  //   POST /entries/:id/analyze                内容没变就跳过（幂等，默认）
+  //   POST /entries/:id/analyze {force:true}   强制重算（改了提示词/换了模型）
+  //
+  // 默认不是 force 的理由：这个接口最常被点到的场景是"我改完提示词，
+  // 想把这批重跑一遍"。若默认 force，用户点第二篇时第一篇刚算好的结果
+  // 会被同一段正文再算一次 —— 白花一倍的钱，且结果一模一样。
+  //
+  // 同步返回而不是入队：单篇 2~8 秒，用户点一下等结果比"排队了但不知道
+  // 什么时候好"更符合预期。批量重跑将来走队列。
+  r.post('/entries/:id/analyze', async (c) => {
+    const uid = requireUserId(c);
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+
+    const row = ctx.dbh.db.prepare('SELECT id FROM entries WHERE id = ? AND user_id = ?')
+      .get(id, uid) as { id: string } | undefined;
+    if (!row) throw notFound('条目不存在');
+
+    const { aiForUser, runtimeAiBase } = await import('../ai/service.ts');
+    const { runAnalyze } = await import('../ai/analyze.ts');
+    const { client } = aiForUser(ctx.dbh.db, uid, runtimeAiBase(ctx.cfg));
+
+    const r = await runAnalyze(ctx.dbh.db, client, id, { force: body.force === true });
+
+    if (!r.ok) {
+      // 返 200 而不是 4xx/5xx：调用方（前端）要展示的是"为什么没分析成"，
+      // 而错误包装只会留下 message，kind 会丢 —— kind 才是"该去改 key
+      // 还是该去换模型"的依据。
+      return c.json({
+        ok: false,
+        skipped: r.skipped,
+        failure: r.failure
+          ? { kind: r.failure.kind, message: r.failure.message, retryable: r.failure.retryable }
+          : null,
+      });
+    }
+
+    return c.json({ ok: true, skipped: r.skipped, called: r.called, category: r.categorySlug });
+  });
+
   r.post('/entries/read', async (c) => {
     const uid = requireUserId(c);
     const body = await c.req.json().catch(() => ({})) as {

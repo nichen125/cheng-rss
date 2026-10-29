@@ -271,6 +271,16 @@ export function upsertItems(
         });
       } else {
         stats.extractSkipped++;
+        // feed 自带全文 → 不需要提取，直接进分析队列（PLAN §7.1 L1→L3）。
+        //
+        // 为什么这里也要排：extract 那个 handler 只在"真的提取过"的条目上
+        // 排分析，而自带全文的条目根本不会入队 extract —— 只在那一处排，
+        // 这类条目永远不会有分析结果，而那恰好是质量最好的那批。
+        enqueue(db, {
+          kind: 'analyze',
+          payload: { entryId: id },
+          dedupeKey: `analyze:${id}`,
+        });
       }
 
       // 摘要进 FTS（正文不进，见 §7.3）

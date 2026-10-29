@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { JobHandler } from './runner.ts';
 import { getFeed } from '../feeds/store.ts';
+import { enqueue } from './queue.ts';
 import type { AppContext } from '../app.ts';
 
 // 处理器注册表。
@@ -87,6 +88,64 @@ export function buildHandlers(ctx: HandlerContext): Record<string, JobHandler> {
     ctx.log?.(`extract 完成`, {
       entryId, replaced: r.replaced, skipped: r.skipped,
       failure: r.failure ?? undefined,
+    });
+
+    // 提取完立刻把分析排上（PLAN §7.1：L1 产出 → L3 消费）。
+    //
+    // 为什么在这里排而不是在 upsertItems 里同时排两个任务：
+    // 摘要型源的条目入库时正文只有几十个字，那个状态下分析出来的摘要
+    // 是照着导语编的。等提取落定再排，模型看到的就是最终正文。
+    // feed 自带全文的条目根本不会走到这里（它们在入库时就是 extracted），
+    // 那条路径由 upsertItems 直接排。
+    enqueue(db, {
+      kind: 'analyze',
+      payload: { entryId },
+      dedupeKey: `analyze:${entryId}`,
+    });
+  };
+
+  // ── 单篇分析（PLAN §8 / §19.4 2.2）──────────────────────
+  //
+  // 与 extract 的分工相同：这里只做调度与记账，真正的模型调用在
+  // ai/analyze.ts 里，验收脚本因此可以单独测它而不启动 HTTP 服务。
+  //
+  // 失败**抛错**而不是在内部吃掉 —— 与 extract 相反。原因是代价不同：
+  // 提取失败用户还有 feed 正文可读，分析失败这条条目就永远没有卡片。
+  // 3 次退避能挡住限流与瞬时 5xx。但 schema/no-key/empty 是例外：
+  // 它们再跑还是错，抛错只会白烧三次调用，所以要吃掉并落 failed。
+  handlers['analyze'] = async (job, db: DatabaseSync) => {
+    const p = safeParse(job.payload);
+    const entryId = String(p.entryId ?? '');
+    if (!entryId) throw new Error('analyze 缺少 entryId');
+    if (!ctx.app) throw new Error('analyze 需要 AppContext（仅 serve 模式可用）');
+
+    const { aiForUser, runtimeAiBase } = await import('../ai/service.ts');
+    const { runAnalyze } = await import('../ai/analyze.ts');
+
+    const row = db.prepare('SELECT user_id FROM entries WHERE id = ?').get(entryId) as
+      { user_id: string } | undefined;
+    if (!row) {
+      // 条目已删除：任务作废，不是失败
+      ctx.log?.('analyze: 条目已不存在，跳过', { entryId });
+      return;
+    }
+
+    const { client } = aiForUser(db, row.user_id, runtimeAiBase(ctx.app.cfg));
+    const r = await runAnalyze(db, client, entryId, { force: p.force === true });
+
+    if (!r.ok && !r.skipped) {
+      const kind = r.failure?.kind ?? 'network';
+      const terminal = kind === 'no-key' || kind === 'schema' || kind === 'bad-json'
+        || kind === 'empty' || kind === 'budget'
+        || r.failure?.retryable === false;
+      ctx.log?.(`analyze 失败`, { entryId, kind, message: r.failure?.message?.slice(0, 160) });
+      if (!terminal) throw new Error(`${kind}: ${r.failure?.message ?? '分析失败'}`);
+      return;
+    }
+
+    ctx.log?.(`analyze 完成`, {
+      entryId, skipped: r.skipped, called: r.called,
+      category: r.categorySlug ?? undefined,
     });
   };
 

@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 // 声明可选类型：源码模式下这两个标识符不存在，typeof 检查为 'undefined'。
 declare const __SQL_0001_INIT__: string | undefined;
 declare const __SQL_0002_DEDUPE_VECTORS__: string | undefined;
+declare const __SQL_0003_ANALYSIS_FINGERPRINT__: string | undefined;
 
 /**
  * 按文件名查内嵌 SQL。
@@ -27,6 +28,8 @@ function bundledSqlFor(name: string): string | null {
       return typeof __SQL_0001_INIT__ === 'string' ? __SQL_0001_INIT__ : null;
     case '0002_dedupe_vectors.sql':
       return typeof __SQL_0002_DEDUPE_VECTORS__ === 'string' ? __SQL_0002_DEDUPE_VECTORS__ : null;
+    case '0003_analysis_fingerprint.sql':
+      return typeof __SQL_0003_ANALYSIS_FINGERPRINT__ === 'string' ? __SQL_0003_ANALYSIS_FINGERPRINT__ : null;
     default:
       return null;
   }
@@ -69,9 +72,24 @@ function loadFromFs(name: string): string {
 export function loadMigrationSql(name: string): string {
   const bundled = bundledSqlFor(name);
   if (bundled !== null) return bundled;
-  if (name === '0001_init.sql' || name === '0002_dedupe_vectors.sql') {
-    // 源码模式：__SQL_*__ 常量不存在，直接读文件
+
+  // 源码模式：__SQL_*__ 常量不存在，直接读文件。
+  //
+  // 这里**不再维护一份文件名白名单**。早先写的是
+  //   if (name === '0001_init.sql' || name === '0002_...') return loadFromFs(name);
+  // 于是每加一个迁移都要同时改两处（这里的白名单 + migration-sql 顶部的
+  // switch），漏改哪一处都只在某个运行模式下炸。加 0003 时就是漏了这一处，
+  // 症状是源码模式报"未登记的迁移文件"，而文件明明在那儿。
+  //
+  // 判据改成"bundled 里没有就去磁盘上找"：打包模式下磁盘上没有 migrations
+  // 目录，loadFromFs 会带着完整的尝试路径抛错，那正是需要的诊断信息。
+  try {
     return loadFromFs(name);
+  } catch (e) {
+    throw new Error(
+      `迁移文件 ${name} 既没有内嵌进 bundle，也不在磁盘上。\n` +
+      `打包模式下要检查 scripts/build-server.mjs 是否把它注入了；\n` +
+      `${(e as Error).message}`,
+    );
   }
-  throw new Error(`未登记的迁移文件: ${name}`);
 }

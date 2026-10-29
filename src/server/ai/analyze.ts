@@ -6,6 +6,7 @@ import { ANALYZE_SYSTEM, BODY_CLIP, PROMPT_VERSION, buildAnalyzeUser } from './p
 import {
   FALLBACK_SLUG, categoryIdMap, ensureDefaultCategories, knownTopics, listCategories,
 } from './taxonomy.ts';
+import { normalizeCategorySlug, tierForImportance } from './classify.ts';
 import { unpackText } from '../db/text-blob.ts';
 import { indexEntry } from '../search/index.ts';
 import { htmlToText } from '../feeds/parse.ts';
@@ -165,10 +166,11 @@ export async function runAnalyze(
   }
 
   const a = r.data;
-  const categorySlug = a.category;
-  // 2.2 只做 slug → id 的查表：不认识就是 NULL。
-  // 「不认识 → 归 other」是 2.3 的行为（判据①），这里提前做掉会让 2.3 的
-  // 断言永远绿 —— 而那正是它存在的理由。
+  // 受控分类（§8.4）：模型自造的 slug 一律归 other，不允许它在库里
+  // 长出新分类。2.3 之前这里是"查表，查不到存 NULL" —— 那个 NULL 会让
+  // 一条有摘要却没有分类的条目在按分类筛选时彻底消失。
+  const rawCategory = a.category;
+  const categorySlug = normalizeCategorySlug(rawCategory, categories.map((c) => c.slug));
   const categoryId = idMap.get(categorySlug) ?? null;
 
   db.exec('BEGIN IMMEDIATE');
@@ -268,35 +270,9 @@ export function estimateReadingTime(text: string): number {
   return Math.max(1, Math.round(cjk / 400 + words / 230));
 }
 
-// ── tier 换算 ────────────────────────────────────────────────
-//
-// 放在这里（而不是 routes 或 UI）的理由：tier 是**写库时**派生出来的，
-// 存进 entry_analysis.tier 供列表筛选与索引使用。每次查询现算的话，
-// `WHERE tier = 'must_read'` 就用不上 idx_analysis_tier。
-
-export type Tier = 'must_read' | 'worth' | 'normal' | 'noise';
-
-/** 分级阈值。2.3 的判据②逐个断言 39/40/69/70/89/90 这六个数 */
-export const TIER_BOUNDS = {
-  mustRead: 90,
-  worth: 70,
-  normal: 40,
-} as const;
-
-/**
- * importance → tier。
- *
- * 边界选择：**左闭右开**，即 90 是 must_read、89 是 worth。
- * 为什么是左闭：提示词里写的是"90+ 行业格局变化"，用户照这个数打分，
- * 90 就该是 must_read；若写成 90 是 worth，提示词与实现就差一格，
- * 黄金测试集的对齐会在边界上反复打架。
- */
-export function tierForImportance(importance: number): Tier {
-  const v = Number.isFinite(importance) ? importance : 0;
-  if (v >= TIER_BOUNDS.mustRead) return 'must_read';
-  if (v >= TIER_BOUNDS.worth) return 'worth';
-  if (v >= TIER_BOUNDS.normal) return 'normal';
-  return 'noise';
-}
+// tier 换算与受控分类在 classify.ts（2.3）—— 那里是它们唯一的定义处。
+// 曾经复制过一份到这里，随即就出现了"两边夹取方式不同"的隐患
+// （一处 Number.isFinite(importance)，一处 Number.isFinite(Number(x))），
+// 所以只留一份。
 
 void FALLBACK_SLUG;

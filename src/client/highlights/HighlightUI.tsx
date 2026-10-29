@@ -48,6 +48,9 @@ export function HighlightList(props: {
   onDelete: (id: string) => void;
   onRecolor: (id: string, color: HighlightColor) => void;
   onSaveNote: (id: string, note: string) => void;
+  onInsight: (id: string) => void;
+  /** 正在解读哪一条；null = 空闲 */
+  insightBusy: string | null;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -76,6 +79,8 @@ export function HighlightList(props: {
               onDelete={() => props.onDelete(h.id)}
               onRecolor={(c) => props.onRecolor(h.id, c)}
               onSaveNote={(n) => props.onSaveNote(h.id, n)}
+              onInsight={() => props.onInsight(h.id)}
+              insightBusy={props.insightBusy === h.id}
             />
           ))}
         </ul>
@@ -99,6 +104,8 @@ export function HighlightList(props: {
                 onDelete={() => props.onDelete(h.id)}
                 onRecolor={(c) => props.onRecolor(h.id, c)}
                 onSaveNote={(n) => props.onSaveNote(h.id, n)}
+              onInsight={() => props.onInsight(h.id)}
+              insightBusy={props.insightBusy === h.id}
               />
             ))}
           </ul>
@@ -116,6 +123,8 @@ function HighlightCard(props: {
   onDelete: () => void;
   onRecolor: (c: HighlightColor) => void;
   onSaveNote: (note: string) => void;
+  onInsight: () => void;
+  insightBusy: boolean;
 }) {
   const { h } = props;
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -168,10 +177,28 @@ function HighlightCard(props: {
         </div>
       ) : (
         <>
+          {h.aiInsight && (
+            <div className="hl-insight">
+              <span className="hl-insight-tag">AI</span>
+              {h.aiInsight}
+            </div>
+          )}
           {h.note && <p className="hl-note">{h.note}</p>}
-          <button className="hl-edit-link" onClick={props.onEdit}>
-            {h.note ? '编辑批注' : '加批注'}
-          </button>
+          <div className="hl-actions">
+            <button className="hl-edit-link" onClick={props.onEdit}>
+              {h.note ? '编辑批注' : '加批注'}
+            </button>
+            {!h.aiInsight && !h.isOrphaned && (
+              <button
+                className="hl-edit-link"
+                onClick={props.onInsight}
+                disabled={props.insightBusy}
+                title="让 AI 解释这段话为什么值得注意"
+              >
+                {props.insightBusy ? '解读中…' : 'AI 解读'}
+              </button>
+            )}
+          </div>
         </>
       )}
     </li>

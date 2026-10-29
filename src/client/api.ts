@@ -440,6 +440,25 @@ export const api = {
   deleteHighlight: (id: string) =>
     request<{ ok: boolean }>(`/highlights/${id}`, { method: 'DELETE' }),
 
+  /**
+   * 单条 AI 解读（§11.4）。同步返回，可能等 1~3 秒。
+   *
+   * 失败时 **HTTP 仍是 200**，靠 ok 字段区分 —— 没配 key 不是「请求错了」，
+   * 前端该显示「去配 key」而不是红色报错。
+   */
+  highlightInsight: (id: string, force = false) =>
+    request<{
+      ok: boolean;
+      insight: string | null;
+      cached?: boolean;
+      costUsd?: number;
+      failureKind?: string;
+      message?: string;
+    }>(`/highlights/${id}/insight`, {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    }),
+
   stats: () => request<{
     entries: number;
     feeds: number;

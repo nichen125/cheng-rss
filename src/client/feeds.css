@@ -901,3 +901,38 @@
   text-transform: uppercase;
   color: var(--fg-faint);
 }
+
+/* AI 解读气泡（M4 / §11.4）。刻意与批注区分：左侧一条竖线 + 小 AI 标签，
+ * 不与用户自己写的批注混在一起 —— 混淆"我说的"和"模型说的"是最糟的体验。 */
+.hl-insight {
+  margin: 6px 0 0 14px;
+  padding: 6px 9px 7px;
+  border-left: 2px solid var(--accent);
+  background: var(--bg-hover);
+  border-radius: 0 6px 6px 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--fg-dim);
+}
+
+.hl-insight-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+}
+
+.hl-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 0 14px;
+}
+.hl-actions .hl-edit-link { margin: 0; }
+.hl-actions .hl-edit-link:disabled { opacity: 0.55; cursor: default; }

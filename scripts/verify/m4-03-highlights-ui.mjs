@@ -305,6 +305,19 @@ check('批注显示出来了', () => ok(/这条值得跟进/.test(String(afterEd
 check('改成绿色后 mark 的 class 跟着变', () =>
   ok(/hl-green/.test(String(afterEdit?.colorClass)), String(afterEdit?.colorClass)));
 
+// AI 解读按钮存在，且**没配 key 时的提示不是红色报错**
+//
+// 这里只验按钮接上了。解读本身要真模型，m4-04 用 mock 已覆盖；
+// 在这个无 key 的环境里调一次会很慢（要等超时），所以不调。
+const insightBtn = await evalJs(`(() => {
+  const btns = [...document.querySelectorAll('.reader-hl .hl-actions .hl-edit-link')];
+  return { labels: btns.map(b => b.textContent.trim()) };
+})()`);
+check('每条高亮都有「AI 解读」入口', () =>
+  ok(insightBtn?.labels?.includes('AI 解读'), JSON.stringify(insightBtn?.labels)));
+check('有批注的那条仍显示「编辑批注」（不是两个按钮合并）', () =>
+  ok(insightBtn?.labels?.includes('编辑批注'), JSON.stringify(insightBtn?.labels)));
+
 // 真正的往返：**刷新页面**，让服务端存的 posStart/posEnd 重新驱动一次渲染。
 //
 // 为什么不用"在页面里按 posStart 手动切一遍"来自检：那样切出来的文本

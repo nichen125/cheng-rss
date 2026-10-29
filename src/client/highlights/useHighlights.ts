@@ -175,6 +175,33 @@ export function useHighlights(
     try { await api.deleteHighlight(id); } catch { void reload(); }
   }, [reload]);
 
+  /** 正在解读哪一条；null = 空闲 */
+  const [insightBusy, setInsightBusy] = useState<string | null>(null);
+
+  /**
+   * 请求单条 AI 解读（§11.4）。
+   *
+   * 失败时只设置 err，不清空已有的 aiInsight —— 用户重算时如果失败，
+   * 上一次的解读还在，比整块消失要好。
+   */
+  const insight = useCallback(async (id: string) => {
+    setErr('');
+    setInsightBusy(id);
+    try {
+      const r = await api.highlightInsight(id);
+      if (r.ok && r.insight) {
+        setItems((xs) => xs.map((x) => (x.id === id ? { ...x, aiInsight: r.insight } : x)));
+      } else {
+        // 没配 key 不该显示成红色错误，它是个提示
+        setErr(r.message || 'AI 解读失败');
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'AI 解读失败');
+    } finally {
+      setInsightBusy(null);
+    }
+  }, []);
+
   /** 滚动到某条高亮。orphaned 的没有位置，滚不动 */
   const scrollTo = useCallback((id: string) => {
     const el = rootRef.current?.querySelector(`[data-highlight-id="${CSS.escape(id)}"]`);
@@ -182,7 +209,7 @@ export function useHighlights(
   }, []);
 
   return {
-    items, sel, err, rootRef, setErr, onSelectionEnd,
+    items, sel, err, rootRef, setErr, onSelectionEnd, insight, insightBusy,
     create, annotate, recolor, updateNote, remove, scrollTo, reload,
   };
 }

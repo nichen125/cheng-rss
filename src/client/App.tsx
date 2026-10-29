@@ -1947,6 +1947,8 @@ function Reader(props: {
               onDelete={(id) => void hl.remove(id)}
               onRecolor={(id, c) => void hl.recolor(id, c)}
               onSaveNote={(id, n) => void hl.updateNote(id, n)}
+              onInsight={(id) => void hl.insight(id)}
+              insightBusy={hl.insightBusy}
             />
           </section>
 

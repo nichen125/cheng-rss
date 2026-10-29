@@ -1250,6 +1250,78 @@ const EntryAnalysisSchema = z.object({
 | 幂等缓存 | 正文 hash 未变不重分析 | 视源重叠度 |
 | 预算闸门 | 累计超 `dailyUsd` → 降 `fast_only`，再超则暂停分析 | 防账单爆炸 |
 
+### 8.6 客户端实现与失败分类（v1.19 新增）
+
+**不引 `openai` SDK。** 本项目的 AI 依赖只有两个端点（`/chat/completions`、
+`/embeddings`），请求体是普通 JSON。SDK 会带进几十个传递依赖、它自己的重试与
+超时策略，以及一个要在 SEA 打包里额外处理的环境探测分支。一个 `fetch` 加一个
+zod schema 就能覆盖全部需要，而且失败点只剩我们自己写的那几处。
+
+**请求形状**
+
+```
+POST {baseURL}/chat/completions
+{ model, messages, temperature, max_tokens,
+  response_format?: { type:'json_schema', json_schema:{ name, schema, strict:true } }
+                  | { type:'json_object' } }
+```
+
+**结构化输出的降级链（§8.2 的落地版本）**
+
+| 级 | 条件 | 动作 |
+|---|---|---|
+| 1 | 默认 | `response_format = json_schema` |
+| 2 | 级 1 返回 4xx 且报文里提到 `response_format` / `schema` / `response format` | 记住该 baseURL 不支持，降 `json_object` |
+| 3 | 级 2 也 4xx | 降纯文本 + 提示词内嵌 schema |
+| 4 | 拿到文本 | 去 ```json 围栏 → `JSON.parse` |
+| 5 | zod `safeParse` 失败 | 把 issues 回灌，重试**一次** |
+| 6 | 二次失败 | 返回 `{ ok:false, kind:'schema' }`，由调用方决定是否进死信 |
+
+「记住不支持」是每个 `AiClient` 实例内的一个 `Set`，**不是持久化配置**：
+服务商升级后重启即重试，用户不需要去改一个他看不懂的开关。
+
+级 2 的判据必须看报文而不是只看状态码。实测部分网关对任何多余字段一律回
+`400 Bad Request`（不带原因）；若按"4xx 就降级"处理，一个真的写错的模型名
+也会被当成"不支持 json_schema"吞掉，然后拿去跑三次纯文本 —— 用户看到的是
+"模型输出格式总是不对"，而真正的原因在第一个 400 里。
+
+**重试的三层，各自的边界**
+
+| 层 | 触发 | 策略 |
+|---|---|---|
+| 传输层 | 连接失败 / 超时 / 429 / 5xx | client 内部退避重试 2 次（1s、3s），带 `Retry-After` 时优先用它 |
+| 结构层 | 文本不是合法 JSON，或 zod 校验失败 | 回灌 issues 重试 1 次 |
+| 其余 4xx | 401/403/404/422 | **不重试**。key 错、模型名错、参数错，重试只是把同一个错再买一次 |
+
+**为什么 schema 重试也必须记两条 `ai_usage`**
+
+回灌重试是**又一次真实计费的调用**。只记成功那一次，成本账会系统性地少算
+一整轮，而恰恰是"模型不听话"的那批条目最需要被看见。`ai_usage` 记的是
+**调用**，不是**条目**。
+
+**失败分类**（`AiFailure.kind`，写进 `stage_error` 与 `ai_usage.error`）
+
+```
+no-key        环境变量里没有 key（不算错误，是没配置）
+http-401      key 无效
+http-404      模型名/端点不存在
+http-429      限流（已重试过）
+http-5xx      服务端错误（已重试过）
+timeout       超时
+bad-json      拿到的文本不是 JSON
+schema        JSON 合法但缺字段/类型不对
+empty         模型返回空内容
+budget        预算闸门拦截（2.5）
+```
+
+**计费**：`pricing` 是「模型 → $/百万 token」的表，`pricing.default` 兜底。
+默认值是**示例价目**（写在配置文件注释里），用户应按自己的服务商核对。
+未知模型按 `default` 计而不是记 0 —— 记 0 会让预算闸门对着一个永远花不完的
+额度形同虚设，那是最坏的一种"看起来有保护"。
+
+**限流（`limits.rpm`）与预算闸门同在 2.5**：两者的失败表现相同（不发请求），
+放在两个步骤里实现会得到两套互不知道对方存在的闸门。
+
 ---
 
 ## 九、每日简报

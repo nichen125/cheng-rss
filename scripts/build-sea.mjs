@@ -131,11 +131,9 @@ try {
   }
   throw e;
 }
-// 注入底本是目标平台的 node（默认就是本机的）
-copyFileSync(baseBin, outPath);
-// 只有非 Windows 目标才需要可执行位
-if (!targetName.startsWith('win')) chmodSync(outPath, 0o755);
-
+// 注入底本是目标平台的 node（默认就是本机的）。
+// 复制放在下面的重试循环里做 —— 每次尝试都从干净的基础 node 开始，
+// 免得把上一次写了一半的文件再叠一次。
 const postject = join(root, 'node_modules', '.bin', platform === 'win32' ? 'postject.cmd' : 'postject');
 const FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
 
@@ -161,17 +159,81 @@ const NODE_FLAGS = ['--liftoff-only'];
 const postjectCli = join(root, 'node_modules', 'postject', 'dist', 'cli.js');
 const args = [postjectCli, outPath, 'NODE_SEA_BLOB', blobPath, '--sentinel-fuse', FUSE];
 
-if (existsSync(postjectCli)) {
-  execFileSync(nodeBin, [...NODE_FLAGS, ...args], { cwd: root, stdio: 'pipe' });
-} else if (existsSync(postject)) {
-  // 兜底：cli.js 不在（打包方式变了），退回 npm 的 .bin 入口
-  execFileSync(postject, args.slice(1), {
-    cwd: root, stdio: 'pipe', shell: platform === 'win32',
-  });
-} else {
-  console.log('未找到本地 postject，尝试 npx');
-  execFileSync('npx', ['--yes', 'postject', outPath, 'NODE_SEA_BLOB', blobPath,
-    '--sentinel-fuse', FUSE], { cwd: root, stdio: 'inherit', shell: platform === 'win32' });
+/**
+ * 注入，并**验证结果**。
+ *
+ * 为什么不能只看退出码 / 文件存在（这是踩过的真坑）：
+ * postject 的失败模式有三种，其中两种不会让脚本察觉 ——
+ *
+ *   · `Aborted()`      —— wasm 内部断言，退出码非 0（这个能察觉）
+ *   · `Array buffer allocation failed` —— 同上
+ *   · **注入到一半没写进去，进程却正常退出** —— outPath 存在（它是 copy
+ *     过来的基础 node），于是 `existsSync(outPath)` 为真，脚本报成功，
+ *     产出一个**没有 bundle 的裸 node**。它跑起来像 node，`version`
+ *     子命令直接报 "Cannot find module"。
+ *
+ * 根因是这台机器上 V8 拿不到连续地址空间（wasm 要 ~256MB 起，Emscripten
+ * 还会 grow）。所以这里做两件事：
+ *   1. 重试若干次（内存压力是波动的，同一命令隔几秒常常就能过）
+ *   2. **用 blob 内容做物理校验** —— 注入成功 = 文件里出现了 blob 的字节
+ *
+ * 校验取 blob 末尾的一段：SEA blob 是 JSON + payload，末尾必然存在且
+ * 不会被 postject 改写（它只插进文件，不改 blob 内容）。
+ */
+function injectedOk() {
+  if (!existsSync(outPath)) return false;
+  const blob = readFileSync(blobPath);
+  if (blob.length < 64) return false;
+  const probe = blob.subarray(blob.length - 48);
+  const out = readFileSync(outPath);
+  return out.includes(probe);
+}
+
+const INJECT_ATTEMPTS = 6;
+let lastErr = null;
+let injected = false;
+for (let i = 1; i <= INJECT_ATTEMPTS; i++) {
+  // 每次重试都从干净的基础 node 开始：上一次可能写了一半
+  copyFileSync(baseBin, outPath);
+  if (!targetName.startsWith('win')) chmodSync(outPath, 0o755);
+
+  try {
+    if (existsSync(postjectCli)) {
+      execFileSync(nodeBin, [...NODE_FLAGS, ...args], { cwd: root, stdio: 'pipe' });
+    } else if (existsSync(postject)) {
+      execFileSync(postject, args.slice(1), {
+        cwd: root, stdio: 'pipe', shell: platform === 'win32',
+      });
+    } else {
+      console.log('未找到本地 postject，尝试 npx');
+      execFileSync('npx', ['--yes', 'postject', outPath, 'NODE_SEA_BLOB', blobPath,
+        '--sentinel-fuse', FUSE], { cwd: root, stdio: 'inherit', shell: platform === 'win32' });
+    }
+  } catch (e) {
+    lastErr = e;
+  }
+
+  if (injectedOk()) { injected = true; break; }
+
+  if (i < INJECT_ATTEMPTS) {
+    console.log(`\u001b[33m!\u001b[0m 注入第 ${i} 次未成功，重试…`);
+    // 等一小会儿：失败多是内存压力，进程退出后会有短暂的喘息窗口
+    execFileSync(nodeBin, ['-e', 'setTimeout(()=>{}, 1500)'], { cwd: root, stdio: 'ignore' });
+  }
+}
+
+if (!injected) {
+  const detail = lastErr
+    ? (String(lastErr.stdout ?? '') + String(lastErr.stderr ?? '') + String(lastErr.message ?? '')).trim()
+    : '注入命令"成功"了，但产物里没有 blob 的字节';
+  fail(
+    `postject 注入失败（连试 ${INJECT_ATTEMPTS} 次）。\n` +
+    `产物 ${outName} 是**没有 bundle 的裸 node**，不能用。\n\n` +
+    `最常见的原因是这台机器可用内存/连续地址空间不足 —— postject 的 wasm\n` +
+    `注入器要一次性拿到 ~256MB 连续内存。实测：关掉一些大程序（浏览器、\n` +
+    `IDE）后重跑即可成功；重启后第一次构建几乎总能过。\n\n` +
+    `最后一次错误：\n${detail.split('\n').slice(0, 8).join('\n')}`,
+  );
 }
 
 if (!existsSync(outPath)) fail('二进制未生成');

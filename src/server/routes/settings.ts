@@ -88,5 +88,45 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
     return c.json({ ok: true });
   });
 
+  /**
+   * 简报配置（`digest_config`）。
+   *
+   * 与 AI 配置不同，这里**只需要两个键**：`at` 与 `enabled`。其余字段
+   * （推送方式、聚合范围）属于后续里程碑，写进库反而会在实现时被迫做兼容。
+   */
+  r.patch('/settings/digest', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+
+    const ALLOWED = new Set(['at', 'enabled', 'kind']);
+    const bad = Object.keys(body).filter((k) => !ALLOWED.has(k));
+    if (bad.length > 0) {
+      throw badRequest(`不认识的配置项: ${bad.join(', ')}。可改的是 ${[...ALLOWED].join(', ')}`);
+    }
+    if (body.at !== undefined && (typeof body.at !== 'string'
+      || !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.at))) {
+      throw badRequest('at 必须是 HH:MM（24 小时制，例如 08:00）');
+    }
+    if (body.enabled !== undefined && typeof body.enabled !== 'boolean') {
+      throw badRequest('enabled 必须是布尔值');
+    }
+
+    const row = ctx.dbh.db.prepare('SELECT digest_config FROM settings WHERE user_id = ?')
+      .get(uid) as { digest_config: string } | undefined;
+    let cur: Record<string, unknown> = {};
+    try {
+      const p = row?.digest_config ? JSON.parse(row.digest_config) : null;
+      if (p && typeof p === 'object') cur = p as Record<string, unknown>;
+    } catch { cur = {}; }
+
+    const next = { ...cur, ...body };
+    ctx.dbh.db.prepare(`
+      INSERT INTO settings (user_id, digest_config) VALUES (?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET digest_config = excluded.digest_config
+    `).run(uid, JSON.stringify(next));
+
+    return c.json({ ok: true });
+  });
+
   return r;
 }

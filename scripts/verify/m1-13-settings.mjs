@@ -387,14 +387,18 @@ check('分类覆盖 订阅/分组/账户 + AI/简报/备份', () => {
   const missing = want.filter((w) => !got.includes(w));
   return ok(missing.length === 0, `缺 ${JSON.stringify(missing)}，实际 ${JSON.stringify(got)}`);
 });
-// M2 落地后（2.5）「AI 分析」不再是占位分类 —— 它现在是真页面。
-// 这条断言随之改写：只剩 M3/M6 两个占位，且 AI 一栏**必须不再**带
-// 「待接入」标签。留着旧的"三个都标 M2/M3/M6"会让这条断言在 M2 完成后
-// 变成永久红 —— 而它不是发现了 bug，是文档里的里程碑过期了。
-check('M3/M6 两个分类仍标「待接入」，AI 分析已落地不再标', () => {
+// M2 落地后（2.5）「AI 分析」不再是占位分类，M3 落地后（3.4）「每日简报」
+// 也不是了。这条断言随之改写：只剩 M6 一个占位，且 AI/简报两栏**必须不再**
+// 带「待接入」标签。
+//
+// 留着旧的"三个都标 M2/M3/M6"会让这条断言在每个里程碑完成后变成永久红 ——
+// 而它不是发现了 bug，是文档里的里程碑过期了。这类断言该跟着里程碑一起走，
+// 否则它会训练人忽略红色。
+check('只剩 M6（备份与迁移）标「待接入」，AI 与简报都已落地', () => {
   const soon = Object.fromEntries(s1.nav.filter((n) => n.soon).map((n) => [n.label, n.soon]));
-  return ok(soon['每日简报'] === 'M3' && soon['备份与迁移'] === 'M6'
-    && soon['AI 分析'] === undefined,
+  return ok(soon['备份与迁移'] === 'M6'
+    && soon['AI 分析'] === undefined
+    && soon['每日简报'] === undefined,
     JSON.stringify(soon));
 });
 const clickedAi = await clickNavSection('AI 分析');

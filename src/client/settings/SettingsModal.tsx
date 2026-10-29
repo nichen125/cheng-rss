@@ -25,6 +25,7 @@ import { FeedsSection } from './FeedsSection.tsx';
 import { FoldersSection } from './FoldersSection.tsx';
 import { AccountSection } from './AccountSection.tsx';
 import { AiSection } from './AiSection.tsx';
+import { DigestSection } from './DigestSection.tsx';
 
 /** 分类 id。'feeds' / 'folders' / 'account' 已实现，其余是占位 */
 export type SettingsSection =
@@ -44,7 +45,7 @@ const SECTIONS: SecDef[] = [
   { key: 'folders', label: '分组', icon: <IconFolder size={16} /> },
   { key: 'account', label: '账户', icon: <IconSettings size={16} /> },
   { key: 'ai', label: 'AI 分析', icon: <IconSparkle size={16} /> },
-  { key: 'digest', label: '每日简报', icon: <IconClock size={16} />, soon: 'M3' },
+  { key: 'digest', label: '每日简报', icon: <IconClock size={16} /> },
   { key: 'backup', label: '备份与迁移', icon: <IconDatabase size={16} />, soon: 'M6' },
 ];
 
@@ -131,17 +132,7 @@ export function SettingsModal(props: {
               <AiSection />
             </SettingsPane>
             <SettingsPane active={props.section === 'digest'}>
-              <SoonSection
-                title="每日简报"
-                milestone="M3"
-                items={[
-                  '生成时间与推送方式（站内 / 邮件 / Webhook）',
-                  '聚合范围（全部未读 / 指定分组 / 指定分级）',
-                  '跨源冲突识别（同一事件的不同说法并列）',
-                  '历史简报的检索与回看',
-                ]}
-                note="简报需要先有 M2 的分类结果，否则只是把标题摞在一起。"
-              />
+              <DigestSection />
             </SettingsPane>
             <SettingsPane active={props.section === 'backup'}>
               <SoonSection

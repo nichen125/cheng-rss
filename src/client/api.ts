@@ -222,6 +222,32 @@ export interface FeedItem {
   folderName: string | null;
 }
 
+/** 简报摘要（列表用，不含 bodyMd） */
+export interface DigestSummary {
+  id: string;
+  title: string;
+  intro: string[];
+  periodStart: number;
+  periodEnd: number;
+  dayKey: number | null;
+  entryCount: number;
+  clusterCount: number;
+  model: string | null;
+  costUsd: number | null;
+  deliveredAt: number | null;
+  createdAt: number;
+}
+
+/** 简报引用的簇（正文里的 [1] [2] 对应它） */
+export interface DigestCluster {
+  id: string;
+  title: string;
+  summary: string | null;
+  entry_count: number;
+  source_count: number;
+  heat: number | null;
+}
+
 export interface FeedListResponse {
   items: FeedItem[];
   total: number;
@@ -396,6 +422,47 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
+
+  // ── 简报（M3）──────────────────────────────────────────
+  /** 只提交要改的字段：`{ at?: 'HH:MM', enabled?: boolean }` */
+  patchDigestConfig: (patch: { at?: string; enabled?: boolean; kind?: string }) =>
+    request<{ ok: boolean }>('/settings/digest', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  digestStatus: () => request<{
+    enabled: boolean;
+    at: string;
+    state: 'none' | 'generated' | 'skipped' | 'failed' | 'pending';
+    digestId: string | null;
+    skipReason: string | null;
+    attempts: number;
+    lastError: string | null;
+    nextAt: number;
+  }>('/digests/status'),
+
+  listDigests: (limit = 20) =>
+    request<{ items: DigestSummary[] }>(`/digests?limit=${limit}`),
+
+  /** `force=true` 时允许只有 1 个事件（用户可能就想看这一件事的综述） */
+  runDigest: (force = false) =>
+    request<{
+      ok: boolean;
+      digestId: string | null;
+      reason: string | null;
+      clusterCount: number;
+      entryCount: number;
+      costUsd: number;
+      invalidCites: number;
+      strippedUrls: number;
+    }>('/digests/run', {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    }),
+
+  getDigest: (id: string) =>
+    request<DigestSummary & { bodyMd: string; clusters: DigestCluster[] }>(`/digests/${id}`),
 
   // ── 订阅 ────────────────────────────────────────────────
   listFeeds: (params: { folderId?: string | null } = {}) => {

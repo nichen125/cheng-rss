@@ -238,6 +238,26 @@ export interface DigestSummary {
   createdAt: number;
 }
 
+/** 高亮的颜色：只有三种（§11.3 明确不做调色盘） */
+export type HighlightColor = 'yellow' | 'green' | 'blue';
+
+export interface HighlightItem {
+  id: string;
+  entryId: string;
+  quote: string;
+  prefix: string | null;
+  suffix: string | null;
+  posStart: number | null;
+  posEnd: number | null;
+  color: HighlightColor | null;
+  note: string | null;
+  aiInsight: string | null;
+  /** 原文已变化、无法定位。仍要在列表里显示（§11.1 不静默丢） */
+  isOrphaned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** 简报引用的簇（正文里的 [1] [2] 对应它） */
 export interface DigestCluster {
   id: string;
@@ -382,6 +402,44 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ progress }),
     }),
+
+  // ── 高亮（M4）──────────────────────────────────────────
+  listHighlights: (entryId: string) =>
+    request<{ items: HighlightItem[] }>(`/entries/${entryId}/highlights`),
+
+  /** 全局列表（跨条目）。cursor 是上一页最后一条的 createdAt */
+  allHighlights: (params: { limit?: number; cursor?: string | null; color?: string | null } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.cursor) sp.set('cursor', params.cursor);
+    if (params.color) sp.set('color', params.color);
+    const qs = sp.toString();
+    return request<{ items: (HighlightItem & { entryTitle: string; sourceName: string })[]; nextCursor: string | null }>(
+      '/highlights' + (qs ? '?' + qs : ''),
+    );
+  },
+
+  // 可以用 start/end（浏览器里的精确选区），也可以只给 quote（服务端搜）。
+  // 两个都给时服务端会校验偏移与 quote 是否一致 —— 不一致说明前端拿的是
+  // 旧正文，它会按 quote 重算。
+  createHighlight: (input: {
+    entryId: string; start?: number; end?: number; quote?: string;
+    color?: HighlightColor; note?: string;
+  }) => request<HighlightItem>('/highlights', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }),
+
+  /** 只传要改的字段。`note: ''` 是"清空"，不是"没传" */
+  patchHighlight: (id: string, patch: { color?: HighlightColor; note?: string }) =>
+    request<HighlightItem>(`/highlights/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  deleteHighlight: (id: string) =>
+    request<{ ok: boolean }>(`/highlights/${id}`, { method: 'DELETE' }),
+
   stats: () => request<{
     entries: number;
     feeds: number;

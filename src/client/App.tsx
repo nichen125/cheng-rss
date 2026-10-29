@@ -8,6 +8,8 @@ import {
   IconClock, IconClose, IconExternal, IconFolder, IconInbox, IconMenu, IconRefresh, IconRss,
   IconSearch, IconSettings, IconSparkle, IconStar,
 } from './icons.tsx';
+import { useHighlights } from './highlights/useHighlights.ts';
+import { HighlightToolbar, HighlightList } from './highlights/HighlightUI.tsx';
 import { SettingsModal, type SettingsSection } from './settings/SettingsModal.tsx';
 import {
   applyPrefs, DEFAULT_PREFS, FONT_SIZES, loadPrefs, savePrefs,
@@ -1604,6 +1606,10 @@ function Reader(props: {
   /** 当前所在的小节 id —— 滚动时更新，目录里对应项高亮 */
   const [tocActive, setTocActive] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  // 划词高亮（§11.3）。rootRef 复用 bodyRef —— 阅读区已经有一个正文容器的
+  // ref，再挂一个只会让两处各自失效时互相不知道。
+  const hl = useHighlights(detail?.id ?? null, detail?.contentHtml ?? null, bodyRef);
   /** 「舞台」：包住纸与目录的那层，用来量右侧还剩多少空白 */
   const stageRef = useRef<HTMLDivElement>(null);
 
@@ -1898,6 +1904,11 @@ function Reader(props: {
             <div
               className="article-body"
               ref={bodyRef}
+              // 划词结束（松手/抬键）时算选区。用声明式事件而不是
+              // addEventListener：后者在某次渲染 ref 为 null 时会静默漏挂，
+              // 表现是"划词没反应"且毫无报错（见 useHighlights 里的注释）。
+              onMouseUp={hl.onSelectionEnd}
+              onKeyUp={hl.onSelectionEnd}
               // 正文来自我们自己抓取并清洗的 HTML（sanitize.ts 白名单 + 链接新标签）
               dangerouslySetInnerHTML={{ __html: detail.contentHtml }}
             />
@@ -1907,6 +1918,37 @@ function Reader(props: {
               <a href={detail.url} target="_blank" rel="noreferrer">去原文阅读 ↗</a>
             </div>
           )}
+
+          {/* 划词工具条（§11.3）。绝对定位在纸内，坐标由选区算出 */}
+          {hl.sel && (
+            <HighlightToolbar
+              x={hl.sel.x}
+              y={hl.sel.y}
+              onPick={(c) => void hl.create(c)}
+              onAnnotate={() => {
+                const t = window.prompt('这条为什么重要？');
+                if (t !== null) void hl.annotate(t);
+              }}
+            />
+          )}
+          {hl.err && <div className="alert error inset">{hl.err}</div>}
+
+          {/* 本文高亮（§11.3）。放在正文之后而不是侧栏第二列：
+              侧栏已经有了目录与 AI 卡片，再加一栏会把正文挤窄。 */}
+          <section className="reader-hl">
+            <h3 className="reader-hl-head">
+              高亮
+              {hl.items.filter((x) => !x.isOrphaned).length > 0
+                && <span className="muted"> {hl.items.filter((x) => !x.isOrphaned).length}</span>}
+            </h3>
+            <HighlightList
+              items={hl.items}
+              onScrollTo={hl.scrollTo}
+              onDelete={(id) => void hl.remove(id)}
+              onRecolor={(id, c) => void hl.recolor(id, c)}
+              onSaveNote={(id, n) => void hl.updateNote(id, n)}
+            />
+          </section>
 
           {/* 文末出口：读完之后最常见的两个动作 */}
           <div className="reader-foot">

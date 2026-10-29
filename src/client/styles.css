@@ -886,6 +886,9 @@ input::placeholder { color: var(--fg-faint); }
      的一块死空间，而 .reader-bar 与正文本身已经有分隔感，不需要再垫。
      底部 120px 是"滚到底还能再往上带一点"的余量，88 足够。 */
   padding: 24px 28px 88px;
+  /* 划词工具条是 .reader 内的绝对定位元素（§11.3）。没有 position:relative
+     的话它会相对最近的定位祖先——通常是最外层 shell——定位，坐标全错。 */
+  position: relative;
   background: var(--paper-bg);
   border: 1px solid var(--paper-line);
   border-radius: var(--radius-lg);

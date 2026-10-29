@@ -696,3 +696,208 @@
   outline: none;
   border-color: var(--accent);
 }
+
+/* ── 划词高亮（M4 / §11.3）──────────────────────────────────
+ *
+ * 三色是刻意限制的：§11.3 明确"不做调色盘 —— 选择过载会让人不用"。
+ * 高亮底色用半透明，压在正文上时不改变文字对比度（对比度是阅读器
+ * 第一优先，见 §15.x 的三个阅读主题）。
+ */
+
+.article-body mark.hl {
+  background: rgba(250, 204, 21, 0.38);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+  cursor: pointer;
+}
+
+.article-body mark.hl-green { background: rgba(74, 222, 128, 0.32); }
+.article-body mark.hl-blue { background: rgba(96, 165, 250, 0.32); }
+
+/* 深色主题下提高不透明度：同一份半透明黄压在深底上几乎看不见 */
+[data-theme="dark"] .article-body mark.hl { background: rgba(250, 204, 21, 0.28); }
+[data-theme="dark"] .article-body mark.hl-green { background: rgba(74, 222, 128, 0.24); }
+[data-theme="dark"] .article-body mark.hl-blue { background: rgba(96, 165, 250, 0.26); }
+
+/* 工具条：相对 .reader（纸）绝对定位，坐标由选区算出。
+ * translate(-50%, -100%) 让它底边贴住选区上沿 —— 位置数值不用管宽度。 */
+.hl-toolbar {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  z-index: 30;
+  user-select: none;
+}
+
+.hl-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s ease;
+}
+.hl-swatch:hover { transform: scale(1.12); }
+.hl-swatch.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.hl-swatch-yellow { background: #facc15; }
+.hl-swatch-green { background: #4ade80; }
+.hl-swatch-blue { background: #60a5fa; }
+
+.hl-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+.hl-action {
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 12px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.hl-action:hover { background: var(--bg-hover); color: var(--fg); }
+
+/* ── 高亮列表（阅读页侧栏段）───────────────────────────── */
+.hl-list { display: flex; flex-direction: column; gap: 10px; }
+
+.hl-group {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hl-card {
+  border-left: 2px solid var(--border);
+  padding: 2px 0 2px 10px;
+}
+
+.hl-card.is-orphaned { opacity: 0.62; border-left-color: var(--fg-faint); }
+
+.hl-quote {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  padding: 0;
+  cursor: pointer;
+}
+.hl-quote:disabled { cursor: default; }
+.hl-quote:hover:not(:disabled) .hl-quote-text { color: var(--accent); }
+
+.hl-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  margin-top: 7px;
+  flex-shrink: 0;
+}
+.hl-dot-yellow { background: #facc15; }
+.hl-dot-green { background: #4ade80; }
+.hl-dot-blue { background: #60a5fa; }
+
+.hl-quote-text {
+  min-width: 0;
+  /* 两行截断：高亮原文可能是一整段，全展开会把侧栏撑爆 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hl-note {
+  margin: 5px 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+}
+
+.hl-edit-link {
+  margin: 4px 0 0 14px;
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 0;
+  cursor: pointer;
+}
+.hl-edit-link:hover { color: var(--accent); }
+
+.hl-edit { margin: 6px 0 0 14px; }
+.hl-edit textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding: 6px 8px;
+}
+.hl-edit textarea:focus { outline: none; border-color: var(--accent); }
+
+.hl-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.hl-edit-actions .spacer { flex: 1; }
+
+.hl-orphan-head {
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  margin: 4px 0 2px;
+}
+
+.hl-empty {
+  font-size: 12.5px;
+  color: var(--fg-faint);
+  line-height: 1.6;
+}
+
+/* 阅读页的高亮段（M4）。与正文同宽、同一张纸内，不做第二列 ——
+ * 侧栏已经有目录与 AI 卡片。 */
+.reader-hl {
+  margin-top: 34px;
+  padding-top: 20px;
+  border-top: 1px solid var(--paper-line);
+}
+
+.reader-hl-head {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}

@@ -24,6 +24,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
+import { launchBrowser } from '../lib/cdp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -260,13 +261,15 @@ if (!browserPath) {
   process.exit(0);
 }
 
+// 端口交给浏览器自己挑（--remote-debugging-port=0），不写死区间。
+//
+// 原来写的是 `10000 + random(80)`：它与系统的保留/临时端口段撞上时，
+// Chrome 会**静默退出**，脚本报「CDP 没起来」，而重跑一次又好了。
+// 全量跑 47 个脚本时这种"1% 概率"变成"几乎每次总有一个红" ——
+// 本机实测在 m1-23 上出现过，重试机制掩盖了它一次。
 const profile = mkdtempSync(join(tmpdir(), 'ai-rss-markall-prof-'));
-const cdpPort = 10000 + Math.floor(Math.random() * 80);
-const proc = spawn(browserPath, [
-  '--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`,
-  '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--hide-scrollbars',
-  '--window-size=1440,950', 'about:blank',
-], { stdio: 'ignore' });
+const launched = await launchBrowser({ profile, width: 1440, height: 950 });
+const proc = launched.proc;
 
 const killBrowser = () => {
   killTree(proc.pid);
@@ -274,21 +277,13 @@ const killBrowser = () => {
 };
 onExit(() => { killBrowser(); cleanup(); });
 
-let target = null;
-for (let i = 0; i < 80; i++) {
-  try {
-    const list = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json();
-    target = list.find((t) => t.type === 'page');
-    if (target?.webSocketDebuggerUrl) break;
-  } catch { /* not yet */ }
-  await sleep(250);
-}
-if (!target?.webSocketDebuggerUrl) {
+if (!launched.wsUrl) {
   check('浏览器调试端口可用', () => ok(false, 'CDP 没起来'));
   summary('m1-23-mark-scope-read');
   cleanup();
   process.exit(1);
 }
+const target = { webSocketDebuggerUrl: launched.wsUrl };
 
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise((res, rej) => {

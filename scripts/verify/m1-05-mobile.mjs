@@ -207,6 +207,7 @@ const shell = await evaluate(`(() => {
     tabbar: box('.tabbar'),
     tabCount: tabs.length,
     tabLabels: tabs.map((t) => t.querySelector('.tab-label')?.textContent ?? ''),
+    tabWidths: tabs.map((t) => Math.round(t.getBoundingClientRect().width)),
     vw: window.innerWidth,
     vh: window.innerHeight,
     docScrollW: document.documentElement.scrollWidth,
@@ -217,14 +218,27 @@ check('手机上侧栏不可见', () => {
   return ok(!shell.sidebar || shell.sidebar.w === 0, JSON.stringify(shell.sidebar));
 });
 check('底部 tab bar 可见', () => ok(shell.tabbar && shell.tabbar.h > 40, JSON.stringify(shell.tabbar)));
-check('tab bar 有 5 个入口', () => ok(shell.tabCount === 5, `实际 ${shell.tabCount}: ${JSON.stringify(shell.tabLabels)}`));
-check('tab 覆盖收件箱/未读/收藏/历史/配置', () => {
+// v1.24：5 → 6。简报页（§15.4）上线后成为一等入口，桌面侧栏与移动端
+// tab 都要有。390px 宽下 6 格每格约 65px，仍高于 44px 触摸下限；
+// 真正的约束是**高度**不是宽度（见 §15.7 的表）。
+check('tab bar 有 6 个入口', () => ok(shell.tabCount === 6, `实际 ${shell.tabCount}: ${JSON.stringify(shell.tabLabels)}`));
+check('tab 覆盖收件箱/未读/收藏/历史/简报/配置', () => {
   // v1.13：第 5 格从「订阅」改名「配置」—— 它打开的是整个配置弹窗
   // （订阅/分组/账户），订阅管理只是其中一分类。名字得对上行为。
-  const want = ['收件箱', '未读', '已收藏', '历史', '配置'];
+  // v1.24：加入「简报」—— 它是每天的入口，藏进二级菜单等于没有。
+  const want = ['收件箱', '未读', '已收藏', '历史', '简报', '配置'];
   const missing = want.filter((w) => !shell.tabLabels.includes(w));
   return ok(missing.length === 0, `缺 ${JSON.stringify(missing)}，实际 ${JSON.stringify(shell.tabLabels)}`);
 });
+// 6 格之后每格更窄 —— 断言它们仍然过 44px 的触摸下限。
+// 不加这条的话"加了第 6 格把每格挤到 60px 以下"不会被发现，
+// 而那是加格子的主要风险。
+check('6 格之后每个 tab 仍 ≥44px 宽', () => {
+  const narrow = (shell.tabLabels ?? []).length;
+  return ok((shell.tabWidths ?? []).every((w) => w >= 44),
+    `${narrow} 格，宽度 ${JSON.stringify(shell.tabWidths)}`);
+});
+
 check('tab bar 在最底部', () => {
   return ok(shell.tabbar && Math.abs(shell.tabbar.y + shell.tabbar.h - shell.vh) <= 40,
     `tabbar 底 = ${shell.tabbar ? shell.tabbar.y + shell.tabbar.h : '?'}, 视口高 = ${shell.vh}`);

@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { AiClient, resolveAiConfig, type AiConfig } from './client.ts';
 import { recordUsage } from './usage.ts';
 import { budgetGuard, budgetState, type BudgetState } from './budget.ts';
+import { keyFingerprint, maskKey, resolveKey, type KeySource } from './secrets.ts';
 import type { RuntimeConfig } from '../config.ts';
 
 // 每用户的 AI 客户端装配（PLAN §8.1）。
@@ -27,6 +28,12 @@ export interface RuntimeAiBase {
   apiKeyEnv?: string;
   models?: { fast?: string; strong?: string; embed?: string };
   budget?: { dailyUsd?: number; monthlyUsd?: number };
+  /**
+   * 数据目录。**v2.0 起必须传**：key 现在可能来自 `data/secrets.json`（§8.8），
+   * 而 secrets 是按数据目录放的。不传的后果是"界面上填了 key 但不生效"，
+   * 而那种症状与缓存问题几乎无法区分。
+   */
+  dataDir?: string;
 }
 
 export function runtimeAiBase(cfg: RuntimeConfig): RuntimeAiBase {
@@ -35,6 +42,7 @@ export function runtimeAiBase(cfg: RuntimeConfig): RuntimeAiBase {
     apiKeyEnv: cfg.ai.apiKeyEnv,
     models: cfg.ai.models,
     budget: cfg.ai.budget,
+    dataDir: cfg.dataDir,
   };
 }
 
@@ -130,8 +138,12 @@ export function readAiConfigRaw(db: DatabaseSync, userId: string): Record<string
 export interface AiForUser {
   client: AiClient;
   config: AiConfig;
-  /** 环境变量里到底有没有 key —— UI 要据此提示"去配 key" */
+  /** 有没有可用的 key（文件或环境变量）—— UI 要据此提示"去配 key" */
   hasKey: boolean;
+  /** key 从哪来（§8.8）：界面上填的文件 / 部署期环境变量 / 都没有 */
+  keySource: KeySource;
+  /** 掩码后的 key，供设置页显示"当前用的是哪个"。绝不回显完整 key */
+  keyMasked: string | null;
   /** 配置来自哪一层，供 /stats 与设置页显示（"我现在到底连的是哪儿"） */
   source: 'settings' | 'deployed';
 }
@@ -144,14 +156,24 @@ export function aiForUser(
   const raw = readAiConfigRaw(db, userId);
   const config = composeAiConfig(base, raw);
   const source: AiForUser['source'] = Object.keys(raw).length > 0 ? 'settings' : 'deployed';
-  const key = `${userId}|${JSON.stringify(config)}`;
+
+  // key 的解析放在这里而不是各调用点（§8.8）：调用点有六处，
+  // 任何一处自己决定"从哪儿读 key"就会有一条路径读不到界面上填的那个。
+  const resolved = base?.dataDir
+    ? resolveKey(base.dataDir, config.apiKeyEnv)
+    : { key: (process.env[config.apiKeyEnv] ?? '').trim() || null, source: 'env' as KeySource };
+
+  // 缓存键必须含 key 的指纹：用户在界面上换了 key、但 baseURL 与模型都没动时，
+  // 不含指纹的缓存会继续用旧客户端，症状是"换了 key 还是 401"。
+  const key = `${userId}|${JSON.stringify(config)}|${keyFingerprint(resolved.key)}`;
 
   let client = cache.get(key);
   if (!client) {
     client = new AiClient({
       config,
-      // apiKey 传 undefined = 从 config.apiKeyEnv 指定的环境变量读。
-      // 这里绝不能从 settings 里取 —— 那会把明文 key 写进数据库与备份。
+      // 显式传 key（而不是让它自己读环境变量）：这样文件里的 key 才生效，
+      // 且"文件优先于环境变量"这条规则只有一个实现点（secrets.ts）。
+      apiKey: resolved.key,
       onUsage: (u) => {
         try {
           recordUsage(db, { ...u, userId });
@@ -171,7 +193,13 @@ export function aiForUser(
     }
   }
 
-  return { client, config, hasKey: client.hasKey(), source };
+  return {
+    client, config,
+    hasKey: client.hasKey(),
+    keySource: resolved.key ? resolved.source : 'none',
+    keyMasked: maskKey(resolved.key),
+    source,
+  };
 }
 
 /**

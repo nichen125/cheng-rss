@@ -14,6 +14,9 @@ import { sweepDueFeeds } from './server/routes/feeds.ts';
 import { ensureOwnerUser, countUsers, purgeExpiredSessions } from './server/auth/session.ts';
 import { pruneOldVectors } from './server/dedupe/index.ts';
 import { countOrphanPending, enqueueOrphanExtracts } from './server/extract/backfill.ts';
+import { countOrphanAnalyze, enqueueOrphanAnalyze } from './server/ai/backfill.ts';
+import { logMissingKeyBanner } from './server/ai/notice.ts';
+import { resolveKey } from './server/ai/secrets.ts';
 import { digestDue, parseDigestConfig } from './server/digest/schedule.ts';
 import { enqueue } from './server/jobs/queue.ts';
 import { listUsersForDigest } from './server/digest/users.ts';
@@ -371,6 +374,59 @@ async function cmdServe(args: Args): Promise<void> {
   firstBackfill.unref?.();
   const backfillTimer = setInterval(backfill, 5 * 60_000);
   backfillTimer.unref?.();
+
+  // 补录孤儿**分析**任务（PLAN §5.7 P2，v2.0）。
+  //
+  // 与上面的提取补录同构，但修的是另一种脱钩：没配 key 的那段时间里，
+  // 每篇的 analyze 都拿到 `no-key`，而 `runAnalyze` **刻意不改 stage**
+  // （§8.6：全局配置问题不该把整库打成 failed），handler 又把它当 terminal
+  // 吃掉 —— 于是任务 done、库里没有分析行、条目停在 extracted，
+  // **再也没有任何东西会把它重新排队**。
+  //
+  // 实测本机库：745 条 extracted、4 条有分析（且是 seed 造的老数据）。
+  // 「填上 key 之后什么都不发生」就是这条缺陷的用户可见形态。
+  //
+  // **没 key 时整个跳过，这不只是省事，是省资源**：每篇 analyze 在拿到
+  // no-key 之前已经 loadAnalyzeInput 解包了正文 BLOB。745 条 × 每 5 分钟
+  // 一次 = 每天 21 万次无意义的解包，而结果必然还是 no-key。
+  // 跳过之后稳态成本只剩一条 key 检查；key 一出现，下一轮立刻开始补录。
+  const hasUsableKey = (): boolean => {
+    try {
+      return resolveKey(cfg.dataDir, cfg.ai.apiKeyEnv).key !== null;
+    } catch {
+      // 读不出就让补录继续：宁可多花点资源，也不要因为一次 IO 异常
+      // 让积压永远不收敛（那是用户看得见的"没有摘要"）。
+      return true;
+    }
+  };
+
+  const analyzeBackfill = () => {
+    if (!hasUsableKey()) return;
+    try {
+      const n = enqueueOrphanAnalyze(h.db);
+      const left = countOrphanAnalyze(h.db);
+      if (n > 0) log.info(`补录 ${n} 条待分析条目`, { remaining: left });
+    } catch (e) {
+      log.warn('补录待分析条目失败', { err: (e as Error).message });
+    }
+  };
+  const firstAnalyzeBackfill = setTimeout(analyzeBackfill, 20_000);
+  firstAnalyzeBackfill.unref?.();
+  const analyzeBackfillTimer = setInterval(analyzeBackfill, 5 * 60_000);
+  analyzeBackfillTimer.unref?.();
+
+  // 启动横幅（§8.8）：没配 key 时说**一次**「N 篇待分析 + 去哪儿填」。
+  //
+  // 这一条替代了原本 745 行逐条 `analyze 失败`。它的信息量更大：
+  // 有数量、有出口、而且不会把别的错误埋掉。
+  if (!hasUsableKey()) {
+    const pending = (() => {
+      try { return countOrphanAnalyze(h.db); } catch { return 0; }
+    })();
+    if (pending > 0) {
+      setTimeout(() => logMissingKeyBanner(pending), 2_000).unref?.();
+    }
+  }
 
   // 每日维护：清掉过期的去重向量（PLAN §7.1 L2）。
   //

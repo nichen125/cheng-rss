@@ -70,6 +70,16 @@ if (!linuxNode && !skipDocker) {
 const results = [];
 const t0 = Date.now();
 
+// 单个脚本的硬超时。
+//
+// 起因是一次实测的挂死：m1-26 在 `Page.reload` 之后紧接 `Runtime.evaluate`，
+// 那条应答因为执行上下文被换掉而**永远不来**，Promise 一直 pending ——
+// 于是整个串行验收停在那个脚本上，「跑了 20 分钟没有输出」看起来像机器卡了。
+// 根因已在 `scripts/lib/cdp.mjs` 里修掉（每条 CDP 命令带超时），
+// 但这里还要一道兜底：**任何**脚本将来以别的方式挂住，都不该让整套验收
+// 变成静默的不返回。10 分钟够最慢的 m0-08（三路部署）跑完。
+const SCRIPT_TIMEOUT_MS = 10 * 60 * 1000;
+
 for (const f of files) {
   process.stdout.write(`\n\u001b[1m▶ ${f}\u001b[0m\n`);
   const started = Date.now();
@@ -88,12 +98,21 @@ for (const f of files) {
       execFileSync(nodeBin, [join(verifyDir, f)], {
         cwd: root,
         stdio: attempts === 1 ? 'inherit' : 'pipe',
+        timeout: SCRIPT_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
         env: { ...process.env, ...(linuxNode ? { AI_RSS_TEST_LINUX_NODE: linuxNode } : {}) },
       });
       ok = true;
-    } catch {
+    } catch (e) {
       ok = false;
-      if (attempts < maxAttempts) {
+      // 超时要说出来。静默地把"挂死"记成一个普通 FAIL，
+      // 下一个人会去翻断言，而那里什么都没有。
+      if (e && (e.killed === true || e.signal === 'SIGKILL')) {
+        process.stdout.write(
+          `  \u001b[33m超时 ${(SCRIPT_TIMEOUT_MS / 1000).toFixed(0)}s 被强杀`
+          + '（检查这个脚本是否卡在某个永不返回的调用上）\u001b[0m\n',
+        );
+      } else if (attempts < maxAttempts) {
         process.stdout.write(`  \u001b[33m重试一次（可能是环境抖动）\u001b[0m\n`);
       }
     }

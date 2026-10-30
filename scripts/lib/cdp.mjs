@@ -90,6 +90,15 @@ export async function launchBrowser(opts = {}) {
  *
  * `send(method, params)` 返回 Promise；`evaluate(expr)` 直接拿到值
  * （走了 `returnByValue` + `awaitPromise`）。
+ *
+ * **每个命令都带超时**。这不是防御性编程，是修一个实测过的挂死：
+ * `Page.reload` 之后紧接着 `Runtime.evaluate` 时，被测页面正在换掉执行
+ * 上下文，那条 evaluate 的应答**有时永远不来** —— 没有超时的话
+ * Promise 永远 pending，整个脚本（以及串行跑它的 verify-all）就挂死。
+ * 第一次遇到时它是"全量验收跑了 20 分钟没有输出"，看起来像机器卡了。
+ *
+ * 超时抛的是普通 Error，调用方原本就写的是 `.catch(() => false)`，
+ * 于是"页面还没就绪"这条正常路径自动成立。
  */
 export async function connectCdp(wsUrl) {
   const ws = new WebSocket(wsUrl);
@@ -103,22 +112,43 @@ export async function connectCdp(wsUrl) {
   ws.addEventListener('message', (e) => {
     const msg = JSON.parse(String(e.data));
     if (msg.id && pending.has(msg.id)) {
-      const { res, rej } = pending.get(msg.id);
+      const { res, rej, timer } = pending.get(msg.id);
       pending.delete(msg.id);
+      if (timer) clearTimeout(timer);
       msg.error ? rej(new Error(msg.error.message)) : res(msg.result);
     }
   });
-
-  const send = (method, params = {}) => new Promise((res, rej) => {
-    const id = ++seq;
-    pending.set(id, { res, rej });
-    ws.send(JSON.stringify({ id, method, params }));
+  // 连接断了要立刻让所有在等的命令失败，而不是等各自的超时
+  ws.addEventListener('close', () => {
+    for (const [, v] of pending) {
+      if (v.timer) clearTimeout(v.timer);
+      v.rej(new Error('CDP 连接已关闭'));
+    }
+    pending.clear();
   });
 
-  const evaluate = async (expr) => {
+  const send = (method, params = {}, timeoutMs = 15_000) => new Promise((res, rej) => {
+    const id = ++seq;
+    const timer = setTimeout(() => {
+      if (!pending.has(id)) return;
+      pending.delete(id);
+      // 措辞里带上方法名：挂死时能一眼看出卡在哪条命令上
+      rej(new Error(`CDP 超时 ${timeoutMs}ms：${method}`));
+    }, timeoutMs);
+    pending.set(id, { res, rej, timer });
+    try {
+      ws.send(JSON.stringify({ id, method, params }));
+    } catch (e) {
+      clearTimeout(timer);
+      pending.delete(id);
+      rej(e instanceof Error ? e : new Error(String(e)));
+    }
+  });
+
+  const evaluate = async (expr, timeoutMs = 10_000) => {
     const r = await send('Runtime.evaluate', {
       expression: expr, returnByValue: true, awaitPromise: true,
-    });
+    }, timeoutMs);
     if (r.exceptionDetails) {
       throw new Error(String(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text));
     }

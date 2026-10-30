@@ -438,6 +438,74 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     return c.json({ ok: true, skipped: r.skipped, called: r.called, category: r.categorySlug });
   });
 
+  // ── 单篇总结（PLAN §8.9 / §19.4 2.7，v2.0）─────────────
+  //
+  // 与上面的 /analyze 是两件事（§8.9 开头那张对照表）：
+  //   analyze 是入库自动排队、提示词固定、输出结构化 JSON
+  //   summary 是用户点按钮、提示词可编辑、输出自由 Markdown
+  //
+  // 同步返回而不是入队：与 /analyze 同理由 —— 用户点一下等 5 秒，
+  // 比"排队了但不知道什么时候好"更符合预期。
+  //
+  // 缓存按**提示词指纹**（summary.ts 的 promptFingerprint）。于是
+  // 「提示词没改再点一次」是 0 次请求，而「改了提示词」会另存一条，
+  // 旧的不删（用户可能改回来 —— 那时原指纹立刻命中）。
+  r.post('/entries/:id/summary', async (c) => {
+    const uid = requireUserId(c);
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+
+    const row = ctx.dbh.db.prepare('SELECT id FROM entries WHERE id = ? AND user_id = ?')
+      .get(id, uid) as { id: string } | undefined;
+    if (!row) throw notFound('条目不存在');
+
+    const { aiForUser, readAiConfigRaw, runtimeAiBase } = await import('../ai/service.ts');
+    const { runSummary, summaryPromptState } = await import('../ai/summary.ts');
+
+    const raw = readAiConfigRaw(ctx.dbh.db, uid);
+    const tpl = summaryPromptState(raw).effective;
+    const { client } = aiForUser(ctx.dbh.db, uid, runtimeAiBase(ctx.cfg));
+
+    const r = await runSummary(ctx.dbh.db, client, id, uid, tpl, { force: body.force === true });
+
+    // 失败也返 200（与 /analyze 一致）：前端要展示的是"为什么没总结成"，
+    // 而错误包装只会留下 message，kind 会丢 —— kind 才是"去填 key 还是
+    // 换模型"的依据。
+    return c.json({
+      ok: r.ok,
+      cached: r.cached,
+      summary: r.body,
+      promptFp: r.promptFp,
+      failure: r.failure
+        ? { kind: r.failure.kind, message: r.failure.message, retryable: r.failure.retryable }
+        : null,
+    });
+  });
+
+  // 读缓存（不生成）。阅读页打开时用它决定按钮写「总结」还是「重新总结」。
+  r.get('/entries/:id/summary', async (c) => {
+    const uid = requireUserId(c);
+    const id = c.req.param('id');
+
+    const { readAiConfigRaw } = await import('../ai/service.ts');
+    const { getSummary, promptFingerprint, summaryPromptState } = await import('../ai/summary.ts');
+
+    const row = ctx.dbh.db.prepare('SELECT id FROM entries WHERE id = ? AND user_id = ?')
+      .get(id, uid) as { id: string } | undefined;
+    if (!row) throw notFound('条目不存在');
+
+    const tpl = summaryPromptState(readAiConfigRaw(ctx.dbh.db, uid)).effective;
+    const fp = promptFingerprint(tpl);
+    const hit = getSummary(ctx.dbh.db, id, fp);
+
+    return c.json({
+      summary: hit?.body ?? null,
+      promptFp: fp,
+      createdAt: hit?.createdAt ?? null,
+      model: hit?.model ?? null,
+    });
+  });
+
   r.post('/entries/read', async (c) => {
     const uid = requireUserId(c);
     const body = await c.req.json().catch(() => ({})) as {

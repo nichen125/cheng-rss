@@ -4,7 +4,7 @@ import { requireUserId } from '../auth/require-user.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { makeAnchor, resolveAnchor, insertHighlight, toApi, type HighlightRow } from '../highlights/anchor.ts';
 import { generateInsight, sliceContext } from '../highlights/insight.ts';
-import { aiForUser } from '../ai/service.ts';
+import { aiForUser, runtimeAiBase } from '../ai/service.ts';
 import { unpackText } from '../db/text-blob.ts';
 import { htmlToText } from '../feeds/parse.ts';
 
@@ -237,7 +237,10 @@ export function highlightRoutes(ctx: AppContext): Hono<{ Variables: Variables }>
     const text = entryText(ctx, uid, h.entry_id) ?? '';
     const cx = sliceContext(text, h.pos_start, h.pos_end, h.quote_exact);
 
-    const ai = aiForUser(ctx.dbh.db, uid, ctx.cfg.ai);
+    // 用 runtimeAiBase 而不是直接传 ctx.cfg.ai（v2.0）：后者少了 dataDir，
+    // 于是界面上填的 key（data/secrets.json）在这条路径上不生效 ——
+    // 症状是"别处分析正常，只有 AI 解读说没配 key"。
+    const ai = aiForUser(ctx.dbh.db, uid, runtimeAiBase(ctx.cfg));
     const r = await generateInsight(ai.client, {
       quote: h.quote_exact,
       note: h.note,

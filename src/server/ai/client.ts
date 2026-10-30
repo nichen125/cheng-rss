@@ -260,6 +260,157 @@ export class AiClient {
   }
 
   /**
+   * 调用一次 chat/completions，**只要纯文本**（v2.0，§8.9 / §8.8）。
+   *
+   * 与 chatJson 分开而不是给它加个 `schema?: undefined` 开关：
+   * 两者的失败处理完全不同 —— chatJson 有"结构不合规 → 回灌 issues 重试"
+   * 这一层，纯文本没有也不该有。合在一起会让"文本模式下要不要走降级链"
+   * 变成一个必须逐处判断的隐含状态，而那种分支最容易漏。
+   *
+   * 用途：单篇总结（返回 Markdown）、`POST /settings/ai/test`（探针）。
+   */
+  async chat(opts: {
+    system: string;
+    user: string;
+    model: string;
+    purpose: string;
+    userId?: string;
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<
+    { ok: true; text: string; usage: AiUsageRecord }
+    | { ok: false; failure: AiFailure; usage: AiUsageRecord | null }
+  > {
+    if (!this.hasKey()) {
+      return {
+        ok: false, usage: null,
+        failure: {
+          kind: 'no-key',
+          message: `没有配置 API key：环境变量 ${this.config.apiKeyEnv} 为空`,
+          retryable: false,
+        },
+      };
+    }
+
+    // 闸门同样问在第一个请求之前（§8.7）。漏在这里的后果是
+    // "总结路径可以无限花钱"，而它偏偏是最容易被反复点的一条。
+    const verdict = this.guard?.({ purpose: opts.purpose, model: opts.model }) ?? { action: 'allow' };
+    if (verdict.action === 'block') {
+      return { ok: false, usage: null, failure: { kind: 'budget', message: verdict.reason, retryable: false } };
+    }
+    const model = verdict.action === 'downgrade' ? verdict.model : opts.model;
+
+    let last: { ok: false; failure: AiFailure; usage: AiUsageRecord | null } | null = null;
+    for (let attempt = 0; attempt <= TRANSPORT_RETRIES; attempt++) {
+      await this.waitForRateLimit();
+      const t0 = this.now();
+      const url = `${this.config.baseURL.replace(/\/+$/, '')}/chat/completions`;
+      const body: Record<string, unknown> = {
+        model,
+        messages: [
+          { role: 'system', content: opts.system },
+          { role: 'user', content: opts.user },
+        ],
+        temperature: opts.temperature ?? 0.3,
+        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+      };
+
+      let resp: Response;
+      try {
+        resp = await this.fetchImpl(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(this.config.timeoutMs),
+        });
+      } catch (e) {
+        const latencyMs = this.now() - t0;
+        const isTimeout = /abort|timeout/i.test((e as Error)?.name ?? '')
+          || /timeout/i.test((e as Error)?.message ?? '');
+        const failure: AiFailure = isTimeout
+          ? { kind: 'timeout', message: `请求超过 ${this.config.timeoutMs}ms 未返回`, retryable: true }
+          : { kind: 'network', message: (e as Error)?.message ?? '网络请求失败', retryable: true };
+        const usage: AiUsageRecord = {
+          purpose: opts.purpose, model, userId: opts.userId,
+          inTokens: null, outTokens: null, costUsd: 0,
+          latencyMs, ok: false, error: `${failure.kind}: ${failure.message}`,
+        };
+        this.record(usage);
+        last = { ok: false, failure, usage };
+        if (!failure.retryable || attempt >= TRANSPORT_RETRIES) return last;
+        await this.sleep(this.backoffMs(attempt));
+        continue;
+      }
+
+      const latencyMs = this.now() - t0;
+
+      if (!resp.ok) {
+        const text = await safeText(resp);
+        const status = resp.status;
+        const failure: AiFailure = {
+          kind: `http-${status}` as AiFailureKind,
+          message: `HTTP ${status}: ${text.slice(0, 300)}`,
+          retryable: status === 429 || status >= 500,
+          status,
+        };
+        const usage: AiUsageRecord = {
+          purpose: opts.purpose, model, userId: opts.userId,
+          inTokens: null, outTokens: null,
+          costUsd: estimateCost(this.config.pricing, model, null, null),
+          latencyMs, ok: false, error: `${failure.kind}: ${failure.message}`,
+        };
+        this.record(usage);
+        last = { ok: false, failure, usage };
+        if (!failure.retryable || attempt >= TRANSPORT_RETRIES) return last;
+        await this.sleep(this.backoffMs(attempt, parseRetryAfter(resp.headers.get('retry-after'))));
+        continue;
+      }
+
+      let json: Record<string, unknown>;
+      try {
+        json = (await resp.json()) as Record<string, unknown>;
+      } catch {
+        const failure: AiFailure = { kind: 'bad-json', message: '响应体不是 JSON', retryable: true };
+        const usage: AiUsageRecord = {
+          purpose: opts.purpose, model, userId: opts.userId,
+          inTokens: null, outTokens: null,
+          costUsd: estimateCost(this.config.pricing, model, null, null),
+          latencyMs, ok: false, error: `${failure.kind}: ${failure.message}`,
+        };
+        this.record(usage);
+        last = { ok: false, failure, usage };
+        if (attempt >= TRANSPORT_RETRIES) return last;
+        await this.sleep(this.backoffMs(attempt));
+        continue;
+      }
+
+      const choices = (json.choices ?? []) as { message?: { content?: unknown } }[];
+      const content = choices[0]?.message?.content;
+      const u = (json.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
+      const usage: AiUsageRecord = {
+        purpose: opts.purpose, model, userId: opts.userId,
+        inTokens: u.prompt_tokens ?? null, outTokens: u.completion_tokens ?? null,
+        costUsd: estimateCost(this.config.pricing, model, u.prompt_tokens, u.completion_tokens),
+        latencyMs, ok: typeof content === 'string' && content.trim() !== '',
+        error: typeof content === 'string' && content.trim() !== '' ? undefined : 'empty: 模型返回空内容',
+      };
+      this.record(usage);
+
+      if (typeof content !== 'string' || content.trim() === '') {
+        // 空内容不重试：原样重发大概率还是空，而它常常意味着提示词
+        // 让模型无话可说（例如要求总结一篇只有标题的文章）。
+        return { ok: false, usage, failure: { kind: 'empty', message: '模型返回空内容', retryable: false } };
+      }
+      return { ok: true, text: content.trim(), usage };
+    }
+
+    return last ?? {
+      ok: false, usage: null,
+      failure: { kind: 'network', message: '请求未发出', retryable: true },
+    };
+  }
+
+  /**
    * 调用一次 chat/completions，要求返回符合 schema 的 JSON。
    *
    * 失败时**不抛异常**：调用方（job handler）要按 kind 决定是重试、

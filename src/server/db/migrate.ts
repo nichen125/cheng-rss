@@ -17,6 +17,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 3, name: 'analysis_fingerprint', file: '0003_analysis_fingerprint.sql' },
   { version: 4, name: 'digest_day_key', file: '0004_digest_day_key.sql' },
   { version: 5, name: 'digest_cites', file: '0005_digest_cites.sql' },
+  { version: 6, name: 'summaries', file: '0006_summaries.sql' },
 ];
 
 export const CURRENT_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

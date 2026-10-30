@@ -510,17 +510,25 @@ check('⑦ 长标题的 title 属性给了全文（截断了也还能看到完�
 //
 // 「高亮当前小节」如果只断言"始终有一项高亮"，一个永远亮第一条的实现
 // 照样通过。必须**滚到文中某个位置**，再断言亮的是那一节的标题。
+//
+// 滚动量用 `getBoundingClientRect()` 相减算，**不用 `offsetTop`**：
+// offsetTop 相对 `offsetParent`，而 offsetParent 由"最近的有 position 的
+// 祖先"决定 —— 往上加一层定位盒子（v2.0 为了划词工具条加的 `.article-wrap`）
+// 就会让同一个 offsetTop 少算「纸顶到正文顶」那段（179px），于是这里滚到
+// 第五节上方两屏，断言莫名其妙变红。rect 相减与布局层级无关。
 const scrolled = await ev(`(async () => {
   const el = document.querySelector('.reader-scroll');
   const heads = [...document.querySelectorAll('.article-body h2, .article-body h3')];
-  // 滚到第五节附近：直接用标题的 offsetTop 定位，避免依赖目录点击
   const target = heads.find((h) => (h.textContent || '').trim() === '第五节');
   if (!target || !el) return { ok: false, reason: '找不到第五节' };
-  el.scrollTop = target.offsetTop - 60;
+  const need = target.getBoundingClientRect().top - el.getBoundingClientRect().top;
+  el.scrollTop = el.scrollTop + need - 60;
   await new Promise((r) => setTimeout(r, 700));
   const links = [...document.querySelectorAll('.toc-link')];
   return {
     ok: true,
+    // 顺带记下滚了多少：红了能分辨"没滚对"还是"滚对了但高亮没跟"
+    scrolledBy: Math.round(need),
     onCount: links.filter((l) => l.getAttribute('aria-current') === 'true').length,
     onText: links.find((l) => l.getAttribute('aria-current') === 'true')?.textContent ?? null,
   };

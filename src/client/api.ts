@@ -520,7 +520,15 @@ export const api = {
     models: { fast: string; strong: string; embed: string };
     budget: { dailyUsd: number; monthlyUsd: number };
     hasKey: boolean;
+    /** key 从哪来（§8.8）：界面上填的文件 / 部署期环境变量 / 都没有 */
+    keySource: 'file' | 'env' | 'none';
+    /** 掩码后的 key。服务端**从不**回显完整 key */
+    keyMasked: string | null;
     source: 'settings' | 'deployed';
+    /** 单篇总结的提示词（§8.9）：生效值 / 内置默认 / 是否处于默认 */
+    summaryPrompt: string;
+    summaryPromptDefault: string;
+    summaryPromptIsDefault: boolean;
   }>('/settings/ai'),
 
   /** 只提交要改的字段。空/缺省 = 保持部署期配置（见 §8.6 三层合并） */
@@ -528,6 +536,49 @@ export const api = {
     request<{ ok: boolean }>('/settings/ai', {
       method: 'PATCH',
       body: JSON.stringify(patch),
+    }),
+
+  /**
+   * 写 API key（§8.8）。空串 = 删除、回落到环境变量。
+   *
+   * 单独一个端点而不是并进 patchAiConfig：key 落在 `data/secrets.json`，
+   * 与 ai_config 不是同一份存储。
+   */
+  setApiKey: (apiKey: string) =>
+    request<{ ok: boolean; hasKey: boolean }>('/settings/ai/key', {
+      method: 'PATCH',
+      body: JSON.stringify({ apiKey }),
+    }),
+
+  /** 用一次最小调用验证 key 能不能用（§8.8）。失败也返 200，看 `ok` */
+  testAiKey: () => request<{
+    ok: boolean;
+    text?: string;
+    model?: string;
+    failure?: { kind: string; message: string; retryable: boolean };
+    hint?: string;
+  }>('/settings/ai/test', { method: 'POST', body: '{}' }),
+
+  // ── 单篇总结（2.7，§8.9）────────────────────────────────
+  /** 读当前提示词下的缓存。`summary:null` = 还没总结过 */
+  getEntrySummary: (id: string) => request<{
+    summary: string | null;
+    promptFp: string;
+    createdAt: number | null;
+    model: string | null;
+  }>(`/entries/${id}/summary`),
+
+  /** 生成（或取缓存）。`force:true` 才重算，否则同提示词命中缓存不发请求 */
+  makeEntrySummary: (id: string, opts: { force?: boolean } = {}) =>
+    request<{
+      ok: boolean;
+      cached: boolean;
+      summary: string | null;
+      promptFp: string;
+      failure: { kind: string; message: string; retryable: boolean } | null;
+    }>(`/entries/${id}/summary`, {
+      method: 'POST',
+      body: JSON.stringify(opts),
     }),
 
   // ── 简报（M3）──────────────────────────────────────────

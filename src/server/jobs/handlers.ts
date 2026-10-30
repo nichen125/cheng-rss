@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { JobHandler } from './runner.ts';
 import { getFeed } from '../feeds/store.ts';
 import { enqueue } from './queue.ts';
+import { shouldLog } from '../ai/notice.ts';
 import type { AppContext } from '../app.ts';
 
 // 处理器注册表。
@@ -138,7 +139,11 @@ export function buildHandlers(ctx: HandlerContext): Record<string, JobHandler> {
       const terminal = kind === 'no-key' || kind === 'schema' || kind === 'bad-json'
         || kind === 'empty' || kind === 'budget'
         || r.failure?.retryable === false;
-      ctx.log?.(`analyze 失败`, { entryId, kind, message: r.failure?.message?.slice(0, 160) });
+      // 全局性失败（没 key / 超预算 / 429 冷却）只报一次（§8.8）。
+      // 报 745 次不会多出信息，只会把真正的错误埋掉。
+      if (shouldLog(kind)) {
+        ctx.log?.(`analyze 失败`, { entryId, kind, message: r.failure?.message?.slice(0, 160) });
+      }
       if (!terminal) throw new Error(`${kind}: ${r.failure?.message ?? '分析失败'}`);
       return;
     }
@@ -186,10 +191,14 @@ export function buildHandlers(ctx: HandlerContext): Record<string, JobHandler> {
 
     const { client } = aiForUser(db, row.user_id, runtimeAiBase(ctx.app.cfg));
     const r = await runEmbed(db, client, entryId, { force: p.force === true });
-    ctx.log?.(r.ok ? 'embed 完成' : 'embed 失败', {
-      entryId, skipped: r.skipped, dim: r.dim,
-      failure: r.ok ? undefined : `${r.failure.kind}: ${r.failure.message}`.slice(0, 160),
-    });
+    // 与 analyze 同一套抑制规则：embedding 也是"没 key 时每篇都会失败"，
+    // 不抑制的话它会在 analyze 的 745 行之外再刷 745 行。
+    if (r.ok || shouldLog(r.failure.kind)) {
+      ctx.log?.(r.ok ? 'embed 完成' : 'embed 失败', {
+        entryId, skipped: r.skipped, dim: r.dim,
+        failure: r.ok ? undefined : `${r.failure.kind}: ${r.failure.message}`.slice(0, 160),
+      });
+    }
   };
 
   // ── 简报（PLAN §9.1 / §19.5 3.4）────────────────────────

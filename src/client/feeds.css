@@ -720,7 +720,21 @@
 [data-theme="dark"] .article-body mark.hl-green { background: rgba(74, 222, 128, 0.24); }
 [data-theme="dark"] .article-body mark.hl-blue { background: rgba(96, 165, 250, 0.26); }
 
-/* 工具条：相对 .reader（纸）绝对定位，坐标由选区算出。
+/* 正文 + 工具条的定位包裹层（§11.3 / v2.0 修正）。
+ *
+ * `useHighlights` 算的 x/y 是「相对 .article-body 左上角」。工具条原先
+ * 直接挂在 `.reader` 下、按 `.reader` 定位，于是「纸顶到正文顶」那段距离
+ * （标题 + meta + AI 摘要卡 + 总结卡）被重复算了一次，工具条浮到纸顶。
+ *
+ * 这一层只做定位父级：**不加 padding、不加 margin**，它的左上角必须与
+ * `.article-body` 完全重合，否则等于把偏移换了个地方加回来。
+ * 不能改成给 `.article-body` 加 position —— 那个元素是 flex 项且带
+ * `content-box` 宽度约束，动它的盒模型会牵到正文宽度。 */
+.article-wrap {
+  position: relative;
+}
+
+/* 工具条：相对 .article-wrap 绝对定位（与坐标的参照系一致）。
  * translate(-50%, -100%) 让它底边贴住选区上沿 —— 位置数值不用管宽度。 */
 .hl-toolbar {
   position: absolute;
@@ -1295,3 +1309,112 @@
   font-size: 11.5px;
   color: var(--fg-faint);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   AI key 与总结提示词（§8.8 / §8.9，v2.0）
+   ══════════════════════════════════════════════════════════════ */
+
+/* 提示词文本域：等宽字体，因为里面是模板而不是自然语言段落 ——
+   占位符 {{body}} 与 Markdown 说明混在一起时，等宽更容易数括号 */
+.prompt-area {
+  width: 100%;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--fg);
+  resize: vertical;
+  min-height: 140px;
+}
+.prompt-area:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 「新的 API Key」那一行要占满整行：它是长串，两列并排会被挤到看不出形状 */
+.settings-card .field-row .field.grow { grid-column: 1 / -1; }
+
+/* ══════════════════════════════════════════════════════════════
+   阅读页「总结」（§15.27，v2.0）
+   ══════════════════════════════════════════════════════════════ */
+
+/* 总结卡片紧贴 AI 摘要卡片之下、正文之上。
+   比摘要卡片更"轻"（无折叠头、无边框）：摘要是一等卡片，总结是它的延伸。 */
+.sum-card {
+  margin: 10px 0 22px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.sum-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--line);
+}
+.sum-head .grow { flex: 1; }
+
+.sum-body {
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.sum-body h2 { font-size: 15px; margin: 14px 0 6px; }
+.sum-body h3 { font-size: 14px; margin: 12px 0 5px; }
+.sum-body p { margin: 0 0 9px; }
+.sum-body ul { margin: 0 0 9px; padding-left: 20px; }
+.sum-body li { margin: 3px 0; }
+.sum-body hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+
+/* 生成中的骨架条：三条不同宽度的占位。
+   不用转圈遮罩 —— 遮罩会让人以为整页卡住了，而实际上只有这一段在等。 */
+.sum-skeleton { padding: 14px; display: grid; gap: 8px; }
+.sum-skeleton span {
+  display: block;
+  height: 11px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--bg-3, #2a2a2a) 25%, var(--line) 37%, var(--bg-3, #2a2a2a) 63%);
+  background-size: 400% 100%;
+  animation: sum-shimmer 1.3s ease-in-out infinite;
+}
+.sum-skeleton span:nth-child(1) { width: 92%; }
+.sum-skeleton span:nth-child(2) { width: 78%; }
+.sum-skeleton span:nth-child(3) { width: 61%; }
+@keyframes sum-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sum-skeleton span { animation: none; }
+}
+
+/* 失败气泡：给 kind 对应的一句话，不吞错误 */
+.sum-fail {
+  margin: 10px 0 22px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--must) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--must) 30%, transparent);
+  font-size: 13px;
+  color: var(--fg);
+}
+.sum-fail .sum-fail-hint { color: var(--fg-faint); font-size: 12px; margin-top: 4px; }
+
+/* ── 未分组源平铺（§15.26，v2.0）──
+   与分组行同级：同缩进、同行高、同样的角标位置。
+   不画脊线、不加缩进 —— 一旦缩进，它看起来就变成"某个组的子行"，
+   而它恰恰是唯一没有归属的那些（需求方说"在最外面直接看"）。 */
+.tree-loose {
+  /* 与最后一个分组之间留一条细缝：不做硬分割线，
+     但要让"从分组切到未分组"这件事在视觉上有个呼吸 */
+  margin-top: 2px;
+}
+.tree-loose-row .tree-caret { width: 15px; }

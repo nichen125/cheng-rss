@@ -17,6 +17,7 @@ declare const __SQL_0002_DEDUPE_VECTORS__: string | undefined;
 declare const __SQL_0003_ANALYSIS_FINGERPRINT__: string | undefined;
 declare const __SQL_0004_DIGEST_DAY_KEY__: string | undefined;
 declare const __SQL_0005_DIGEST_CITES__: string | undefined;
+declare const __SQL_0006_SUMMARIES__: string | undefined;
 
 /**
  * 按文件名查内嵌 SQL。
@@ -36,6 +37,8 @@ function bundledSqlFor(name: string): string | null {
       return typeof __SQL_0005_DIGEST_CITES__ === 'string' ? __SQL_0005_DIGEST_CITES__ : null;
     case '0003_analysis_fingerprint.sql':
       return typeof __SQL_0003_ANALYSIS_FINGERPRINT__ === 'string' ? __SQL_0003_ANALYSIS_FINGERPRINT__ : null;
+    case '0006_summaries.sql':
+      return typeof __SQL_0006_SUMMARIES__ === 'string' ? __SQL_0006_SUMMARIES__ : null;
     default:
       return null;
   }

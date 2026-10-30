@@ -9,6 +9,7 @@ import {
   IconSearch, IconSettings, IconSparkle, IconStar,
 } from './icons.tsx';
 import { DigestPage } from './digest/DigestPage.tsx';
+import { SummaryMarkdown, sumFailHint } from './summary/SummaryMarkdown.tsx';
 import { useHighlights } from './highlights/useHighlights.ts';
 import { HighlightToolbar, HighlightList } from './highlights/HighlightUI.tsx';
 import { SettingsModal, type SettingsSection } from './settings/SettingsModal.tsx';
@@ -583,25 +584,61 @@ function Main(props: { user: User; onLogout: () => void }) {
     [scope.folderId, feedsByFolder],
   );
 
-  // 源筛选的自愈：当前筛的源已不在**这个组**里（被移出 / 被删），退回整组。
+  /**
+   * 未分组的源（§15.26，v2.0）。
+   *
+   * 侧栏把它们**平铺在分组区块里**，与分组行同级 —— 需求方原话是
+   * 「未分组的直接在组的地方显示，没有分组就意味着在最外面直接看」。
+   *
+   * 按标题用 `zh-CN` 排序（拼音序）：分组有 sort 顺序（用户自己排的），
+   * 未分组没有那个依据，按名字是最不令人意外的默认。用 `zh-CN` 而不是
+   * 默认比较器：默认比较器按码点排，中文会得到"零、七、三"这种
+   * 完全无序的结果（实测：码点序 零 96F6 > 七 4E03）。
+   */
+  const looseFeeds = useMemo(
+    () => feeds
+      .filter((f) => !f.folderId)
+      .sort((x, y) => (x.title ?? x.url).localeCompare(y.title ?? y.url, 'zh-CN')),
+    [feeds],
+  );
+
+  /**
+   * 当前范围里的源清单，含「未分组」这个伪范围。
+   *
+   * 为什么需要这一层：`feedsByFolder` 只装真的分组（folder_id 非空），
+   * 而 `folderId='none'` 是**列表 API 认得的一个取值**（它表示"没有分组的源"），
+   * 不是一个真实的目录 id。少了这个分支，选中未分组源时 `folderFeeds`
+   * 恒为空，下面的自愈逻辑会立刻把 feedId 清掉 —— 症状是"点了未分组的源，
+   * 高亮闪一下就消失，列表回到全部"。
+   */
+  const feedsInScope = useMemo(
+    () => (scope.folderId === 'none' ? looseFeeds : folderFeeds),
+    [scope.folderId, looseFeeds, folderFeeds],
+  );
+
+  // 源筛选的自愈：当前筛的源已不在**这个范围**里（被移出 / 被删），退回该范围。
   //
   // 不自愈的话会出现"侧栏里那个源还高亮着，列表却永远是空的" ——
   // 请求带的是 {folderId: 新组, feedId: 旧组的源}，交集必然为空，
   // 用户看到的是"这个组里没有文章"，而不是"你的筛选失效了"。
   //
-  // 判据必须是「这个组里有没有它」，不是「库里有没有它」：源被移出分组
+  // 判据必须是「这个范围里有没有它」，不是「库里有没有它」：源被移出分组
   // 时它还在库里（只是 folder_id 变了），用全局 feeds 判会永远不触发。
   // 第一版 v1.13 就是这么写的，m1-11 ⑩ 当场抓到。
+  //
+  // v2.0：判据里用 `feedsInScope` 而不是 `folderFeeds` —— 后者只认识真分组，
+  // 遇到 `folderId='none'`（未分组，§15.26）会恒为空，于是选中未分组源后
+  // 自愈逻辑立刻把 feedId 清掉（"点了没反应"）。
   useEffect(() => {
     if (!scope.feedId) return;
     if (!feedsLoaded) return; // 还在加载，不能据此判定
-    if (!folderFeeds.some((f) => f.id === scope.feedId)) {
+    if (!feedsInScope.some((f) => f.id === scope.feedId)) {
       // 只丢源、保留分组 —— 顺手把 folderId 也清掉会让用户以为自己
       // 被弹出了分组（树收起、标题变回收件箱）。m1-11 的
       // 「自愈只丢源、不丢分组」那条就是专门抓这个的。
       setScope((s) => ({ folderId: s.folderId }));
     }
-  }, [folderFeeds, feedsLoaded, scope.feedId, scope.folderId]);
+  }, [feedsInScope, feedsLoaded, scope.feedId, scope.folderId]);
 
   /**
    * 展开/收起一个分组（§15.13 手风琴）。
@@ -814,21 +851,27 @@ function Main(props: { user: User; onLogout: () => void }) {
   /** 列表标题：有分组过滤时显示组名，让用户知道自己在看一个子集 */
   const listTitle = useMemo(() => {
     if (!scope.folderId) return current.label;
-    const f = folders.find((x) => x.id === scope.folderId);
+    // v2.0（§15.26）：`none` 是"未分组"这个伪范围，不是真实目录 id
+    const f = scope.folderId === 'none'
+      ? { name: '未分组' }
+      : folders.find((x) => x.id === scope.folderId);
     const base = f ? f.name : current.label;
     // 再叠一层源筛选时，标题要同时说清"哪个组 + 哪个源"（§15.13），
     // 否则标题还写「科技IT」，而列表只剩一个源的内容，看起来像丢数据。
     if (!scope.feedId) return base;
-    const feed = folderFeeds.find((x) => x.id === scope.feedId);
+    const feed = feedsInScope.find((x) => x.id === scope.feedId);
     return feed ? `${base} · ${feed.title ?? hostOf(feed.url) ?? '该源'}` : base;
-  }, [scope.folderId, scope.feedId, folders, folderFeeds, current.label]);
+  }, [scope.folderId, scope.feedId, folders, feedsInScope, current.label]);
 
   /** 当前范围的未读数。feed 优先于 folder（选了源时用户看的是那个源） */
   const scopeUnread = scope.feedId
     ? (feeds.find((f) => f.id === scope.feedId)?.unread ?? 0)
-    : scope.folderId
-      ? (folders.find((f) => f.id === scope.folderId)?.unread ?? 0)
-      : 0;
+    : scope.folderId === 'none'
+      // 未分组没有文件夹行可以读角标，只能把组内各源加起来
+      ? looseFeeds.reduce((n, f) => n + f.unread, 0)
+      : scope.folderId
+        ? (folders.find((f) => f.id === scope.folderId)?.unread ?? 0)
+        : 0;
 
   /**
    * 渲染用的尾段：`null` = 不画分割线，数组 = 画分割线并接上这些已读条目。
@@ -975,8 +1018,13 @@ function Main(props: { user: User; onLogout: () => void }) {
             吃掉 41px 高度，而且滚出去就看不见。改到侧栏之后：
               · 列表栏一行不占，一屏条目数回到 9
               · 未读数与源名同时可见，不用横向滚
-              · 范围的选择全在左栏一处，符合"左=范围 / 中=列表 / 右=内容" */}
-        {folders.length > 0 && (
+              · 范围的选择全在左栏一处，符合"左=范围 / 中=列表 / 右=内容"
+
+            v2.0（§15.26）：未分组源**平铺**在这一块里，与分组行同级。
+            条件从 `folders.length > 0` 改成「有分组或有未分组源」——
+            一个分组都没有但有 2 个未分组源的用户，原来整个区块不渲染，
+            那 2 个源在侧栏完全不可见。 */}
+        {(folders.length > 0 || looseFeeds.length > 0) && (
           <>
             <div className="nav-section">分组</div>
             <nav className="nav tree" aria-label="分组与订阅源">
@@ -1046,6 +1094,37 @@ function Main(props: { user: User; onLogout: () => void }) {
                   </div>
                 );
               })}
+
+              {/* 未分组源平铺（§15.26，v2.0）。
+                  不造「未分组」伪分组：需求方说的是"在最外面直接看"，
+                  而伪分组多一次点击 —— 未分组通常只有个位数个源。
+                  排序固定排在所有真分组之后，让人一眼看出"这些不归属任何组"。 */}
+              {looseFeeds.length > 0 && (
+                <div className="tree-loose" data-testid="loose-feeds">
+                  {looseFeeds.map((fd) => {
+                    const on = scope.feedId === fd.id;
+                    return (
+                      <button
+                        key={fd.id}
+                        // 与分组行**同级**：不加 tree-leaf 的缩进、不加脊线。
+                        // 用 tree-row 的形状（含一个空白箭头位）让文字起点
+                        // 与分组行对齐 —— 差 15px 会让"它们是一类"这件事垮掉。
+                        className={`nav-item tree-row tree-loose-row ${on ? 'active' : ''}`}
+                        onClick={() => pickFeed('none', fd.id)}
+                        title={fd.title ?? hostOf(fd.url) ?? fd.url}
+                        aria-pressed={on}
+                        data-feed-id={fd.id}
+                      >
+                        <span className="tree-caret" aria-hidden="true" />
+                        <span className="nav-label">
+                          {fd.title ?? hostOf(fd.url) ?? '未命名源'}
+                        </span>
+                        {fd.unread > 0 && <span className="badge">{fd.unread > 999 ? '999+' : fd.unread}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </nav>
           </>
         )}
@@ -1620,6 +1699,57 @@ function Reader(props: {
   const [progress, setProgress] = useState(0);
   const reportedRef = useRef(0);
 
+  // ── 单篇总结（§15.27，v2.0）───────────────────────────────
+  //
+  // 三种状态收敛成一个：'idle'（没总结过）/'busy'（生成中）/'done'。
+  // 不用两个布尔（loading + hasSummary）：那会有"两个都 true"的非法组合，
+  // 而它对应的界面是"骨架条下面同时有内容"，看着像渲染 bug。
+  const [sum, setSum] = useState<{
+    state: 'idle' | 'busy' | 'done';
+    text: string | null;
+    createdAt: number | null;
+    fail: { kind: string; message: string } | null;
+  }>({ state: 'idle', text: null, createdAt: null, fail: null });
+
+  // 打开另一篇时重置并预取缓存 —— 不预取的话按钮永远写「总结」，
+  // 而库里可能早有一份，用户再点一次会命中缓存却看不出"它本来就在"。
+  useEffect(() => {
+    const id = detail?.id;
+    if (!id) { setSum({ state: 'idle', text: null, createdAt: null, fail: null }); return; }
+    let alive = true;
+    setSum({ state: 'idle', text: null, createdAt: null, fail: null });
+    api.getEntrySummary(id)
+      .then((r) => {
+        if (!alive || !r.summary) return;
+        setSum({ state: 'done', text: r.summary, createdAt: r.createdAt, fail: null });
+      })
+      .catch(() => { /* 读缓存失败不该阻断阅读 */ });
+    return () => { alive = false; };
+  }, [detail?.id]);
+
+  /** 点「总结」：有缓存直接展开，没有就现生成；`force` 时强制重算 */
+  const makeSummary = useCallback(async (force: boolean) => {
+    const id = detail?.id;
+    if (!id) return;
+    setSum((s) => ({ ...s, state: 'busy', fail: null }));
+    try {
+      const r = await api.makeEntrySummary(id, { force });
+      if (!r.ok || !r.summary) {
+        setSum({
+          state: 'idle', text: null, createdAt: null,
+          fail: r.failure ? { kind: r.failure.kind, message: r.failure.message } : null,
+        });
+        return;
+      }
+      setSum({ state: 'done', text: r.summary, createdAt: Date.now(), fail: null });
+    } catch (e) {
+      setSum({
+        state: 'idle', text: null, createdAt: null,
+        fail: { kind: 'request', message: e instanceof Error ? e.message : '生成失败' },
+      });
+    }
+  }, [detail?.id]);
+
   // ── 侧边目录（§15.18）─────────────────────────────────────
   /** 正文里的小标题。从 DOM 读，不在服务端另解析一份 */
   const [toc, setToc] = useState<TocItem[]>([]);
@@ -1922,37 +2052,102 @@ function Reader(props: {
             </div>
           )}
 
-          {detail.contentHtml ? (
-            <div
-              className="article-body"
-              ref={bodyRef}
-              // 划词结束（松手/抬键）时算选区。用声明式事件而不是
-              // addEventListener：后者在某次渲染 ref 为 null 时会静默漏挂，
-              // 表现是"划词没反应"且毫无报错（见 useHighlights 里的注释）。
-              onMouseUp={hl.onSelectionEnd}
-              onKeyUp={hl.onSelectionEnd}
-              // 正文来自我们自己抓取并清洗的 HTML（sanitize.ts 白名单 + 链接新标签）
-              dangerouslySetInnerHTML={{ __html: detail.contentHtml }}
-            />
-          ) : (
-            <div className="alert info">
-              这篇还没有正文缓存。
-              <a href={detail.url} target="_blank" rel="noreferrer">去原文阅读 ↗</a>
-            </div>
-          )}
+          {/* 单篇总结（§15.27，v2.0）：紧贴 AI 摘要卡片之下、正文之上。
+              放正文前是"先看结论再决定读不读"；放正文后等于读完才看到，
+              那时它已经没用了。
 
-          {/* 划词工具条（§11.3）。绝对定位在纸内，坐标由选区算出 */}
-          {hl.sel && (
-            <HighlightToolbar
-              x={hl.sel.x}
-              y={hl.sel.y}
-              onPick={(c) => void hl.create(c)}
-              onAnnotate={() => {
-                const t = window.prompt('这条为什么重要？');
-                if (t !== null) void hl.annotate(t);
-              }}
-            />
-          )}
+              按钮独立于摘要卡片而不是塞进它的头部：摘要是自动产出的，
+              总结是按需生成的 —— 两个动作的成本与时机都不同。 */}
+          <div className="sum-card" data-testid="summary-card">
+            <div className="sum-head">
+              <IconSparkle size={14} />
+              <span>总结</span>
+              {sum.state === 'done' && sum.createdAt && (
+                <span className="muted" style={{ fontSize: 11.5 }}>
+                  · {new Date(sum.createdAt).toLocaleString('zh-CN', {
+                    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+                  })}
+                </span>
+              )}
+              <span className="grow" />
+              <button
+                className="btn sm"
+                onClick={() => void makeSummary(sum.state === 'done')}
+                disabled={sum.state === 'busy'}
+                title={sum.state === 'done' ? '按当前提示词重新生成' : '按当前提示词生成一份速读摘要'}
+              >
+                {sum.state === 'busy' ? '总结中…'
+                  : sum.state === 'done' ? '重新总结' : '总结'}
+              </button>
+            </div>
+
+            {sum.state === 'busy' && (
+              <div className="sum-skeleton" aria-live="polite" aria-label="正在生成总结">
+                <span /><span /><span />
+              </div>
+            )}
+
+            {sum.state === 'done' && sum.text && (
+              <div className="sum-body">
+                {/* 复用简报页的 Markdown 渲染器（§8.9）：它产出 React 节点、
+                    不用 dangerouslySetInnerHTML，所以模型输出不经过 HTML 解析。 */}
+                <SummaryMarkdown md={sum.text} />
+              </div>
+            )}
+
+            {sum.fail && (
+              <div className="sum-fail" role="alert">
+                {sumFailHint(sum.fail.kind)}
+                <div className="sum-fail-hint">{sum.fail.message}</div>
+              </div>
+            )}
+          </div>
+
+          {/* 正文 + 划词工具条（§11.3）。
+              **工具条必须和正文同一个定位父级**：`useHighlights` 算的
+              x/y 是「相对 `.article-body` 左上角」，而工具条原先直接挂在
+              `.reader` 下 —— 那个元素才有 `position: relative`，于是
+              绝对定位按它解，坐标里「纸顶到正文顶」那段距离（标题 + meta
+              + AI 摘要卡 + 总结卡）被重复算了一次，工具条浮到纸的顶部。
+              这毛病一直都在，只是 M4 时期那段距离只有约 72px，落在
+              m4-03 的 ±120px 容差里；v2.0 加了总结卡之后涨到 179px，
+              容差被顶破才暴露。
+              修法是把两者放进同一个 `position: relative` 的包裹层，
+              于是「计算时的参照系」与「定位时的参照系」是同一个盒子。
+              包裹层不加 padding/margin，所以它的左上角与正文完全重合。 */}
+          <div className="article-wrap">
+            {detail.contentHtml ? (
+              <div
+                className="article-body"
+                ref={bodyRef}
+                // 划词结束（松手/抬键）时算选区。用声明式事件而不是
+                // addEventListener：后者在某次渲染 ref 为 null 时会静默漏挂，
+                // 表现是"划词没反应"且毫无报错（见 useHighlights 里的注释）。
+                onMouseUp={hl.onSelectionEnd}
+                onKeyUp={hl.onSelectionEnd}
+                // 正文来自我们自己抓取并清洗的 HTML（sanitize.ts 白名单 + 链接新标签）
+                dangerouslySetInnerHTML={{ __html: detail.contentHtml }}
+              />
+            ) : (
+              <div className="alert info">
+                这篇还没有正文缓存。
+                <a href={detail.url} target="_blank" rel="noreferrer">去原文阅读 ↗</a>
+              </div>
+            )}
+
+            {/* 划词工具条。坐标由选区算出，参照系就是外面这层 .article-wrap */}
+            {hl.sel && (
+              <HighlightToolbar
+                x={hl.sel.x}
+                y={hl.sel.y}
+                onPick={(c) => void hl.create(c)}
+                onAnnotate={() => {
+                  const t = window.prompt('这条为什么重要？');
+                  if (t !== null) void hl.annotate(t);
+                }}
+              />
+            )}
+          </div>
           {hl.err && <div className="alert error inset">{hl.err}</div>}
 
           {/* 本文高亮（§11.3）。放在正文之后而不是侧栏第二列：

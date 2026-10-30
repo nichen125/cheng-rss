@@ -33,13 +33,24 @@ interface AiConfigView {
   models: { fast: string; strong: string; embed: string };
   budget: { dailyUsd: number; monthlyUsd: number };
   hasKey: boolean;
+  keySource: 'file' | 'env' | 'none';
+  keyMasked: string | null;
   source: 'settings' | 'deployed';
+  summaryPrompt: string;
+  summaryPromptDefault: string;
+  summaryPromptIsDefault: boolean;
 }
 
 const LEVEL_LABEL: Record<string, string> = {
   ok: '正常运行',
   fast_only: '降级：只用快模型',
   stop: '已暂停',
+};
+
+const KEY_SOURCE_LABEL: Record<AiConfigView['keySource'], string> = {
+  file: '界面上填的（data/secrets.json）',
+  env: '环境变量',
+  none: '未配置',
 };
 
 export function AiSection() {
@@ -49,13 +60,25 @@ export function AiSection() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // 表单只放**用户可覆盖**的字段。apiKey 不在这里 —— 它只能从环境变量读，
-  // 让它出现在输入框里等于邀请用户把 key 填进数据库。
+  // 表单只放**用户可覆盖**的字段。key 有独立的输入框（见下面的「API Key」卡）：
+  // 它与其它字段的语义不同 —— 其它字段留空 = 不改，而 key 留空 = 不改、
+  // 点「删除」才是清空。混在同一张表单里会让"清空"没有明确的入口。
   const [baseURL, setBaseURL] = useState('');
   const [fastModel, setFastModel] = useState('');
   const [strongModel, setStrongModel] = useState('');
   const [embedModel, setEmbedModel] = useState('');
   const [dailyUsd, setDailyUsd] = useState('');
+
+  // 新 key 的输入框：写进 data/secrets.json（§8.8）。
+  // 用 type="password" 只是防肩窥，不是安全措施 —— 真正的措施是
+  // 服务端从不回显、且文件不进库与备份。
+  const [newKey, setNewKey] = useState('');
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [testMsg, setTestMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  // 单篇总结的提示词（§8.9）
+  const [promptDraft, setPromptDraft] = useState('');
+  const [promptBusy, setPromptBusy] = useState(false);
 
   const fail = (e: unknown, fb: string) => {
     setErr(e instanceof ApiFailure ? e.message : fb);
@@ -72,12 +95,75 @@ export function AiSection() {
       setStrongModel('');
       setEmbedModel('');
       setDailyUsd('');
+      setNewKey('');
+      setPromptDraft(c.summaryPromptIsDefault ? '' : c.summaryPrompt);
     } catch (e) {
       fail(e, '读取 AI 配置失败');
     }
   }, []);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  /**
+   * 写入 key（§8.8）。不传参就用输入框的值；传明确的值用于「删除」。
+   *
+   * 为什么删除要传参而不是先 setNewKey('') 再调：React 的 setState 是异步的，
+   * 同一次事件里读到的 newKey 仍是旧值 —— 那样点「删除」会先把 key 存一遍
+   * 再删，多来一次写盘，而且中间那一刻文件里是新 key。
+   */
+  const saveKey = async (explicit?: string) => {
+    setKeyBusy(true);
+    setErr('');
+    setNotice('');
+    setTestMsg(null);
+    try {
+      const k = (explicit ?? newKey).trim();
+      await api.setApiKey(k);
+      setNewKey('');
+      setNotice(k ? 'API key 已保存' : 'API key 已删除，回落到环境变量');
+      await reload();
+    } catch (e) {
+      fail(e, '保存 API key 失败');
+    } finally {
+      setKeyBusy(false);
+    }
+  };
+
+  const testKey = async () => {
+    setKeyBusy(true);
+    setTestMsg(null);
+    try {
+      const r = await api.testAiKey();
+      if (r.ok) {
+        setTestMsg({ kind: 'ok', text: `连接正常（${r.model}）` });
+      } else {
+        // 文案按 kind 分流：401 与 network 的处置完全不同，
+        // 统一说"测试失败"等于什么都没说。
+        const base = r.hint ?? r.failure?.message ?? '测试失败';
+        setTestMsg({ kind: 'err', text: `${base}${r.failure?.kind ? `（${r.failure.kind}）` : ''}` });
+      }
+    } catch (e) {
+      setTestMsg({ kind: 'err', text: e instanceof ApiFailure ? e.message : '测试失败' });
+    } finally {
+      setKeyBusy(false);
+    }
+  };
+
+  /** 保存总结提示词（§8.9）。空串 = 恢复默认 */
+  const savePrompt = async () => {
+    setPromptBusy(true);
+    setErr('');
+    setNotice('');
+    try {
+      await api.patchAiConfig({ summaryPrompt: promptDraft.trim() });
+      setNotice(promptDraft.trim() ? '总结提示词已保存' : '总结提示词已恢复默认');
+      await reload();
+    } catch (e) {
+      fail(e, '保存提示词失败');
+    } finally {
+      setPromptBusy(false);
+    }
+  };
 
   const save = async () => {
     setBusy(true);
@@ -122,8 +208,9 @@ export function AiSection() {
       <header className="settings-sec-head">
         <h2>AI 分析</h2>
         <p className="muted">
-          条目入库后会自动排队做分类分级与向量化。这里只放"连哪个模型"和"花多少钱"，
-          提示词与分类法不开放编辑（改了会让历史数据与新数据不可比）。
+          条目入库后会自动排队做分类分级与向量化。这里放"用哪个 key、连哪个模型、
+          花多少钱"。分类法与分级规则仍然不开放编辑（改了会让历史数据与新数据不可比），
+          但**单篇总结的提示词可以改** —— 它只影响你主动点的那一下。
         </p>
       </header>
 
@@ -147,8 +234,11 @@ export function AiSection() {
 
         {cfg && !cfg.hasKey && (
           <p className="hint warn">
-            环境变量 <code>{cfg.apiKeyEnv}</code> 里没有 API key —— 现在不会调用任何模型。
-            key 只从环境变量读，不写进数据库（备份包里不会有它）。
+            还没有 API key —— 环境变量 <code>{cfg.apiKeyEnv}</code> 与下面的
+            「API Key」卡都为空。不填就不调用模型：条目照常入库，但不出摘要与分类。
+            <br />
+            两种给法任选：卡里填（存进 <code>data/secrets.json</code>，
+            <strong>不需要重启</strong>，下一轮分析就用上），或部署时注入上面那个环境变量。
           </p>
         )}
 
@@ -273,6 +363,128 @@ export function AiSection() {
         <div className="settings-actions">
           <button className="btn primary" onClick={() => void save()} disabled={busy}>
             <IconSparkle size={15} /> 保存
+          </button>
+        </div>
+      </section>
+
+      {/* ── API Key（§8.8，v2.0）──
+          单独一张卡而不是并进「模型连接」：key 与其它字段的语义不同 ——
+          其它字段留空 = 不改，而 key 需要明确的「删除」入口。 */}
+      <section className="settings-card" id="ai-key-card">
+        <div className="settings-card-head">
+          <h3>API Key</h3>
+          <span className="muted" data-testid="key-source">
+            当前来源：{KEY_SOURCE_LABEL[cfg?.keySource ?? 'none']}
+            {cfg?.keyMasked ? ` · ${cfg.keyMasked}` : ''}
+          </span>
+        </div>
+
+        <p className="hint">
+          存在 <code>data/secrets.json</code>（权限收紧到仅当前用户）。
+          <strong>不会写进数据库，所以备份包、导出、迁移里都不含它</strong> ——
+          换机器时要重新填一次。
+          {cfg?.keySource === 'env' && (
+            <> 环境变量 <code>{cfg.apiKeyEnv}</code> 里已有一个；这里填的会**覆盖**它。</>
+          )}
+        </p>
+
+        <div className="field-row">
+          <label className="field grow">
+            <span className="field-label">新的 API Key</span>
+            <input
+              type="password"
+              autoComplete="off"
+              value={newKey}
+              onChange={(e) => setNewKey(e.target.value)}
+              placeholder={cfg?.hasKey ? '已配置，留空表示不改' : 'sk-…'}
+            />
+          </label>
+        </div>
+
+        <div className="settings-actions">
+          <button
+            className="btn primary" onClick={() => void saveKey()}
+            disabled={keyBusy || newKey.trim() === ''}
+          >
+            <IconSparkle size={15} /> 保存 Key
+          </button>
+          <button className="btn" onClick={() => void testKey()} disabled={keyBusy || !cfg?.hasKey}>
+            <IconRefresh size={14} /> 测试连接
+          </button>
+          <button
+            className="btn danger" onClick={() => void saveKey('')}
+            disabled={keyBusy || cfg?.keySource !== 'file'}
+            title={cfg?.keySource === 'file' ? '删除文件里的 key，回落到环境变量' : '当前 key 不在文件里'}
+          >
+            删除 Key
+          </button>
+        </div>
+
+        {testMsg && (
+          <p className={testMsg.kind === 'ok' ? 'hint' : 'hint warn'} role="status">
+            {testMsg.text}
+          </p>
+        )}
+      </section>
+
+      {/* ── 单篇总结的提示词（§8.9，v2.0）──
+          只有"总结"这一个动作受影响，分类分级仍然用固定提示词。 */}
+      <section className="settings-card" id="ai-summary-prompt-card">
+        <div className="settings-card-head">
+          <h3>总结提示词</h3>
+          <span className="muted">
+            {cfg?.summaryPromptIsDefault ? '正在用内置默认' : '已自定义'}
+          </span>
+        </div>
+
+        <p className="hint">
+          阅读页的「总结」按钮用它。可用占位符：
+          <code>{'{{title}}'}</code> <code>{'{{body}}'}</code>{' '}
+          <code>{'{{summary}}'}</code> <code>{'{{highlights}}'}</code>。
+          至少要有一个占位符，否则正文不会被喂给模型。
+          留空保存 = 恢复默认；改了提示词不会覆盖已有的总结（旧的仍在，改回来即可命中）。
+        </p>
+
+        <label className="field">
+          <span className="field-label">提示词</span>
+          <textarea
+            rows={10}
+            className="prompt-area"
+            value={promptDraft}
+            onChange={(e) => setPromptDraft(e.target.value)}
+            placeholder={cfg?.summaryPromptIsDefault ? '留空 = 用内置默认' : ''}
+          />
+        </label>
+
+        <div className="settings-actions">
+          <button className="btn primary" onClick={() => void savePrompt()} disabled={promptBusy}>
+            <IconSparkle size={15} /> 保存提示词
+          </button>
+          <button
+            className="btn"
+            onClick={() => setPromptDraft(cfg?.summaryPromptDefault ?? '')}
+            disabled={promptBusy}
+            title="把默认提示词填进输入框，再点保存"
+          >
+            填入默认值
+          </button>
+          <button
+            className="btn"
+            onClick={() => { setPromptDraft(''); void (async () => {
+              setPromptBusy(true);
+              try {
+                await api.patchAiConfig({ summaryPrompt: '' });
+                setNotice('总结提示词已恢复默认');
+                await reload();
+              } catch (e) {
+                fail(e, '恢复默认失败');
+              } finally {
+                setPromptBusy(false);
+              }
+            })(); }}
+            disabled={promptBusy || cfg?.summaryPromptIsDefault}
+          >
+            恢复默认
           </button>
         </div>
       </section>

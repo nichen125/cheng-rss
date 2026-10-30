@@ -236,6 +236,8 @@ export interface DigestSummary {
   costUsd: number | null;
   deliveredAt: number | null;
   createdAt: number;
+  /** 引用条数（"3 个事件"这类概括文案要用，不必先拉全量详情） */
+  citeCount?: number;
 }
 
 /** 高亮的颜色：只有三种（§11.3 明确不做调色盘） */
@@ -258,14 +260,42 @@ export interface HighlightItem {
   updatedAt: number;
 }
 
-/** 简报引用的簇（正文里的 [1] [2] 对应它） */
+/**
+ * 简报引用的簇（正文里的 [1] [2] 对应它）。
+ *
+ * `index` 是**脚注号**，由服务端按 cites 的顺序给出 ——
+ * 不能靠数组下标算：簇被清理后某些条目会缺 detail，下标就与 [n] 错位了。
+ */
 export interface DigestCluster {
+  id: string;
+  index: number;
+  title: string;
+  summary: string | null;
+  keyPoints: string[];
+  consensus: string[];
+  /** 各来源说法不一致之处。空数组表示"没有分歧"，不是"没查" */
+  conflicts: { claim: string; sources: string[] }[];
+  entry_count: number | null;
+  source_count: number | null;
+  heat: number | null;
+  /** 簇的详细数据已被清理，只剩简报里存下的标题 */
+  missing: boolean;
+}
+
+/** 「值得一读」的一项（低热度但值得看） */
+export interface DigestWorthReading {
   id: string;
   title: string;
   summary: string | null;
-  entry_count: number;
-  source_count: number;
+  entryCount: number | null;
+  sourceCount: number | null;
   heat: number | null;
+}
+
+export interface DigestDetail extends DigestSummary {
+  bodyMd: string;
+  clusters: DigestCluster[];
+  worthReading: DigestWorthReading[];
 }
 
 export interface FeedListResponse {
@@ -539,7 +569,7 @@ export const api = {
     }),
 
   getDigest: (id: string) =>
-    request<DigestSummary & { bodyMd: string; clusters: DigestCluster[] }>(`/digests/${id}`),
+    request<DigestDetail>(`/digests/${id}`),
 
   // ── 订阅 ────────────────────────────────────────────────
   listFeeds: (params: { folderId?: string | null } = {}) => {

@@ -226,6 +226,16 @@ export interface SaveDigestInput {
   model: string | null;
   costUsd: number | null;
   now?: number;
+  /**
+   * 引用表（`RenderResult.citations` 或 `fallbackCitations()`）。
+   *
+   * 必须显式传进来，**不能**从 body_md 里反查 —— body_md 落库前已经被
+   * `renderCitations` 把 `{{cite:cl_x}}` 换成了 `[1]`，簇 id 不在里面了。
+   * 3.5 之前 `GET /digests/:id` 就是这么反查的，所以 clusters 恒为空。
+   */
+  citations?: { index: number; id: string; title: string }[] | null;
+  /** 「值得一读」的事件 id（模型给的 `worth_reading`） */
+  worthReading?: string[] | null;
 }
 
 /**
@@ -237,6 +247,9 @@ export interface SaveDigestInput {
  *
  * id 保持不变（不重新生成）：简报可能已经被推送到邮件/Webhook，
  * 换 id 会让那些地方引用的旧链接失效。
+ *
+ * 覆盖时**引用表跟着覆盖**：重跑产生了新的事件集，残留旧引用会让
+ * 脚注号指向上一版的簇。
  */
 export function saveDigest(db: DatabaseSync, input: SaveDigestInput): string {
   const now = input.now ?? Date.now();
@@ -246,10 +259,18 @@ export function saveDigest(db: DatabaseSync, input: SaveDigestInput): string {
 
   const id = existing?.id ?? `dg_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
+  // 没有引用时存 NULL，不存 "[]"：两者在页面上表现不同 ——
+  // NULL 是"这份简报没有引用表"（老数据），"[]" 是"查了，确实一条都没有"。
+  // 存成 "[]" 会让"老数据缺字段"和"新数据无引用"不可区分。
+  const cites = input.citations && input.citations.length > 0
+    ? JSON.stringify(input.citations) : null;
+  const wr = input.worthReading && input.worthReading.length > 0
+    ? JSON.stringify(input.worthReading) : null;
+
   db.prepare(`
     INSERT INTO digests (id, user_id, kind, title, intro, body_md, period_start, period_end,
-      entry_count, cluster_count, model, cost_usd, delivered_at, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL,?)
+      entry_count, cluster_count, model, cost_usd, delivered_at, created_at, cites, worth_reading)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?,?)
     ON CONFLICT(user_id, kind, period_start) DO UPDATE SET
       title = excluded.title,
       intro = excluded.intro,
@@ -259,7 +280,9 @@ export function saveDigest(db: DatabaseSync, input: SaveDigestInput): string {
       cluster_count = excluded.cluster_count,
       model = excluded.model,
       cost_usd = excluded.cost_usd,
-      created_at = excluded.created_at
+      created_at = excluded.created_at,
+      cites = excluded.cites,
+      worth_reading = excluded.worth_reading
   `).run(
     id, input.userId, input.kind, input.body.title,
     input.body.highlights.join('\n'),
@@ -267,6 +290,7 @@ export function saveDigest(db: DatabaseSync, input: SaveDigestInput): string {
     input.periodStart, input.periodEnd,
     input.entryCount, input.clusterCount,
     input.model, input.costUsd, now,
+    cites, wr,
   );
   return id;
 }

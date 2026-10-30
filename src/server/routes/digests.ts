@@ -36,6 +36,7 @@ export function digestRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
         costUsd: x.cost_usd,
         deliveredAt: x.delivered_at,
         createdAt: x.created_at,
+        citeCount: parseJsonArray<unknown>(x.cites).length,
       })),
     });
   });
@@ -71,16 +72,73 @@ export function digestRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     ).get(c.req.param('id'), uid) as Record<string, unknown> | undefined;
     if (!row) throw notFound('简报不存在');
 
-    // 简报引用的簇：正文里只有 [1] [2] 这样的脚注号，
-    // 用户点开要能看到"第 1 条对应哪件事、那件事有几篇报道"。
-    const ids = String(row.body_md ?? '').match(/\{\{cite:([A-Za-z0-9_-]+)\}\}/g)
-      ?.map((m) => m.slice(7, -2)) ?? [];
-    const clusters = ids.length === 0 ? [] : ctx.dbh.db.prepare(`
-      SELECT id, title, summary, entry_count, source_count, heat
-        FROM clusters WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')})
-    `).all(uid, ...ids) as Record<string, unknown>[];
+    // 简报引用的簇：正文里只有 [1] [2] 这样的脚注号，用户点开要能看到
+    // "第 1 条对应哪件事、那件事有几篇报道、各方说法是否一致"。
+    //
+    // 引用表**从 cites 列读**，不从正文反查：body_md 落库前
+    // renderCitations 已经把 {{cite:cl_x}} 换成了 [1]，簇 id 不在里面。
+    // 3.5 之前这里是正则反查，永远匹配不到，clusters 恒为空 ——
+    // 接口 200、页面不报错，只是 [1] 点了没反应。
+    const cites = parseJsonArray<{ index: number; id: string; title: string }>(row.cites);
+    // worth_reading 的 id 通常**不在**引用表里（"低热度"就意味着正文没提它），
+    // 所以要一起查，否则标题会退化成裸 id。
+    const wrIds = parseJsonArray<string>(row.worth_reading);
+    const ids = [...new Set([...cites.map((x) => x.id), ...wrIds])];
 
-    return c.json({ ...shape(row), clusters });
+    // 一次查完，再按 cites 的顺序重排 ——
+    // SQL 的 IN 不保证顺序，而脚注号必须与正文的 [1][2][3] 对齐。
+    const byId = new Map<string, Record<string, unknown>>();
+    if (ids.length > 0) {
+      const rows = ctx.dbh.db.prepare(`
+        SELECT id, title, summary, key_points, consensus, conflicts,
+               entry_count, source_count, heat
+          FROM clusters WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')})
+      `).all(uid, ...ids) as Record<string, unknown>[];
+      for (const r of rows) byId.set(String(r.id), r);
+    }
+
+    // 簇被整窗重算清掉后，cites 里仍有标题（saveDigest 时存了快照）——
+    // 这时给一条只有标题的条目，脚注不会变成空号。
+    const clusters = cites.map((x) => {
+      const row2 = byId.get(x.id);
+      if (!row2) {
+        return {
+          id: x.id, index: x.index, title: x.title, summary: null,
+          keyPoints: [], consensus: [], conflicts: [],
+          entry_count: null, source_count: null, heat: null, missing: true,
+        };
+      }
+      return {
+        id: x.id,
+        index: x.index,
+        title: String(row2.title ?? x.title),
+        summary: row2.summary === null ? null : String(row2.summary),
+        keyPoints: parseJsonArray<string>(row2.key_points),
+        // conflicts 有两种历史形状：字符串数组，或 {claim, sources} 对象数组
+        consensus: parseJsonArray<string>(row2.consensus),
+        conflicts: parseJsonArray<{ claim: string; sources: string[] }>(row2.conflicts),
+        entry_count: row2.entry_count,
+        source_count: row2.source_count,
+        heat: row2.heat,
+        missing: false,
+      };
+    });
+
+    // 「值得一读」：模型给的是 id，要换成标题才可读
+    const wr = wrIds.map((id) => {
+      const hit = byId.get(id) ?? null;
+      const cite = cites.find((x) => x.id === id);
+      return {
+        id,
+        title: hit ? String(hit.title) : (cite?.title ?? id),
+        summary: hit && hit.summary !== null ? String(hit.summary) : null,
+        entryCount: hit?.entry_count ?? null,
+        sourceCount: hit?.source_count ?? null,
+        heat: hit?.heat ?? null,
+      };
+    });
+
+    return c.json({ ...shape(row), clusters, worthReading: wr });
   });
 
   /**
@@ -118,6 +176,23 @@ export function digestRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   return r;
 }
 
+/**
+ * 解析存成 JSON 的列。
+ *
+ * 坏数据一律当空数组：简报页读不出来时应该是"这一块没有内容"，
+ * 而不是整页 500。这些列都是我们自己写的，出现坏值说明迁移或手工改库
+ * 出了问题 —— 那时用户更需要能打开简报看正文。
+ */
+function parseJsonArray<T>(raw: unknown): T[] {
+  if (raw === null || raw === undefined || raw === '') return [];
+  try {
+    const v = JSON.parse(String(raw));
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function shape(row: Record<string, unknown>) {
   return {
     id: row.id,
@@ -133,5 +208,7 @@ function shape(row: Record<string, unknown>) {
     costUsd: row.cost_usd,
     deliveredAt: row.delivered_at,
     createdAt: row.created_at,
+    // 引用条数：页面上"3 个事件"这类概括文案要用，不必先拉全量详情
+    citeCount: parseJsonArray<unknown>(row.cites).length,
   };
 }

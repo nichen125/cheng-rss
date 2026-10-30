@@ -936,3 +936,362 @@
 }
 .hl-actions .hl-edit-link { margin: 0; }
 .hl-actions .hl-edit-link:disabled { opacity: 0.55; cursor: default; }
+
+/* ── 简报页（M3.5 / §15.4）──────────────────────────────────
+ *
+ * 它占「列表 + 阅读区」两列（sidebar 之外的剩余宽度），内部再分
+ * 「日期列表 + 正文」两栏 —— 与收件箱同一套肌肉记忆，用户不用重新学。
+ * 用 grid-column: 2 / -1 而不是把 .app 改成四列：简报是**替换**
+ * 前两栏的整块布局，不是新增一栏。
+ */
+.digest-page {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: var(--list-w) 1fr;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.digest-list {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.digest-gen-msg {
+  margin: 8px 12px 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--bg-hover);
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.digest-empty {
+  padding: 26px 18px;
+}
+.digest-empty h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.digest-empty p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--fg-dim);
+}
+
+.digest-date-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 40px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.digest-date-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'date meta'
+    'title title';
+  gap: 2px 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 9px 14px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.digest-date-item:hover { background: var(--bg-hover); }
+.digest-date-item.active {
+  background: var(--bg-hover);
+  border-left-color: var(--accent);
+}
+
+.digest-date {
+  grid-area: date;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.digest-date-meta {
+  grid-area: meta;
+  font-size: 11px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.digest-date-title {
+  grid-area: title;
+  font-size: 13px;
+  line-height: 1.5;
+  /* 两行截断：标题是模型写的概括句，可能很长 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.digest-reader {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--desk-bg, var(--bg));
+}
+
+.digest-doc {
+  position: relative;
+  max-width: 76ch;
+  margin: 26px auto 80px;
+  padding: 30px 34px 40px;
+  background: var(--paper-bg);
+  border: 1px solid var(--paper-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--paper-shadow);
+}
+
+.digest-title {
+  margin: 0 0 8px;
+  font-size: 25px;
+  line-height: 1.32;
+  letter-spacing: -0.01em;
+}
+
+.digest-period {
+  font-size: 12px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 22px;
+}
+
+/* 今日要点：三条粗体各一行，左边一条短线做视觉锚 */
+.digest-points {
+  list-style: none;
+  margin: 0 0 26px;
+  padding: 0 0 0 14px;
+  border-left: 2px solid var(--accent);
+}
+.digest-points li {
+  font-size: 14.5px;
+  line-height: 1.7;
+  font-weight: 600;
+  color: var(--fg);
+}
+.digest-points li + li { margin-top: 4px; }
+
+.digest-body {
+  font-size: 15.5px;
+  line-height: 1.78;
+}
+.digest-body h2 {
+  margin: 28px 0 10px;
+  font-size: 17px;
+}
+.digest-body h3 {
+  margin: 20px 0 8px;
+  font-size: 15.5px;
+}
+.digest-body p { margin: 0 0 13px; }
+.digest-body ul { margin: 0 0 13px; padding-left: 20px; }
+.digest-body li { margin-bottom: 5px; }
+.digest-body hr {
+  border: none;
+  border-top: 1px solid var(--paper-line);
+  margin: 26px 0;
+}
+
+/* 脚注号：小、不抢眼，但可点。hover 才有底色 —— 常驻底色会让正文
+ * 到处是小方块，读起来像表格。 */
+.digest-cite {
+  display: inline-block;
+  min-width: 15px;
+  padding: 0 3px;
+  margin: 0 1px;
+  border: none;
+  border-radius: 4px;
+  background: rgba(96, 165, 250, 0.16);
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  vertical-align: 1px;
+  cursor: pointer;
+  text-align: center;
+}
+.digest-cite:hover { background: rgba(96, 165, 250, 0.3); }
+.digest-cite.active { background: var(--accent); color: var(--bg); }
+.digest-cite-missing {
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: default;
+}
+
+/* 事件卡片区 */
+.digest-clusters {
+  margin-top: 34px;
+  padding-top: 22px;
+  border-top: 1px solid var(--paper-line);
+}
+
+.digest-section-head {
+  margin: 0 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.digest-cluster {
+  padding: 12px 0 12px 12px;
+  border-left: 2px solid var(--border);
+}
+.digest-cluster + .digest-cluster { margin-top: 10px; }
+.digest-cluster[data-missing='1'] { opacity: 0.62; }
+
+.digest-cluster-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.digest-cluster-index {
+  font-size: 11.5px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.digest-cluster-title {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.digest-cluster-meta {
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.digest-cluster-summary {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--fg-dim);
+}
+
+/* 一致 / 分歧：**左侧细色条 + 小字**，不用红色感叹号（§15.4）。
+ * 冲突是常态，不是警报 —— 用警示色会让用户以为出了故障。 */
+.digest-consensus,
+.digest-conflict {
+  margin-top: 7px;
+  font-size: 13px;
+  line-height: 1.65;
+  padding-left: 9px;
+  border-left: 2px solid var(--border);
+  color: var(--fg-dim);
+}
+.digest-consensus { border-left-color: rgba(74, 222, 128, 0.55); }
+.digest-conflict { border-left-color: rgba(250, 204, 21, 0.6); }
+
+.digest-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  color: var(--fg-faint);
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+}
+
+.digest-conflict-src {
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+.digest-cluster-gone {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.digest-wr-section {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--paper-line);
+}
+.digest-wr { margin: 0; padding-left: 20px; }
+.digest-wr li {
+  font-size: 13.5px;
+  line-height: 1.7;
+  margin-bottom: 5px;
+}
+.digest-wr .muted { color: var(--fg-faint); font-size: 12px; }
+
+.digest-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 30px;
+  padding-top: 16px;
+  border-top: 1px solid var(--paper-line);
+  font-size: 12px;
+}
+.digest-foot .spacer { flex: 1; }
+.digest-foot .muted { color: var(--fg-faint); }
+
+/* 脚注浮层：贴在正文内部，不跳页。sticky 底部让它跟着滚动位置留在眼前 */
+.digest-cite-card {
+  position: sticky;
+  bottom: 12px;
+  margin-top: 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.22);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.digest-cite-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.digest-cite-card-head .icon-btn { margin-left: auto; }
+
+.digest-cite-card-idx {
+  color: var(--accent);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.digest-cite-card p { margin: 0 0 6px; color: var(--fg-dim); }
+
+.digest-cite-card-meta {
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}
+
+.digest-cite-card-conflict {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}

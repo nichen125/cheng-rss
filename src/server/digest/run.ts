@@ -173,12 +173,26 @@ export async function runDigest(
   const dayHl = listDayHighlights(db, userId, dayKey, now);
   md += renderDigestHighlightSection(dayHl);
 
+  // 引用表必须**显式**存下来（§15.4 的脚注点开要看到"第 1 条是哪件事"）。
+  //
+  // body_md 里的 {{cite:cl_x}} 已经被 renderCitations 换成了 [1]，
+  // 所以从正文反查簇 id 是不可能的 —— 之前 GET /digests/:id 就是这么做的，
+  // clusters 恒为空、脚注点了没反应，而接口返回 200 一切正常。
+  //
+  // 兜底路径（模型一个引用都没写）也要存：那时脚注是程序补的"今日事件索引"，
+  // 用户同样要能点开看是哪几件事。
+  const cited = (gen.rendered?.citations.length ?? 0) > 0
+    ? gen.rendered!.citations
+    : fallbackCitations(inputs);
+
   const body = { ...gen.body, body_md: md };
   const id = saveDigest(db, {
     userId, kind, body,
     periodStart: dayKey, periodEnd: now,
     entryCount: win.items.length, clusterCount: inputs.length,
     model: client.config.models.strong, costUsd, now,
+    citations: cited,
+    worthReading: gen.body.worth_reading,
   });
 
   recordAttempt(db, userId, cfg, dayKey, true, null, now);

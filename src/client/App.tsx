@@ -8,6 +8,7 @@ import {
   IconClock, IconClose, IconExternal, IconFolder, IconInbox, IconMenu, IconRefresh, IconRss,
   IconSearch, IconSettings, IconSparkle, IconStar,
 } from './icons.tsx';
+import { DigestPage } from './digest/DigestPage.tsx';
 import { useHighlights } from './highlights/useHighlights.ts';
 import { HighlightToolbar, HighlightList } from './highlights/HighlightUI.tsx';
 import { SettingsModal, type SettingsSection } from './settings/SettingsModal.tsx';
@@ -26,7 +27,7 @@ import {
 // M0 的数据能力只有「条目读取 + 已读/收藏」，所以导航里除收件箱外的
 // 入口都标了"待接入"，不让用户点了没反应。
 
-type View = 'inbox' | 'unread' | 'starred' | 'history';
+type View = 'inbox' | 'unread' | 'starred' | 'history' | 'digest';
 
 interface NavItem {
   key: View;
@@ -69,12 +70,19 @@ const NAV: NavItem[] = [
   { key: 'unread', label: '未读', icon: <IconCircle />, count: 'unread' },
   { key: 'starred', label: '已收藏', icon: <IconStar />, count: 'starred' },
   { key: 'history', label: '历史', icon: <IconClock /> },
+  // 简报（§15.4 / 3.5）。它是一等入口而不是"即将支持"：
+  // 每天生成的简报如果只能在设置页里看到，等于没做。
+  { key: 'digest', label: '简报', icon: <IconSparkle /> },
 ];
 
-// 未接入的导航项：给用户"以后会有"的确定感，而不是装作不存在
-const SOON: { label: string; icon: React.ReactNode }[] = [
-  { label: '简报', icon: <IconSparkle /> },
-];
+/**
+ * 未接入的导航项。
+ *
+ * 现在是**空的** —— M0~M4 的需求项已全部落地。保留这个数组而不是删掉
+ * 整块渲染逻辑：M5（检索）与 M6（备份）会再来加，而"待接入"这个标签
+ * 本身是有价值的（点了没反应 vs 明确标注未实现，后者更诚实）。
+ */
+const SOON: { label: string; icon: React.ReactNode }[] = [];
 
 /**
  * 条目的额外过滤（与 view 正交）。
@@ -331,6 +339,10 @@ function Main(props: { user: User; onLogout: () => void }) {
   }, [query]);
 
   const load = useCallback(async (reset: boolean) => {
+    // 简报视图用的是 /digests，与条目列表无关。不加这一句的话切到简报
+    // 会白跑一次 listEntries（服务端把未知 view 当 inbox 处理，返回一大堆
+    // 用不上的数据），而且它会覆盖 items 让"返回上一视图"时列表闪一下。
+    if (view === 'digest') { setLoading(false); return; }
     setLoading(true);
     setErr('');
     try {
@@ -1038,16 +1050,22 @@ function Main(props: { user: User; onLogout: () => void }) {
           </>
         )}
 
-        <div className="nav-section">即将支持</div>
-        <nav className="nav">
-          {SOON.map((s) => (
-            <button key={s.label} className="nav-item soon" disabled title="M2~M3 落地">
-              <span className="nav-icon">{s.icon}</span>
-              <span className="nav-label">{s.label}</span>
-              <span className="soon-tag">待接入</span>
-            </button>
-          ))}
-        </nav>
+        {/* 「即将支持」整块在 SOON 为空时不渲染 ——
+            一个只有标题、下面什么都没有的分区比没有更糟。 */}
+        {SOON.length > 0 && (
+          <>
+            <div className="nav-section">即将支持</div>
+            <nav className="nav">
+              {SOON.map((s2) => (
+                <button key={s2.label} className="nav-item soon" disabled>
+                  <span className="nav-icon">{s2.icon}</span>
+                  <span className="nav-label">{s2.label}</span>
+                  <span className="soon-tag">待接入</span>
+                </button>
+              ))}
+            </nav>
+          </>
+        )}
 
         <div className="sidebar-foot">
           {/* 侧栏底部只留一个齿轮（§15.15）：账户信息与订阅/分组管理
@@ -1085,9 +1103,12 @@ function Main(props: { user: User; onLogout: () => void }) {
         />
       )}
 
-      {/* 列表与阅读区。
-          订阅不再是独立页 —— 它已经在配置弹窗里（§15.15），
-          所以这里不再有 "page === feeds" 的分支。 */}
+      {/* 简报视图：整块替换「列表 + 阅读区」。
+          它是同层的另一种布局（日期列表 + 简报正文），
+          塞进 list-pane 会渲染出一个空着的阅读区。 */}
+      {view === 'digest' && <DigestPage narrow={false} />}
+
+      {view !== 'digest' && (
       <>
       {/* ── 列表栏 ───────────────────────────────────────── */}
       <section className={`list-pane ${openId ? 'narrow' : ''}`}>
@@ -1370,7 +1391,8 @@ function Main(props: { user: User; onLogout: () => void }) {
           />
         )}
       </section>
-        </>
+      </>
+      )}
 
       {/* ── 移动端底部导航（≤640px 才显示，见 styles.css）───────── */}
       <nav className="tabbar">

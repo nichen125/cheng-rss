@@ -96,6 +96,31 @@ export function DigestPage(props: DigestPageProps) {
     return m;
   }, [detail]);
 
+  // 脚注浮层必须能关掉。
+  //
+  // 它是 sticky 的，会盖住正文底部一块 —— 不给关闭路径的话用户只能点
+  // 另一个 [n]，或者滚到看不见它为止，那等于"读正文时永久挡一条"。
+  // 三个关闭途径：右上角 ×、点浮层外面、Esc。
+  useEffect(() => {
+    if (activeCite === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setActiveCite(null); }
+    };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('.digest-cite-card')) return;
+      // 点脚注本身不算"外面" —— 那是在切换目标，由它自己的 onClick 处理
+      if (t?.closest('.digest-cite')) return;
+      setActiveCite(null);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [activeCite]);
+
   const blocks = useMemo(() => parseMarkdown(detail?.bodyMd ?? ''), [detail?.bodyMd]);
   const cite = activeCite === null ? null : (detail?.clusters ?? []).find((c) => c.index === activeCite);
 
@@ -194,7 +219,7 @@ export function DigestPage(props: DigestPageProps) {
                     <ul key={i}>
                       {b.items.map((it, j) => (
                         <li key={j}>
-                          {renderInline(it, byIndex, setActiveCite, activeCite)}
+                          {renderInline(it, byIndex, (n) => setActiveCite(activeCite === n ? null : n), activeCite)}
                         </li>
                       ))}
                     </ul>
@@ -202,7 +227,7 @@ export function DigestPage(props: DigestPageProps) {
                 }
                 return (
                   <p key={i}>
-                    {renderInline(b.text, byIndex, setActiveCite, activeCite)}
+                    {renderInline(b.text, byIndex, (n) => setActiveCite(activeCite === n ? null : n), activeCite)}
                   </p>
                 );
               })}

@@ -475,6 +475,49 @@ if (!browser) {
     check('脚注卡片里说明了"几篇报道 / 几个来源"', () =>
       ok(/\d+\s*篇/.test(String(footnote?.text)), String(footnote?.text)?.slice(0, 160)));
 
+    // 浮层必须能关掉。它 sticky 在正文底部，关不掉等于读正文时永久
+    // 挡一条 —— 而"能点开"的断言不会发现这件事。
+    const dismissed = await evalJs(`(async () => {
+      const card = () => document.querySelector('.digest-cite-card');
+      if (!card()) return { err: 'no-card' };
+
+      // ① Esc
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise(r => setTimeout(r, 300));
+      const afterEsc = !card();
+
+      // ② 再点开，然后点浮层外面
+      document.querySelector('.digest-body .digest-cite')?.click();
+      await new Promise(r => setTimeout(r, 300));
+      const reopened = Boolean(card());
+      document.querySelector('.digest-body')?.dispatchEvent(
+        new MouseEvent('mousedown', { bubbles: true }),
+      );
+      await new Promise(r => setTimeout(r, 300));
+      const afterOutside = !card();
+
+      // ③ 再点开，点同一个脚注第二次应收起
+      document.querySelector('.digest-body .digest-cite')?.click();
+      await new Promise(r => setTimeout(r, 300));
+      const third = Boolean(card());
+      document.querySelector('.digest-body .digest-cite')?.click();
+      await new Promise(r => setTimeout(r, 300));
+      const afterToggle = !card();
+
+      return { afterEsc, reopened, afterOutside, third, afterToggle };
+    })()`);
+
+    check('Esc 能关掉脚注浮层', () =>
+      ok(dismissed?.afterEsc === true, JSON.stringify(dismissed)));
+    check('点浮层外面能关掉', () => ok(
+      dismissed?.reopened === true && dismissed?.afterOutside === true,
+      JSON.stringify(dismissed),
+    ));
+    check('再点同一个脚注能收起（切换而不是只能叠着）', () => ok(
+      dismissed?.third === true && dismissed?.afterToggle === true,
+      JSON.stringify(dismissed),
+    ));
+
     // ④ 「现在生成」按钮存在且能点（无 key 时应给提示而不是崩）
     const genBtn = await evalJs(`(() => {
       const b = [...document.querySelectorAll('.digest-page button, .digest-pane button')]

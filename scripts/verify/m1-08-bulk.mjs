@@ -23,6 +23,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
+import { removeDir } from '../lib/tmp.mjs';
+
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -357,7 +359,7 @@ async function uiChecks() {
         execFileSync('taskkill', ['/F', '/T', '/PID', String(br.pid)], { stdio: 'ignore' });
       } else br.kill('SIGKILL');
     } catch { /* 已退出 */ }
-    try { rmSync(prof, { recursive: true, force: true }); } catch { /* ignore */ }
+    removeDir(prof);
   };
   process.on('exit', killBr);
 

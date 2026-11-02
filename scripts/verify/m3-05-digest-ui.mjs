@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, gt, summary } from './harness.mjs';
+import { removeDir } from '../lib/tmp.mjs';
 import { killTree } from '../lib/proc.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -154,7 +155,12 @@ let edge = null;
 const cleanup = () => {
   killTree(proc.pid);
   killTree(edge?.pid);
-  try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  // 本进程自己也开着 tmp 里的 app.db。不 close 的话 removeDir 永远失败 ——
+  // 重试再多次也没用，因为持有者就是我们自己（实测残留 21.6 MB）。
+  try { h.close(); } catch { /* 可能已经关了 */ }
+  // tmp 里还装着浏览器 profile（见下方 `profile = join(tmp, 'profile')`），
+  // killTree 之后句柄要 100ms 左右才松手，removeDir 内部会重试
+  removeDir(tmp);
 };
 process.on('exit', cleanup);
 

@@ -5,12 +5,14 @@
 //   node scripts/verify-all.mjs            # 跑全部
 //   node scripts/verify-all.mjs m0-0[5-8]  # 只跑匹配的
 //   node scripts/verify-all.mjs --no-docker-path
+//   node scripts/verify-all.mjs --keep-tmp # 留着 .tmp/verify 便于排查
 //
 // 退出码：全部通过为 0，任一失败为 1。
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TMP_ROOT, cleanTmp, human, useProjectTmp } from './lib/tmp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -23,6 +25,19 @@ if (!existsSync(nodeBin)) {
 const args = process.argv.slice(2);
 const pattern = args.find((a) => !a.startsWith('--'));
 const skipDocker = args.includes('--no-docker-path');
+
+// 临时目录落在项目内（PLAN §19.10c）。子脚本通过继承的环境变量拿到它，
+// 所以这里设一次就覆盖全部 52 个脚本，不用逐个改。
+useProjectTmp();
+if (!args.includes('--keep-tmp')) {
+  const before = cleanTmp();
+  if (before.removed > 0) {
+    process.stdout.write(
+      `\u001b[33m!\u001b[0m 清掉上一轮残留：${before.removed} 项 / ${human(before.freedBytes)}`
+      + `${before.failed ? `（${before.failed} 项删不掉，见结尾）` : ''}\n`,
+    );
+  }
+}
 
 const verifyDir = join(root, 'scripts/verify');
 let files = readdirSync(verifyDir)
@@ -136,4 +151,20 @@ if (fail === 0) {
 } else {
   process.stdout.write(`\u001b[31m${fail} 个脚本失败\u001b[0m\n`);
   process.exitCode = 1;
+}
+
+// 整轮结束后再删一次。
+//
+// 子脚本的 cleanup 挂在 onExit 上，而 Windows 上进程被硬杀（超时 SIGKILL）
+// 时它一次都不执行；就算执行了，浏览器 profile 也会因为句柄没释放而 EPERM。
+// 这一道是唯一能保证"跑完不留垃圾"的地方，所以它必须存在 ——
+// 实测没有它时，一次全量验收留 32 个目录 / 4.8GB。
+if (!args.includes('--keep-tmp')) {
+  const t = cleanTmp();
+  if (t.removed > 0 || t.failed > 0) {
+    process.stdout.write(
+      `\u001b[2m清理 ${TMP_ROOT}：删除 ${t.removed} 项 / ${human(t.freedBytes)}`
+      + `${t.failed ? `，${t.failed} 项仍被占用（稍后再跑一次即可）` : ''}\u001b[0m\n`,
+    );
+  }
 }

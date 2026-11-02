@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { killTree } from './proc.mjs';
+import { removeDir } from './tmp.mjs';
 
 // 无头浏览器的启动与 CDP 连接（验收脚本共用）。
 //
@@ -80,7 +81,7 @@ export async function launchBrowser(opts = {}) {
 
   const close = () => {
     killTree(proc.pid);
-    try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+    removeDir(profile);
   };
   return { proc, wsUrl, close, profile, browserPath };
 }

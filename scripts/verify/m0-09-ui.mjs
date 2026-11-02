@@ -26,6 +26,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
+import { removeDir } from '../lib/tmp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -130,7 +131,7 @@ const proc = spawn(browser, [
 const cleanup = () => {
   stopServer();
   killTree(proc.pid);
-  try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+  removeDir(profile);
   try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
 };
 onExit(cleanup);

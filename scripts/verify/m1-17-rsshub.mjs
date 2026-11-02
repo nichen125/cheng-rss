@@ -27,6 +27,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
+import { removeDir } from '../lib/tmp.mjs';
 import {
   domainOf, fillRoute, joinRsshub, looksLikeUrl, paramsOf,
 } from '../../src/server/rsshub/library.ts';
@@ -495,7 +496,7 @@ if (!browserPath) {
   // 也是 msedge.exe（这条是硬约束，之前踩过）。
   const killBrowser = () => {
     try { killTree(proc.pid); } catch { /* 已退出 */ }
-    try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+    removeDir(profile);
   };
   onExit(killBrowser);
 

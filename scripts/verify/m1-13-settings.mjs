@@ -39,6 +39,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
+import { removeDir } from '../lib/tmp.mjs';
 import { openSettings as openSettingsShared } from '../lib/ui.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -171,7 +172,7 @@ const proc = spawn(browser, [
 
 const killBrowser = () => {
   killTree(proc.pid);
-  try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+  removeDir(profile);
 };
 onExit(() => { killBrowser(); cleanup(); });
 

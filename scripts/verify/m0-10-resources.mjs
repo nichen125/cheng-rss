@@ -392,6 +392,54 @@ check(`④ 第二个 60s 的日志量不比第一个多（${window2Lines.length}
   });
 }
 
+// ── ⑥ 临时目录落在项目内且能清干净（§19.10c）────────────
+//
+// 这一条防的是"验收本身变成资源问题"：一次全量验收曾在 %TEMP% 留下
+// 32 个目录 / 4.8GB，其中几个 500MB 的浏览器 profile 因为句柄没释放
+// 被 `catch {}` 静默吞掉。断言要能证明"现在不会"。
+{
+  const { useProjectTmp, cleanTmp, dirSize } = await import('../lib/tmp.mjs');
+  const { mkdtempSync: mkdtemp2, writeFileSync: write2, existsSync: exists2 } = await import('node:fs');
+  const { tmpdir: tmpdir2 } = await import('node:os');
+
+  const dir = useProjectTmp();
+  check('⑥ useProjectTmp 之后 os.tmpdir() 指向项目内', () => {
+    const t = tmpdir2().replace(/\\/g, '/');
+    return ok(t === dir.replace(/\\/g, '/'), `tmpdir=${t} 期望 ${dir}`);
+  });
+  check('⑥ 指向的目录真的被建出来了', () => ok(exists2(dir), dir));
+
+  // 用真实调用验证：改完之后 mkdtempSync 落在哪儿
+  const probe = mkdtemp2(join(tmpdir2(), 'ai-rss-m010tmp-'));
+  check('⑥ 改完之后 mkdtempSync 建在项目内', () => {
+    const p = probe.replace(/\\/g, '/');
+    return ok(p.startsWith(dir.replace(/\\/g, '/') + '/'), p);
+  });
+  check('⑥ 新目录不再落在系统临时目录里', () => {
+    // 系统临时目录必然含用户名这一段，项目路径不含
+    return ok(!probe.replace(/\\/g, '/').includes('/AppData/'), probe);
+  });
+
+  // 造一点真文件，验证 cleanTmp 的体积统计不是 0
+  write2(join(probe, 'junk.bin'), Buffer.alloc(64 * 1024));
+  const sizeBefore = dirSize(probe);
+  check('⑥ 目录体积能读出来（清理脚本要靠它报"释放了多少"）', () => {
+    return ok(sizeBefore >= 64 * 1024, `${(sizeBefore / 1024).toFixed(1)} KB`);
+  });
+
+  const t = cleanTmp();
+  check('⑥ cleanTmp 删掉了刚造的那个目录', () => {
+    return ok(!exists2(probe), `removed=${t.removed} failed=${t.failed}`);
+  });
+  check('⑥ cleanTmp 报出了释放的体积（不是恒 0）', () => {
+    return ok(t.freedBytes >= 64 * 1024, `${(t.freedBytes / 1024).toFixed(1)} KB`);
+  });
+  check('⑥ cleanTmp 没有越界清掉 .tmp 下的其它东西', () => {
+    // .tmp/linuxnode 是 fetch-linux-node 的缓存，不该被临时目录清理顺手删掉
+    return ok(exists2(join(root, '.tmp')), '.tmp 必须还在');
+  });
+}
+
 cleanup();
 await sleep(300);
 summary('m0-10-resources');

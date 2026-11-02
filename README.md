@@ -10,6 +10,9 @@
 > 单篇总结 + 提示词可编辑（2.7）、资源与性能预算（0.10）。
 > 52 个验收脚本全绿。
 > 按 [PLAN.md](PLAN.md) 的分步计划推进，下一步是 M5（检索 + MCP 服务器）。
+>
+> **临时文件一律留在项目内**：验收与调试脚本写 `.tmp/`，不写系统临时目录。
+> `verify-all` 收尾会自动清；手动清用 `node scripts/clean-tmp.mjs`（详见 PLAN §19.10c）。
 
 **要跑 AI 分析，需要一个 OpenAI 兼容的 key**。两种给法任选其一：
 
@@ -571,54 +574,59 @@ node scripts/verify-all.mjs
 输出汇总：
 
 ```
-验收汇总  48 个脚本，耗时 491s
-  PASS  docker-path.mjs            3.8s
-  PASS  m0-01-toolchain.mjs        1.3s
+验收汇总  52 个脚本，耗时 748s
+  PASS  docker-path.mjs            10.3s
+  PASS  m0-01-toolchain.mjs        2.3s
   ...
-  PASS  m0-09-ui.mjs               11.1s
-  PASS  m1-01-feed-parse.mjs       0.4s
+  PASS  m0-09-ui.mjs               11.4s
+  PASS  m0-10-resources.mjs       188.8s
+  PASS  m1-01-feed-parse.mjs       0.3s
   ...
-  PASS  m1-05-mobile.mjs           9.3s
-  PASS  m1-06-feeds-ui.mjs         7.5s
-  PASS  m1-07-folders.mjs          1.4s
-  PASS  m1-08-bulk.mjs             10.0s
-  PASS  m1-09-reader.mjs           20.5s
-  PASS  m1-10-ui-scale.mjs         10.8s
-  PASS  m1-11-folder-feeds.mjs     41.7s
-  PASS  m1-12-inbox-view.mjs       24.0s
-  PASS  m1-13-settings.mjs         28.1s
-  PASS  m1-14-extract.mjs          3.2s
-  PASS  m1-15-dedupe.mjs           2.0s
-  PASS  m1-16-ui-api.mjs           6.6s
-  PASS  m1-17-rsshub.mjs          11.0s
-  PASS  m1-18-sidebar-tree.mjs     15.5s
-  PASS  m1-19-density.mjs          14.3s
-  PASS  m1-20-reader-toc.mjs       78.9s
-  PASS  m1-21-default-unread.mjs   17.5s
-  PASS  m1-22-empty-scope.mjs      45.8s
-  PASS  m1-23-mark-scope-read.mjs   9.3s
-  PASS  m1-24-pane-head.mjs        11.9s
-  PASS  m1-26-ungrouped.mjs        31.5s
-  PASS  m2-01-ai-client.mjs         0.7s
-  PASS  m2-02-analyze.mjs          19.3s
+  PASS  m1-04-feeds.mjs            1.2s
+  PASS  m1-05-mobile.mjs           11.5s
+  PASS  m1-06-feeds-ui.mjs         12.3s
+  PASS  m1-07-folders.mjs          1.7s
+  PASS  m1-08-bulk.mjs             10.9s
+  PASS  m1-09-reader.mjs           21.4s
+  PASS  m1-10-ui-scale.mjs         12.8s
+  PASS  m1-11-folder-feeds.mjs     52.2s
+  PASS  m1-12-inbox-view.mjs       24.5s
+  PASS  m1-13-settings.mjs         28.9s
+  PASS  m1-14-extract.mjs           3.2s
+  PASS  m1-15-dedupe.mjs            2.2s
+  PASS  m1-16-ui-api.mjs            6.6s
+  PASS  m1-17-rsshub.mjs           10.8s
+  PASS  m1-18-sidebar-tree.mjs     17.4s
+  PASS  m1-19-density.mjs          17.0s
+  PASS  m1-20-reader-toc.mjs       82.9s
+  PASS  m1-21-default-unread.mjs   19.4s
+  PASS  m1-22-empty-scope.mjs      46.3s
+  PASS  m1-23-mark-scope-read.mjs   9.6s
+  PASS  m1-24-pane-head.mjs        12.0s
+  PASS  m1-26-ungrouped.mjs        15.9s
+  PASS  m2-01-ai-client.mjs         0.8s
+  PASS  m2-02-analyze.mjs          19.6s
   PASS  m2-03-classify.mjs          0.4s
-  PASS  m2-04-embed.mjs             0.3s
+  PASS  m2-04-embed.mjs             0.4s
   PASS  m2-05-budget.mjs            7.5s
-  PASS  m2-06-api-key.mjs         24.8s
-  PASS  m2-07-summary.mjs         11.6s
+  PASS  m2-06-api-key.mjs          10.1s
+  PASS  m2-07-summary.mjs           1.5s
   PASS  m3-01-cluster.mjs           0.2s
   PASS  m3-02-cluster-summary.mjs   0.2s
   PASS  m3-03-digest.mjs            0.2s
-  PASS  m3-04-schedule.mjs          1.3s
-  PASS  m3-05-digest-ui.mjs         9.3s
-  PASS  m4-01-anchor.mjs             0.2s
-  PASS  m4-02-highlights-api.mjs     1.2s
-  PASS  m4-03-highlights-ui.mjs     17.7s
-  PASS  m4-04-ai-linkage.mjs         1.2s
-全部通过 48/48
+  PASS  m3-04-schedule.mjs          1.2s
+  PASS  m3-05-digest-ui.mjs        10.8s
+  PASS  m4-01-anchor.mjs            0.2s
+  PASS  m4-02-highlights-api.mjs    1.3s
+  PASS  m4-03-highlights-ui.mjs    18.2s
+  PASS  m4-04-ai-linkage.mjs        1.4s
+全部通过 52/52
 ```
 
-> 加 `--no-docker-path`（跳过 Docker 产物验证）时是 47 个脚本、502s。
+> **临时文件都落在 `.tmp/verify`**，不写系统临时目录；`verify-all` 收尾自动清。
+> 加 `--keep-tmp` 保留现场排查，`node scripts/clean-tmp.mjs` 手动清（PLAN §19.10c）。
+>
+> 加 `--no-docker-path`（跳过 Docker 产物验证）时少 1 个脚本。
 > 本机没下载 linux node 时用这个更快；产物验证在 CI 里跑。
 
 单独跑某一步：

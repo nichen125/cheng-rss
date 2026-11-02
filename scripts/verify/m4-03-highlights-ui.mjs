@@ -20,6 +20,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, gt, summary } from './harness.mjs';
 import { killTree } from '../lib/proc.mjs';
+import { removeDir } from '../lib/tmp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BROWSERS = process.platform === 'win32'
@@ -56,7 +57,8 @@ let edge = null;
 const cleanup = () => {
   killTree(proc.pid);
   killTree(edge?.pid);
-  try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  // dir 里装着浏览器 profile：killTree 后句柄还没释放，普通 rmSync 会 EPERM
+  removeDir(dir);
 };
 process.on('exit', cleanup);
 

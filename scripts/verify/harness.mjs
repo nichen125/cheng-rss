@@ -6,6 +6,13 @@
 //   - 检查产物，不检查"代码里有没有某函数"
 //   - 输出可机读的 PASS/FAIL 汇总，退出码非零即失败
 
+import { useProjectTmp } from '../lib/tmp.mjs';
+
+// 临时目录重定向必须在任何 mkdtempSync 之前生效，所以放在模块顶层。
+// 各脚本照旧写 `mkdtempSync(join(tmpdir(), 'x'))`，落到项目内 .tmp/verify。
+// 实测 Windows 上 tmpdir() 每次调用都读 TEMP，不缓存（PLAN §19.10c）。
+useProjectTmp();
+
 const results = [];
 let currentGroup = null;
 

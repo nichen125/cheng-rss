@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { group, check, eq, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
+import { removeDir } from '../lib/tmp.mjs';
 import { bucketOf, groupByDay, HISTORY_BUCKETS } from '../../src/server/entries/history.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -491,7 +492,7 @@ if (!browserPath) {
   // （用户自己的浏览器也是 msedge.exe）。
   const killBrowser = () => {
     try { killTree(proc.pid); } catch { /* 已退出 */ }
-    try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+    removeDir(profile);
   };
   onExit(killBrowser);
 

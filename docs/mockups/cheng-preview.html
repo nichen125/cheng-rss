@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>澄 · 视觉草图</title>
+<style>
+/* ─────────────────────────────────────────────────────────────
+   澄 / CHENG — 视觉草图（静态预览，不参与构建）
+
+   方向：沉淀。信息从 RSS 流进来，AI 压一遍，留下的才是你的。
+   四条设计主张：
+     1. 亮色是主色，暗色跟随系统；三层底色靠明度差分带，不靠粗线。
+     2. 强调色只出现在三处：主按钮、当前导航项、正文外链。
+     3. 时间是结构，不是元信息 —— 列表左侧竖排日期做"沉积层"。
+     4. 列表用无衬线（扫描），正文用衬线（阅读）。两种任务两种字。
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  /* 三层底色：暗（侧栏/桌面）→ 白（列表/内容）→ 纸（浮起）。
+     靠明度差分层，不靠粗线。强调色只出现在主按钮、当前导航项、正文链接。 */
+  --bg: #ffffff;
+  --bg-sunken: #f7f8fa;
+  --bg-elev: #ffffff;
+  --bg-elev2: #f3f5f8;
+  --bg-hover: #f1f3f7;
+  --bg-active: #e8ecf2;
+  --fg: #14171c;
+  --fg-dim: #58616e;
+  --fg-faint: #8c95a3;
+  --border: #e4e8ee;
+  --border-soft: #eef1f5;
+
+  --accent: #0f766e;
+  --accent-hover: #0d6a63;
+  --accent-soft: #e7f3f1;
+  --accent-fg: #ffffff;
+
+  --must: #c2410c;
+  --worth: #a16207;
+  --ok: #15803d;
+
+  --paper-bg: #ffffff;
+  --paper-line: #e9edf3;
+  --desk-bg: #f7f8fa;
+  --sheet-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 32px rgba(16,24,40,.06);
+  --shadow-sm: 0 1px 2px rgba(16,24,40,.05);
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong, simsun, Georgia, serif;
+  --sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
+          -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --sidebar-w: 196px;
+  --list-w: 368px;
+  color-scheme: light;
+}
+
+/* 暗色跟随系统；预览页也支持 Class 强制（?theme=dark） */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171c;
+    --bg-sunken: #0f1115;
+    --bg-elev: #1a1d23;
+    --bg-elev2: #1f232a;
+    --bg-hover: #22262e;
+    --bg-active: #2a2f38;
+    --fg: #e9ecf1;
+    --fg-dim: #a4adba;
+    --fg-faint: #727c8a;
+    --border: #2a2f38;
+    --border-soft: #20242b;
+    --accent: #4fd1c5;
+    --accent-hover: #6bded3;
+    --accent-soft: rgba(79, 209, 197, 0.12);
+    --accent-fg: #0f1115;
+    --must: #f97362;
+    --worth: #d9a441;
+    --ok: #4ade80;
+    --paper-bg: #1a1d23;
+    --paper-line: #242830;
+    --desk-bg: #0f1115;
+    --sheet-shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 40px rgba(0,0,0,.35);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+}
+
+/* ?theme=dark 强制暗色（预览用；正式构建里没有这个开关，只跟随系统） */
+:root[data-theme='dark'] {
+    --bg: #15171c;
+    --bg-sunken: #0f1115;
+    --bg-elev: #1a1d23;
+    --bg-elev2: #1f232a;
+    --bg-hover: #22262e;
+    --bg-active: #2a2f38;
+    --fg: #e9ecf1;
+    --fg-dim: #a4adba;
+    --fg-faint: #727c8a;
+    --border: #2a2f38;
+    --border-soft: #20242b;
+    --accent: #4fd1c5;
+    --accent-hover: #6bded3;
+    --accent-soft: rgba(79, 209, 197, 0.12);
+    --accent-fg: #0f1115;
+    --must: #f97362;
+    --worth: #d9a441;
+    --ok: #4ade80;
+    --paper-bg: #1a1d23;
+    --paper-line: #242830;
+    --desk-bg: #0f1115;
+    --sheet-shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 40px rgba(0,0,0,.35);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
+    color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+a { color: inherit; text-decoration: none; }
+
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) var(--list-w) 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── 侧栏 ─────────────────────────────────────────────── */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  padding: 14px 10px 10px;
+  overflow: hidden;
+}
+
+/* 车站牌式字标：一枚方块（三道逐级变短的横线）+ 字名 + 一个英文小注 */
+.brand { display: flex; align-items: center; gap: 9px; padding: 2px 8px 18px; }
+.brand .mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--accent); color: var(--accent-fg);
+}
+.brand .name { font-size: 15px; font-weight: 600; letter-spacing: .02em; color: var(--fg); }
+.brand .sub {
+  margin-left: auto;
+  font-size: 10px; letter-spacing: .08em;
+  color: var(--fg-faint);
+}
+
+.nav { display: flex; flex-direction: column; gap: 1px; }
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px 7px 11px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  font-size: 13.5px;
+  transition: background 110ms, color 110ms;
+}
+.nav-item:hover { background: var(--bg-hover); color: var(--fg); }
+/* 激活态：实心淡强调色底 + 强调色字。
+   这个位置一天要看几十次，值得给一块有重量的底色；一道竖线太轻。 */
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.nav-item .ic { display: inline-flex; opacity: .8; flex-shrink: 0; }
+.nav-item.active .ic { opacity: 1; }
+.nav-item .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-item .n {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+.nav-item.active .n { color: var(--fg-dim); }
+
+.section-label {
+  margin: 22px 9px 7px;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  color: var(--fg-faint);
+}
+
+.tree { display: flex; flex-direction: column; gap: 1px; }
+.tree-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px 6px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--fg-dim);
+}
+.tree-row:hover { background: var(--bg-hover); }
+.tree-row .caret { opacity: .5; display: inline-flex; }
+.tree-row .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-row .n { font-family: var(--mono); font-size: 10.5px; color: var(--fg-faint); }
+.tree-row.lead { background: var(--accent-soft); color: var(--accent); border-radius: var(--radius-sm); }
+.tree-row.lead .ic { opacity: .9; }
+
+.side-foot {
+  margin-top: auto;
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 9px 4px;
+  border-top: 1px solid var(--border);
+}
+.avatar {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent-soft);
+  border: none;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--sans); font-size: 11.5px; font-weight: 600; color: var(--accent);
+}
+.who { min-width: 0; flex: 1; }
+.who b { display: block; font-size: 12px; font-weight: 500; }
+.who span { display: block; font-size: 10.5px; color: var(--fg-faint); }
+
+/* ── 列表栏 ───────────────────────────────────────────── */
+.list-pane {
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pane-head {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 15px 16px 9px;
+  flex-shrink: 0;
+}
+.pane-title {
+  font-size: 16px; font-weight: 600; margin: 0;
+  letter-spacing: 0.01em;
+}
+.pane-count {
+  font-family: var(--mono); font-size: 11px; color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+.pane-actions { margin-left: auto; display: flex; gap: 2px; align-items: center; }
+.icon-btn {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--fg-faint);
+  background: none; border: none; cursor: pointer;
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--fg); }
+
+.search { padding: 0 12px 11px; flex-shrink: 0; }
+.search-box {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  color: var(--fg-faint);
+  font-size: 12.5px;
+}
+.search-box .kbd {
+  margin-left: auto;
+  font-family: var(--mono); font-size: 10px;
+  padding: 1px 5px; border-radius: var(--radius-xs);
+  border: 1px solid var(--border); color: var(--fg-faint);
+}
+
+.list-scroll { flex: 1; overflow: hidden; }
+
+/* 沉积层：左栏竖排日期 + 一道连续的分层线 */
+.day {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+}
+.day-gutter {
+  position: relative;
+  border-right: 1px solid var(--border-soft);
+}
+.day-gutter .date {
+  position: absolute; top: 15px; left: 0; right: 0;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+.day-gutter .date b {
+  display: block;
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--fg-dim);
+  line-height: 1.2;
+}
+/* 月界：只有换月那一层挂一个小标签，其余日子只留日号 */
+.month-mark {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px 6px 14px;
+  font-family: var(--mono);
+  font-size: 9.5px; letter-spacing: 0.24em;
+  color: var(--fg-faint);
+}
+.month-mark::after {
+  content: ''; flex: 1; height: 1px; background: var(--border-soft);
+}
+.day-rows { min-width: 0; }
+
+.entry {
+  position: relative;
+  display: block;
+  padding: 12px 16px 13px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  cursor: pointer;
+  transition: background 110ms;
+}
+.entry:hover { background: var(--bg-hover); }
+.entry.active { background: var(--bg-elev2); }
+.entry.active::before {
+  content: '';
+  position: absolute; left: 0; top: 10px; bottom: 10px;
+  width: 2px; border-radius: 2px; background: var(--fg);
+}
+
+.entry-top {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--fg-faint);
+  margin-bottom: 7px;
+}
+.fav {
+  width: 13px; height: 13px; border-radius: 3px;
+  background: var(--bg-elev2);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8px; color: var(--fg-faint); flex-shrink: 0;
+}
+.entry-site { color: var(--fg-dim); }
+.entry-top .dot { opacity: .4; }
+.entry-top .time { font-family: var(--mono); font-size: 10.5px; letter-spacing: .01em; }
+
+.entry-title {
+  font-size: 14px; line-height: 1.55; font-weight: 500;
+  color: var(--fg);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.entry.is-read .entry-title { color: var(--fg-dim); font-weight: 400; }
+.entry-summary {
+  margin-top: 5px;
+  font-size: 12px; line-height: 1.55; color: var(--fg-faint);
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* tier 不用色块胶囊：一个圆点 + 两个字，颜色只说明"AI 的判断" */
+.tier {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; letter-spacing: 0.06em;
+}
+.tier i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.tier.must { color: var(--must); }
+.tier.worth { color: var(--worth); }
+
+/* ── 阅读区 ───────────────────────────────────────────── */
+.reader-pane {
+  display: flex; flex-direction: column;
+  background: var(--desk-bg);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+}
+
+.reader-bar {
+  display: flex; align-items: center; gap: 2px;
+  padding: 9px 14px;
+  flex-shrink: 0;
+}
+.reader-bar .spacer { flex: 1; }
+
+.reader-scroll { flex: 1; overflow: hidden; }
+
+.stage {
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 4px 0 24px;
+  gap: 20px;
+}
+
+.sheet {
+  width: 712px;
+  flex-shrink: 0;
+  background: var(--paper-bg);
+  border: 1px solid var(--paper-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sheet-shadow);
+  padding: 34px 52px 40px;
+}
+
+.eyebrow {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--mono);
+  font-size: 10px; letter-spacing: 0.14em;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+.eyebrow .src { color: var(--fg-dim); }
+
+.sheet h1 {
+  margin: 0 0 14px;
+  font-family: var(--serif);
+  font-size: 30px; line-height: 1.36; font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.byline {
+  display: flex; align-items: center; gap: 7px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--paper-line);
+  font-size: 11.5px; color: var(--fg-faint);
+}
+.byline .time { font-family: var(--mono); font-size: 10.5px; }
+/* 分级：4px 圆点 + 两字，没有色块背景（设计方案 §3.4） */
+.byline .tier {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; letter-spacing: .06em;
+}
+.byline .tier i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.tier-must { color: var(--must); }
+.tier-worth { color: var(--worth); }
+
+/* AI 摘要块：没有卡片、没有阴影。一道墨线 + 一小段引言体 */
+.ai {
+  margin: 18px 0 4px;
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid var(--fg);
+}
+.ai-label {
+  font-family: var(--mono);
+  font-size: 9.5px; letter-spacing: 0.2em;
+  color: var(--fg-faint);
+  margin-bottom: 7px;
+}
+.ai p {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 15px; line-height: 1.8;
+  color: var(--fg-dim);
+}
+.ai ul { margin: 9px 0 0; padding: 0; list-style: none; }
+.ai li {
+  position: relative;
+  font-size: 13px; line-height: 1.7;
+  color: var(--fg-dim);
+  padding-left: 13px;
+  margin-bottom: 3px;
+}
+.ai li::before {
+  content: '';
+  position: absolute; left: 2px; top: 9px;
+  width: 3px; height: 3px; border-radius: 50%;
+  background: var(--fg-faint);
+}
+
+.body {
+  font-family: var(--serif);
+  font-size: 16.5px;
+  line-height: 1.86;
+  color: var(--fg);
+  margin-top: 22px;
+}
+.body p { margin: 0 0 1.05em; }
+.body a { border-bottom: 1px solid var(--border); }
+.body em { font-style: normal; }
+.body mark {
+  background: rgba(201, 162, 39, 0.16);
+  color: inherit;
+  padding: 1px 0;
+  border-bottom: 1px solid rgba(201, 162, 39, 0.5);
+}
+.body blockquote {
+  margin: 1.2em 0;
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid var(--border);
+  color: var(--fg-dim);
+}
+.rule-end {
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px; margin: 30px 0 0;
+  color: var(--fg-faint); font-size: 11px; letter-spacing: 0.3em;
+}
+.rule-end::before, .rule-end::after {
+  content: ''; height: 1px; width: 42px; background: var(--paper-line);
+}
+
+.foot-actions {
+  display: flex; gap: 8px; margin-top: 20px;
+}
+/* 三种角色一套骨架：主按钮实心强调色 / 次按钮白底描边 / 图标按钮裸 */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  font-size: 13px; color: var(--fg-dim);
+  cursor: pointer;
+}
+.btn:hover { background: var(--bg-hover); border-color: var(--border-strong, var(--fg-faint)); color: var(--fg); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 500; }
+.btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* AI 动作组：两个按钮拼成一段，与右侧单图标分开 */
+.ai-group {
+  display: flex; align-items: center; gap: 2px;
+  margin-right: 6px; padding: 2px;
+  background: var(--bg-elev2); border-radius: var(--radius-sm);
+}
+.ai-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 26px; padding: 0 9px;
+  border: none; border-radius: 6px; background: none;
+  color: var(--fg-dim); font-size: 12px; cursor: pointer;
+}
+.ai-btn:hover { background: var(--bg); color: var(--fg); }
+.ai-btn.on { background: var(--bg); color: var(--accent); font-weight: 500; box-shadow: var(--shadow-sm); }
+
+/* 侧边目录：更轻，只有当前节有墨线 */
+.toc {
+  width: 150px; flex-shrink: 0;
+  padding-top: 40px;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}
+.toc .toc-head {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.18em;
+  color: var(--fg-faint); margin-bottom: 10px;
+}
+.toc ul { list-style: none; margin: 0; padding: 0; }
+.toc li { padding: 4px 0 4px 10px; border-left: 1px solid var(--border-soft); line-height: 1.5; }
+.toc li.on { color: var(--fg-dim); border-left-color: var(--fg); }
+
+svg { display: block; }
+
+/* -- 窄屏：草图阶段只证明"结构能塌缩"，不替代真机调试 -- */
+.tabbar { display: none; }
+@media (max-width: 1100px) {
+  .toc { display: none; }
+  .sheet { width: auto; max-width: 712px; margin: 0 20px; }
+}
+@media (max-width: 900px) {
+  .app { grid-template-columns: var(--sidebar-w) 1fr; }
+  .reader-pane { display: none; }
+}
+@media (max-width: 640px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .list-pane { border-right: none; padding-bottom: 62px; }
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex;
+    padding: 7px 0 calc(7px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg-elev);
+    border-top: 1px solid var(--border);
+  }
+  .tabbar a {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 3px 0; font-size: 10px; color: var(--fg-faint);
+  }
+  .tabbar a.on { color: var(--fg); }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── 侧栏 ─────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+          <path d="M2 4h12M2 8h8M2 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <span class="name">澄</span>
+      <span class="sub">KNOWLEDGE</span>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-item"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="lbl">收件箱</span><span class="n">527</span></div>
+      <div class="nav-item active"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/></svg></span><span class="lbl">未读</span><span class="n">527</span></div>
+      <div class="nav-item"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg></span><span class="lbl">已收藏</span><span class="n">142</span></div>
+      <div class="nav-item"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="lbl">历史</span></div>
+      <div class="nav-item"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m12 2 1.9 4.6 4.9.4-3.7 3.3 1.1 4.8L12 12.7 7.8 15.1l1.1-4.8L5.2 7 10.1 6.6z"/></svg></span><span class="lbl">简报</span></div>
+    </nav>
+
+    <div class="section-label">订阅源</div>
+    <div class="tree">
+      <div class="tree-row lead"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg></span><span class="lbl">订阅</span><span class="n">22</span></div>
+    </div>
+
+    <div class="section-label">分组</div>
+    <div class="tree">
+      <div class="tree-row"><span class="caret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6"/></svg></span><span class="lbl">科技 IT</span><span class="n">59</span></div>
+      <div class="tree-row"><span class="caret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6"/></svg></span><span class="lbl">长知识</span><span class="n">21</span></div>
+      <div class="tree-row"><span class="caret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6"/></svg></span><span class="lbl">编程</span><span class="n">301</span></div>
+      <div class="tree-row"><span class="caret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 6 6 6-6 6"/></svg></span><span class="lbl">独立博客</span><span class="n">121</span></div>
+    </div>
+
+    <div class="side-foot">
+      <div class="avatar">澄</div>
+      <div class="who"><b>Owner</b><span>admin@localhost</span></div>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" style="opacity:.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+    </div>
+  </aside>
+
+  <!-- ── 列表 ─────────────────────────────── -->
+  <section class="list-pane">
+    <header class="pane-head">
+      <h2 class="pane-title">未读</h2>
+      <span class="pane-count">553</span>
+      <div class="pane-actions">
+        <button class="icon-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m3 12 4-4 4 4"/><path d="m13 12 4-4 4 4"/><path d="M4 18h16"/></svg></button>
+        <button class="icon-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></button>
+      </div>
+    </header>
+
+    <div class="search">
+      <div class="search-box">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span>搜索标题、摘要…</span>
+        <span class="kbd">/</span>
+      </div>
+    </div>
+
+    <div class="list-scroll">
+
+      <div class="month-mark">十一月</div>
+
+      <!-- 今天 -->
+      <div class="day">
+        <div class="day-gutter"><span class="date"><b>02</b>周六</span></div>
+        <div class="day-rows">
+          <div class="entry">
+            <div class="entry-top">
+              <span class="fav">S</span><span class="entry-site">奇客Solidot</span><i class="dot">·</i><span class="time">25 分钟</span>
+              <span class="tier worth"><i></i>值得</span>
+            </div>
+            <div class="entry-title">欧洲夏季热浪导致逾 5 万城市居民死亡</div>
+            <div class="entry-summary">今年夏天热浪席卷欧洲大部分地区，多地气温超过 40℃…</div>
+          </div>
+
+          <div class="entry active">
+            <div class="entry-top">
+              <span class="fav">R</span><span class="entry-site">ruanyf/weekly</span><i class="dot">·</i><span class="time">26 分钟</span>
+              <span class="tier must"><i></i>必读</span>
+            </div>
+            <div class="entry-title">[文章自荐] Agent 已完成却被判失败：一个可复现的状态读取竞态</div>
+            <div class="entry-summary">投稿一篇个人开源项目中的工程案例，供周刊文章栏目考虑…</div>
+          </div>
+
+          <div class="entry is-read">
+            <div class="entry-top">
+              <span class="fav">R</span><span class="entry-site">ruanyf/weekly</span><i class="dot">·</i><span class="time">56 分钟</span>
+            </div>
+            <div class="entry-title">【开源自荐】Review Inbox：把等你审查的 PR 放在 Claude Code 输入框上方</div>
+            <div class="entry-summary">阮老师好，自荐一下我做的 Review Inbox…</div>
+          </div>
+
+          <div class="entry is-read">
+            <div class="entry-top">
+              <span class="fav">R</span><span class="entry-site">ruanyf/weekly</span><i class="dot">·</i><span class="time">1 小时</span>
+            </div>
+            <div class="entry-title">【开源自荐】打造最好用的处理本地办公文件的 AI 助手</div>
+            <div class="entry-summary">具备当下所有 AI 工具（codex 这些）的基本能力…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 昨天 -->
+      <div class="day">
+        <div class="day-gutter"><span class="date"><b>01</b>周日</span></div>
+        <div class="day-rows">
+          <div class="entry">
+            <div class="entry-top">
+              <span class="fav">奇</span><span class="entry-site">奇客Solidot</span><i class="dot">·</i><span class="time">昨天 18:20</span>
+              <span class="tier worth"><i></i>值得</span>
+            </div>
+            <div class="entry-title">2025 年老年抚养比首次超过少儿抚养比</div>
+            <div class="entry-summary">根据国家统计局编著出版的《中国统计年鉴 2026》…</div>
+          </div>
+
+          <div class="entry">
+            <div class="entry-top">
+              <span class="fav">G</span><span class="entry-site">GitHubDaily</span><i class="dot">·</i><span class="time">昨天 15:40</span>
+            </div>
+            <div class="entry-title">Gangmu：识别嵌入式 SDK 组件，结合构建证据生成 SBOM</div>
+            <div class="entry-summary">项目地址：https://github.com/GANGMU-SBOM/gangmu…</div>
+          </div>
+
+          <div class="entry is-read">
+            <div class="entry-top">
+              <span class="fav">A</span><span class="entry-site">AntiBrow</span><i class="dot">·</i><span class="time">昨天 11:02</span>
+            </div>
+            <div class="entry-title">AntiBrow：用你已经在写的 Playwright API 驱动的内核级反检测浏览器</div>
+            <div class="entry-summary">网站：https://antibrow.com 源码与 SDK…</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="month-mark">十月</div>
+      <div class="day">
+        <div class="day-gutter"><span class="date"><b>31</b>周一</span></div>
+        <div class="day-rows">
+          <div class="entry is-read">
+            <div class="entry-top">
+              <span class="fav">少</span><span class="entry-site">少数派</span><i class="dot">·</i><span class="time">31 日</span>
+            </div>
+            <div class="entry-title">曲高和寡、终成绝唱：傲腾 P5800X 测试报告</div>
+            <div class="entry-summary">一起来看 3D XPoint 这张考卷的性能表现吧…</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── 阅读区 ───────────────────────────── -->
+  <main class="reader-pane">
+    <div class="reader-bar">
+      <button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 18-6-6 6-6"/></svg></button>
+      <span class="spacer"></span>
+      <div class="ai-group">
+        <button class="ai-btn on">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m12 3 2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 8.3l5-.7z"/></svg>摘要
+        </button>
+        <button class="ai-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m12 3 2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 8.3l5-.7z"/></svg>总结
+        </button>
+      </div>
+      <button class="icon-btn" title="已读"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m2 12 5 5L22 2"/></svg></button>
+      <button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></button>
+      <button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></button>
+      <button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg></button>
+    </div>
+
+    <div class="reader-scroll">
+      <div class="stage">
+        <article class="sheet">
+          <div class="eyebrow">
+            <span class="src">ruanyf/weekly issues</span><span>·</span><span>ISSUE 4221</span>
+          </div>
+
+          <h1>[文章自荐] Agent 已完成却被判失败：一个可复现的状态读取竞态</h1>
+
+          <div class="byline">
+            <span>胡涂涂</span><span>·</span><span class="time">2026-11-02 15:13</span>
+            <span class="tier tier-must"><i></i>必读</span>
+          </div>
+
+          <div class="ai">
+            <div class="ai-label">AI 摘要</div>
+            <p>ReelPilot 把视频素材检索、剪辑计划编译和 FFmpeg 执行串成可恢复流程。这篇文章记录了一个容易被测试时序掩盖的问题：监督器先查询任务是否完成，再单独检查所有权，worker 恰在两次读取之间提交完成，租约归零，第二次检查把正常完成误判为失联。</p>
+            <ul>
+              <li>取消 Future 并不能强制停止正在执行的 Python 线程</li>
+              <li>结果文件已经写出，不代表数据库已经确认任务完成</li>
+              <li>已提交结果与后续清理错误需要分别记录</li>
+            </ul>
+          </div>
+
+          <div class="body">
+            <p>投稿一篇个人开源项目中的工程案例，供周刊文章栏目考虑。</p>
+            <p><strong>Agent 已完成，却被监督器误判失败</strong>：一个可复现的状态读取竞态。</p>
+            <p>文章（英文，含代码与复现命令）：<a href="#">github.com/422145205-source/reelpilot</a></p>
+            <p>项目 ReelPilot 将视频素材检索、剪辑计划编译和 FFmpeg 执行串成可恢复流程。这篇文章集中讨论一个容易被测试时序掩盖的问题：监督器先查询任务是否完成，再单独检查所有权；worker 恰在两次读取之间提交完成，租约归零，第二次检查可能将正常完成误判为失联。</p>
+            <p>文中提供确定性测试复现旧序列，采用<mark>同行快照校验修复</mark>，并延伸解释三个相关边界：</p>
+            <blockquote>适合开发 LLM 工具调用、后台长任务或 Agent Runtime 的读者。复现该竞态不需要 GPU、模型权重或 API Key。</blockquote>
+            <p>如果你在做类似的调度器，值得对照自己代码里<mark>两次读取之间</mark>的那段窗口。</p>
+          </div>
+
+          <div class="rule-end">完</div>
+
+          <div class="foot-actions">
+            <button class="btn primary"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>打开原文</button>
+            <button class="btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>访问源站</button>
+          </div>
+        </article>
+
+        <aside class="toc">
+          <div class="toc-head">目录</div>
+          <ul>
+            <li class="on">竞态是怎么发生的</li>
+            <li>确定性复现</li>
+            <li>同行快照校验</li>
+            <li>三个相关边界</li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <!-- 移动端 tab（桌面隐藏） -->
+  <nav class="tabbar">
+    <a href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>收件箱</a>
+    <a href="#" class="on"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/></svg>未读</a>
+    <a href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>已收藏</a>
+    <a href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>历史</a>
+    <a href="#"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 2 1.9 4.6 4.9.4-3.7 3.3 1.1 4.8L12 12.7 7.8 15.1l1.1-4.8L5.2 7 10.1 6.6z"/></svg>简报</a>
+  </nav>
+</div>
+
+<script>
+  const t = new URLSearchParams(location.search).get('theme');
+  if (t) document.documentElement.dataset.theme = t;
+</script>
+</body>
+</html>

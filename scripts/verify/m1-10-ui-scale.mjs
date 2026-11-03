@@ -199,7 +199,7 @@ await send('Runtime.enable');
 await send('Network.enable');
 await send('Emulation.setEmulatedMedia', {
   media: 'screen',
-  features: [{ name: 'prefers-color-scheme', value: 'dark' }],
+  features: [{ name: 'prefers-color-scheme', value: 'light' }],
 });
 await send('Network.setCookie', {
   name: 'ai_rss_sid', value: cookie.split('=')[1] ?? '',
@@ -340,14 +340,20 @@ check('四个页面都采到了控件（否则下面的断言是空转）', () =
 // 尺度：0（共边的列表行）/ 4（<24px 的小控件）/ 7（默认）/
 // 999（胶囊）。.seg 容器内的分段按钮额外允许 5（= 7 − 2px 内边距），
 // 这是"内圆角跟着外圆角缩"的正确做法，不是随手写的数字。
-const SCALE = [0, 4, 7, 999];
+// 尺度（设计方案 §6）：0（共边的列表行）/ 4（<24px 的小控件）/
+// 8（默认控件）/ 999（胶囊）。.seg 内的分段按钮额外允许 5、6
+// （= 外圆角 − 容器内边距），这是"内圆角跟着外圆角缩"的正确做法。
+//
+// 7 → 8 是"现代化"的一部分：7 来自旧版把控件压到 26~30px 的时期，
+// 控件长到 32px 之后 7 看起来偏方。判据跟着规格走，不跟着历史走。
+const SCALE = [0, 4, 8, 999];
 const allButtons = Object.entries(pages).flatMap(([page, list]) => list.map((b) => ({ page, ...b })));
 const offScale = allButtons.filter((b) => {
   if (SCALE.includes(b.radius)) return false;
-  if (b.inSeg && b.radius === 5) return false;
+  if (b.inSeg && (b.radius === 5 || b.radius === 6)) return false;
   return true;
 });
-check('所有可见按钮的圆角都在尺度内（0/4/7/999，.seg 内允许 5）', () => {
+check('所有可见按钮的圆角都在尺度内（0/4/8/999，.seg 内允许 5-6）', () => {
   if (offScale.length === 0) return ok(true);
   const sample = offScale.slice(0, 6).map((b) => `${b.page}:${b.cls}="${b.label}" r=${b.radius}px`);
   return ok(false, `${offScale.length} 个越界：\n        ${sample.join('\n        ')}`);
@@ -378,8 +384,8 @@ check('同一 class 的按钮高度唯一（同类控件不许两个高度）', 
 
 // ── ③ 小控件用小圆角 ──────────────────────────────────────
 //
-// 22px 的图标按钮配 7px 圆角，观感接近胶囊；它必须用 4px。
-// 判据写成"短边 < 24px 只能 4px"，而不是"不能等于 7px" —— 前者能顺带
+// 22px 的图标按钮配 8px 圆角，观感接近胶囊；它必须用 4px。
+// 判据写成"短边 < 24px 只能 4px"，而不是"不能等于 8px" —— 前者能顺带
 // 抓住以后有人给它写 6px/8px 的情况。
 //
 // .seg 内的分段按钮排除在外：它们的圆角是"外圆角 − 容器内边距"

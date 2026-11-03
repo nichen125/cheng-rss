@@ -184,10 +184,11 @@ await send('Page.enable');
 await send('Runtime.enable');
 await send('Network.enable');
 
-// 暗色是本项目主色，无头浏览器默认 light，必须显式指定
+// 亮色是本项目主色（设计方案 §3）。无头浏览器默认就是 light，但这里仍然
+// 显式指定：否则将来某次默认值改动会让这条断言测的不是"用户看到的那一版"。
 await send('Emulation.setEmulatedMedia', {
   media: 'screen',
-  features: [{ name: 'prefers-color-scheme', value: 'dark' }],
+  features: [{ name: 'prefers-color-scheme', value: 'light' }],
 });
 await send('Emulation.setDeviceMetricsOverride', {
   width: 1440, height: 960, deviceScaleFactor: 1, mobile: false,
@@ -245,6 +246,14 @@ const density = await evaluate(`(() => {
     hasSummary: Boolean(first?.querySelector('.entry-summary')?.textContent?.trim()),
     hasMeta: Boolean(first?.querySelector('.entry-top')?.textContent?.trim()),
     clamped: getComputedStyle(first?.querySelector('.entry-title') ?? document.body).webkitLineClamp,
+    // 元信息行必须**永远是单行**。时间与分级是定长信息，一旦允许换行，
+    // 「13 小时前」会从中间空格处折成两行，整行高度 22 → 62px，
+    // 一屏条数从 9 掉到 6。这条断言直接量行数，不靠"看起来对"。
+    metaLines: [...document.querySelectorAll('.entry-item .entry-time')].slice(0, 8).map((e) => {
+      const rc = e.getBoundingClientRect();
+      const lh = parseFloat(getComputedStyle(e).lineHeight) || 15;
+      return Math.round(rc.height / lh);
+    }),
   };
 })()`);
 
@@ -256,6 +265,73 @@ check('列表项含标题 + 一行摘要 + 元信息', () => {
   return ok(density.hasTitle && density.hasSummary && density.hasMeta,
     JSON.stringify(density));
 });
+// 这条必须**主动加压**才有意义：演示数据里的站名都很短（`源0`），
+// 1440px 下这一行永远挤不满 —— 不加压的话它无论实现对不对都通过，等于空转。
+//
+// 真实翻车条件是"窄列 + 长站名"：窄列不是随便设个宽度，而是 1024px 断点下
+// --list-w 真的会变成 320px（mobile.css §393）。这里直接把变量压到 240px
+// 制造更极端的情形，站名换成真实长度，再看时间元素的行数。压完还原。
+const stressedMeta = await evaluate(`(() => {
+  // 不改 --list-w / grid-template-columns：那两个都被样式表规则压着，
+  // 内联写进去计算值不变（实测 before === after），压力加了个寂寞。
+  // 直接给条目本身设一个硬宽度，等于模拟"列很窄时条目有多宽"。
+  const items0 = [...document.querySelectorAll('.entry-item')].slice(0, 8);
+  const prevWidths = items0.map((el) => el.style.width);
+  items0.forEach((el) => { el.style.width = '220px'; el.style.boxSizing = 'border-box'; });
+
+  const names = ['晚点LatePost','阮一峰的网络日志','少数派 sspai 编辑部','GitHub Daily'];
+  const items = items0;
+  const saved = items.map((it) => {
+    const s = it.querySelector('.entry-site');
+    const t = it.querySelector('.entry-time');
+    return { s, sText: s?.textContent ?? '', t, tText: t?.textContent ?? '' };
+  });
+  items.forEach((it, i) => {
+    const s = it.querySelector('.entry-site');
+    if (s) s.textContent = names[i % names.length];
+    const t = it.querySelector('.entry-time');
+    if (t) t.textContent = '13 小时前';
+  });
+
+  // 只量真的存在 .entry-time 的条目。没有它的条目（例如元信息是别的结构）
+  // 如果也参与计算，rc.height 会是 0，除以行高得到 0，虽然不误报，
+  // 但一旦结构变化就会变成噪声；这里显式过滤。
+  const lines = items.map((it) => {
+    const e = it.querySelector('.entry-time');
+    if (!e) return 1;
+    const rc = e.getBoundingClientRect();
+    const lh = parseFloat(getComputedStyle(e).lineHeight) || 15;
+    return Math.round(rc.height / lh);
+  });
+  // 失败时把折行元素的计算样式一起带出来：只看到一个数字（[4]）
+  // 不知道是谁、为什么，排查成本会高得多。
+  const badDetail = items.map((it, i) => {
+    if (lines[i] <= 1) return null;
+    const e = it.querySelector('.entry-time');
+    const cs = getComputedStyle(e);
+    return { i, text: e.textContent,
+      w: Math.round(e.getBoundingClientRect().width),
+      ws: cs.whiteSpace, flex: cs.flex, parent: e.parentElement.className };
+  }).filter(Boolean);
+  const itemW = items0[0] ? Math.round(items0[0].getBoundingClientRect().width) : 0;
+
+  // 还原，避免影响后续断言
+  saved.forEach((x) => {
+    if (x.s) x.s.textContent = x.sText;
+    if (x.t) x.t.textContent = x.tText;
+  });
+  items0.forEach((el, i) => { el.style.width = prevWidths[i]; });
+  return { lines, itemW, badDetail, multi: lines.filter((n) => n > 1).length };
+})()`);
+
+check('元信息行不换行（窄列 + 长站名时，时间也不许被挤成两行）', () => {
+  // 顺带确认压力真的加上了：否则列宽没变，这条断言又变成空转
+  return ok(stressedMeta.multi === 0 && stressedMeta.itemW <= 240,
+    `条目宽 ${stressedMeta.itemW}px，多行 ${stressedMeta.multi} 个：${JSON.stringify(stressedMeta.lines)}`
+    + (stressedMeta.multi ? `
+        ${JSON.stringify(stressedMeta.badDetail)}` : ''));
+});
+
 check('标题限制行数（超出省略，不是撑开）', () => {
   // -webkit-line-clamp 在 Chromium 里返回字符串 "2"
   return ok(['2', '3'].includes(String(density.clamped)), `line-clamp=${density.clamped}`);
@@ -348,10 +424,10 @@ const theme = await evaluate(`(() => {
   const bg = getComputedStyle(document.body).backgroundColor;
   const m = bg.match(/\\d+/g)?.map(Number) ?? [];
   const lum = (m[0] * 0.299 + m[1] * 0.587 + m[2] * 0.114);
-  return { bg, lum, dark: lum < 80 };
+  return { bg, lum, light: lum > 200 };
 })()`);
-check('默认主题是暗色（阅读器主场景，§15.6）', () => {
-  return ok(theme.dark, `body 背景 ${theme.bg}，亮度 ${theme.lum?.toFixed(0)}`);
+check('默认主题是亮色（设计方案 §3：白天长文阅读为主场景）', () => {
+  return ok(theme.light, `body 背景 ${theme.bg}，亮度 ${theme.lum?.toFixed(0)}`);
 });
 
 // ── ⑥ 键盘可达 ────────────────────────────────────────────────

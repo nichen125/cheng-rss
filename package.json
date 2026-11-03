@@ -8,7 +8,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "dev": "node --watch --experimental-strip-types src/index.ts serve",
     "start": "node --experimental-strip-types src/index.ts serve",
     "typecheck": "tsc --noEmit",
     "typecheck:client": "tsc -p tsconfig.client.json --noEmit",

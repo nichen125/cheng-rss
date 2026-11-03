@@ -170,7 +170,7 @@ export function createApp(ctx: AppContext): Hono<{ Variables: Variables }> {
     if (!assets.ok) {
       // 前端还没构建：给出明确指引而不是 404
       return c.html(
-        `<!DOCTYPE html><html><head><meta charset="utf-8"><title>AI RSS</title></head>` +
+        `<!DOCTYPE html><html><head><meta charset="utf-8"><title>澄 · 私人知识库</title></head>` +
         `<body style="font-family:system-ui;padding:3rem;max-width:640px;margin:0 auto;line-height:1.6">` +
         `<h1 style="font-size:20px">前端尚未构建</h1>` +
         `<p style="color:#666">当前运行的是 API 服务，前端资源不可用。</p>` +

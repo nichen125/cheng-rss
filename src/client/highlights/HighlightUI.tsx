@@ -14,8 +14,16 @@ export function HighlightToolbar(props: {
   x: number;
   y: number;
   onPick: (color: HighlightColor) => void;
-  onAnnotate: () => void;
+  onAnnotate: (note: string) => void;
 }) {
+  // 批注在工具条内联展开，不用 window.prompt（§11.3 修订）。
+  //
+  // 为什么换掉 prompt：它是浏览器原生模态框，样式完全不受控 —— 在暗色主题下
+  // 会弹出一块纯白方块，而且**无法取消已输入的文本**（原生 prompt 的"取消"
+  // 只返回 null，用户看不到自己写了什么被丢掉）。内联输入框的取消就是在
+  // 工具条里点「取消」，与界面其余部分同一套语言。
+  const [note, setNote] = useState<string | null>(null);
+
   // 工具条贴着选区上方浮出。用 transform 居中而不是算 left = x - width/2：
   // 宽度随语言/字号变化，算死值在对齐上会差几个像素。
   return (
@@ -26,18 +34,49 @@ export function HighlightToolbar(props: {
       // 而我们正是要在选区还有效时提交它
       onMouseDown={(e) => e.preventDefault()}
     >
-      {COLORS.map((c) => (
-        <button
-          key={c}
-          className={`hl-swatch hl-swatch-${c}`}
-          title={`${COLOR_LABEL[c]}色高亮（快捷键 ${c === 'yellow' ? 'h' : c === 'green' ? 'g' : 'b'}）`}
-          onClick={() => props.onPick(c)}
-        />
-      ))}
-      <span className="hl-sep" aria-hidden="true" />
-      <button className="hl-action" onClick={props.onAnnotate} title="加批注（快捷键 n）">
-        批注
-      </button>
+      {note === null ? (
+        <>
+          {COLORS.map((c) => (
+            <button
+              key={c}
+              className={`hl-swatch hl-swatch-${c}`}
+              title={`${COLOR_LABEL[c]}色高亮（快捷键 ${c === 'yellow' ? 'h' : c === 'green' ? 'g' : 'b'}）`}
+              onClick={() => props.onPick(c)}
+            />
+          ))}
+          <span className="hl-sep" aria-hidden="true" />
+          <button className="hl-action" onClick={() => setNote('')} title="加批注（快捷键 n）">
+            批注
+          </button>
+        </>
+      ) : (
+        <div className="hl-annotate">
+          <input
+            autoFocus
+            value={note}
+            placeholder="这条为什么重要？"
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { props.onAnnotate(note.trim()); }
+              if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setNote(null); }
+            }}
+          />
+          <button
+            className="hl-action"
+            onClick={() => setNote(null)}
+            title="取消（Esc）"
+          >
+            取消
+          </button>
+          <button
+            className="hl-action primary"
+            onClick={() => props.onAnnotate(note.trim())}
+            disabled={note.trim().length === 0}
+          >
+            保存
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -135,6 +174,14 @@ function HighlightCard(props: {
     if (props.editing) noteRef.current?.focus();
   }, [props.editing]);
 
+  // 进编辑态时把草稿对齐到当前值；退出时丢弃未保存的改动。
+  // 不这么做的话：改了一半、点「取消」，再点「加批注」会看到上次的草稿，
+  // 用户以为"取消没生效"。取消的语义就是丢弃。
+  const cancel = () => {
+    setNote(h.note ?? '');
+    props.onEdit();
+  };
+
   return (
     <li className={`hl-card${h.isOrphaned ? ' is-orphaned' : ''}`}>
       <button
@@ -154,6 +201,10 @@ function HighlightCard(props: {
             value={note}
             rows={3}
             onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              // Esc 退出编辑（与 Esc 关闭浮层/返回列表一致）
+              if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
+            }}
             placeholder="这条为什么重要？"
           />
           <div className="hl-edit-actions">
@@ -167,6 +218,7 @@ function HighlightCard(props: {
             ))}
             <span className="spacer" />
             <button className="btn sm" onClick={props.onDelete}>删除</button>
+            <button className="btn sm" onClick={cancel}>取消</button>
             <button
               className="btn sm primary"
               onClick={() => { props.onSaveNote(note); props.onEdit(); }}

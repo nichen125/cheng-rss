@@ -13,6 +13,12 @@ import { SummaryMarkdown, sumFailHint } from './summary/SummaryMarkdown.tsx';
 import { useHighlights } from './highlights/useHighlights.ts';
 import { HighlightToolbar, HighlightList } from './highlights/HighlightUI.tsx';
 import { SettingsModal, type SettingsSection } from './settings/SettingsModal.tsx';
+import { ToastHost, type ToastSpec } from './Toasts.tsx';
+import { useArrange } from './useArrange.ts';
+import {
+  feedsOfFolder, looseFeedsOf, rowKey, foldersAfterDrop, orderAfterDrop, moveItem,
+  type ArrangeRow, type DropTarget,
+} from './arrange.ts';
 import {
   applyPrefs, DEFAULT_PREFS, FONT_SIZES, loadPrefs, savePrefs,
   THEMES, WIDTHS, type ReaderPrefs,
@@ -168,8 +174,10 @@ function LoginPage(props: { onDone: (u: User) => void; onNeedSetup: () => void }
   return (
     <div className="center-page">
       <form className="auth-card" onSubmit={submit}>
-        <div className="auth-brand"><IconRss size={22} /> AI RSS</div>
-        <p className="hint">自托管 RSS 阅读与 AI 分析</p>
+        <div className="auth-brand">
+          <span className="brand-mark">澄</span>
+        </div>
+        <p className="hint">私人知识库 · 订阅、沉淀、回看</p>
         {err && <div className="alert error">{err}</div>}
         <div className="field">
           <label htmlFor="email">邮箱</label>
@@ -226,8 +234,8 @@ function SetupPage(props: { onDone: (u: User) => void }) {
   return (
     <div className="center-page">
       <form className="auth-card" onSubmit={submit}>
-        <div className="auth-brand"><IconRss size={22} /> 初始化</div>
-        <p className="hint">这个数据库还没有任何账号，创建一个管理员。数据全部保存在本地。</p>
+        <div className="auth-brand"><span className="brand-mark">澄</span></div>
+        <p className="hint">第一次使用，先建一个管理员。数据全部保存在本地。</p>
         {err && <div className="alert error">{err}</div>}
         <div className="field">
           <label htmlFor="su-email">邮箱</label>
@@ -326,6 +334,15 @@ function Main(props: { user: User; onLogout: () => void }) {
    * 闪出「还没有阅读记录」。
    */
   const [historyGroups, setHistoryGroups] = useState<HistoryGroup[] | null>(null);
+  /** 排列模式（§15.28）：侧栏长按进入，行可拖、可点 ↑↓ */
+  const [arranging, setArranging] = useState(false);
+  /** 底部提示条（§15.28）：只在跨组移动时出现，带撤销 */
+  const [toast, setToast] = useState<ToastSpec | null>(null);
+  const toastSeq = useRef(0);
+  const showToast = useCallback((t: Omit<ToastSpec, 'id'>) => {
+    toastSeq.current += 1;
+    setToast({ ...t, id: toastSeq.current });
+  }, []);
 
   // 偏好变更 → 立刻写 CSS 变量 + 落盘。
   // 放在 effect 里而不是 setPrefs 的调用处：刷新页面时初次挂载也要应用一次。
@@ -568,6 +585,10 @@ function Main(props: { user: User; onLogout: () => void }) {
   // 按分组归拢源（§15.13）。用 Map 而不是每次 render 都 filter 一遍：
   // 侧栏每组都要拿一次自己那份，11 组 × 21 源 = 231 次比较，虽然小，
   // 但它在每次滚动/打字时都会重跑。
+  //
+  // §15.28 起组内顺序由 `sort` 决定（用户能拖能点箭头），所以这里不能
+  // 只 push —— 要按 sort、标题兜底排好。排序规则集中在 arrange.ts 的
+  // feedsOfFolder 里，配置页与侧栏共用同一份，两处给不出不同顺序。
   const feedsByFolder = useMemo(() => {
     const m = new Map<string, FeedItem[]>();
     for (const f of feeds) {
@@ -575,6 +596,7 @@ function Main(props: { user: User; onLogout: () => void }) {
       const list = m.get(f.folderId);
       if (list) list.push(f); else m.set(f.folderId, [f]);
     }
+    for (const id of m.keys()) m.set(id, feedsOfFolder(feeds, id));
     return m;
   }, [feeds]);
 
@@ -585,22 +607,19 @@ function Main(props: { user: User; onLogout: () => void }) {
   );
 
   /**
-   * 未分组的源（§15.26，v2.0）。
+   * 未分组的源（§15.26，v2.0；§15.28 起位置改到最前）。
    *
    * 侧栏把它们**平铺在分组区块里**，与分组行同级 —— 需求方原话是
    * 「未分组的直接在组的地方显示，没有分组就意味着在最外面直接看」。
    *
-   * 按标题用 `zh-CN` 排序（拼音序）：分组有 sort 顺序（用户自己排的），
-   * 未分组没有那个依据，按名字是最不令人意外的默认。用 `zh-CN` 而不是
-   * 默认比较器：默认比较器按码点排，中文会得到"零、七、三"这种
-   * 完全无序的结果（实测：码点序 零 96F6 > 七 4E03）。
+   * 顺序：先按 `sort`（用户在排列模式里拖过的），并列时按标题的 `zh-CN`
+   * 拼音序。**不能让默认比较器接手并列项**：它按码点排，中文会得到
+   * "零、七、三"这种完全无序的结果（实测码点序 零 96F6 > 七 4E03），
+   * 而这不报错、只是看起来很乱。m1-26 ① 就是抓这个的。
+   *
+   * 排序规则在 arrange.ts 的 looseFeedsOf 里，配置页共用同一份。
    */
-  const looseFeeds = useMemo(
-    () => feeds
-      .filter((f) => !f.folderId)
-      .sort((x, y) => (x.title ?? x.url).localeCompare(y.title ?? y.url, 'zh-CN')),
-    [feeds],
-  );
+  const looseFeeds = useMemo(() => looseFeedsOf(feeds), [feeds]);
 
   /**
    * 当前范围里的源清单，含「未分组」这个伪范围。
@@ -639,6 +658,153 @@ function Main(props: { user: User; onLogout: () => void }) {
       setScope((s) => ({ folderId: s.folderId }));
     }
   }, [feedsInScope, feedsLoaded, scope.feedId, scope.folderId]);
+
+  /**
+   * 落位：把一次拖动变成一次提交（§15.28）。
+   *
+   * 三种结果，走同一套接口：
+   *   · 拖分组行 → `reorderFolders`
+   *   · 拖源到行间 → 在同组内调序（`arrangeFeeds`，只换 sort）
+   *   · 拖源到分组行上 → 换组（`arrangeFeeds` 带新 folderId），弹 toast
+   *
+   * 失败时**不退出排列模式**：退出等于用户刚做的调整无声消失，
+   * 他只会以为"又白弄了"。改成弹一条不自动消失的错误 toast。
+   */
+  const handleDrop = useCallback(async (row: ArrangeRow, target: DropTarget | null) => {
+    if (!target) return;   // 松手在空处/自己身上 = 取消，不发请求
+
+    try {
+      if (row.kind === 'folder') {
+        const ids = foldersAfterDrop(folders, row.id, target);
+        if (!ids) return;
+        await api.reorderFolders(ids);
+        refreshShell();
+        return;
+      }
+
+      // ── 源：先确定目标组，再算新顺序 ─────────────────────
+      const toFolder = target.kind === 'into' ? target.folderId : row.folderId;
+      // 目标组当前的显示顺序（跨组时不含被拖的那个，它还在原组里）
+      const siblings = (toFolder === null ? looseFeeds : (feedsByFolder.get(toFolder) ?? []))
+        .map((f) => f.id);
+
+      let ids: string[] | null;
+      if (target.kind === 'into') {
+        // 放进某组：落在末尾。拖到组行上没有"插到中间"这回事 ——
+        // 组行只有一个整体，没有可供落点的行间位置
+        ids = [...siblings.filter((x) => x !== row.id), row.id];
+      } else {
+        // 行间落位。findDropTarget 只在同组时才给 line，所以这里
+        // siblings 一定含 row.id
+        ids = orderAfterDrop(siblings, row.id, target);
+      }
+      if (!ids) return;
+
+      await api.arrangeFeeds(toFolder, ids);
+
+      // toast 只在**跨组**时弹：同组调序是原地微调，弹一条比不弹更吵
+      if (toFolder !== row.folderId) {
+        const destName = toFolder === null
+          ? '未分组'
+          : (folders.find((f) => f.id === toFolder)?.name ?? '分组');
+        const fromFolder = row.folderId;
+        const fromName = fromFolder === null
+          ? '未分组'
+          : (folders.find((f) => f.id === fromFolder)?.name ?? '分组');
+        const back = fromFolder === null ? looseFeeds : (feedsByFolder.get(fromFolder) ?? []);
+        showToast({
+          text: `「${row.label}」已移入「${destName}」`,
+          action: {
+            label: '撤销',
+            onRun: async () => {
+              try {
+                // 撤销要把归属和位置一起还原：只改 folderId 的话，
+                // 它会落在原组末尾而不是原来的位置
+                await api.arrangeFeeds(fromFolder, [...back.map((f) => f.id).filter((x) => x !== row.id), row.id]);
+                showToast({ text: `已撤销，回到「${fromName}」` });
+              } catch {
+                showToast({ text: '撤销失败，请手动移回', tone: 'error' });
+              }
+              refreshShell();
+            },
+          },
+        });
+      }
+      refreshShell();
+    } catch (e) {
+      showToast({
+        text: e instanceof ApiFailure ? e.message : '调整失败，顺序未改变',
+        tone: 'error',
+      });
+    }
+  }, [folders, feedsByFolder, looseFeeds, refreshShell, showToast]);
+
+  const arrange = useArrange({
+    inArrange: arranging,
+    enterArrange: () => {
+      setArranging(true);
+      // 进入排列模式时收起全部手风琴（§15.28）：展开的组行高几十像素，
+      // 落点计算会漂；拖动时子行跟着父行走还会让整块跳。
+      setExpanded(new Set());
+    },
+    onDrop: (row, target) => { void handleDrop(row, target); },
+  });
+
+  /**
+   * ↑↓ 走一格（§15.28）。这是拖拽的兜底通道 —— 键盘、触控板、
+   * 或者"就想挪一位"的时候用它，不必拖。
+   *
+   * 与拖拽共用 `moveItem` 与同一套提交接口，所以两条路给出的顺序
+   * 不可能不一致；差别只在落点怎么算出来。
+   */
+  const moveFolderBy = useCallback(async (folderId: string, delta: number) => {
+    const ids = folders.map((f) => f.id);
+    const i = ids.indexOf(folderId);
+    if (i < 0) return;
+    const dst = i + delta;
+    if (dst < 0 || dst >= ids.length) return;   // 首行 ↑ / 末行 ↓ 已经在按钮上禁用
+    try {
+      await api.reorderFolders(moveItem(ids, i, dst));
+      refreshShell();
+    } catch (e) {
+      showToast({ text: e instanceof ApiFailure ? e.message : '调整失败', tone: 'error' });
+    }
+  }, [folders, refreshShell, showToast]);
+
+  const moveFeedBy = useCallback(async (folderId: string | null, feedId: string, delta: number) => {
+    const kids = folderId === null ? looseFeeds : (feedsByFolder.get(folderId) ?? []);
+    const ids = kids.map((f) => f.id);
+    const i = ids.indexOf(feedId);
+    if (i < 0) return;
+    const dst = i + delta;
+    if (dst < 0 || dst >= ids.length) return;   // 首行 ↑ / 末行 ↓ 已经在按钮上禁用
+    try {
+      await api.arrangeFeeds(folderId, moveItem(ids, i, dst));
+      refreshShell();
+    } catch (e) {
+      showToast({ text: e instanceof ApiFailure ? e.message : '调整失败', tone: 'error' });
+    }
+  }, [feedsByFolder, looseFeeds, refreshShell, showToast]);
+
+  // 排列模式的 Esc 退出（§15.28）。挂在 window 上：焦点可能在任意一行上，
+  // 而"退出"是全局语义，不该要求先点到某个容器里。
+  //
+  // ⚠️ **拖动进行中不退出**：那时 Esc 的语义是"取消这次拖动"，
+  // 由 useArrange 自己处理。这里再退一次，用户会把整个排列现场一起丢掉。
+  useEffect(() => {
+    if (!arranging || arrange.drag) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // 阅读区/搜索框里的 Esc 各有各的用处，别抢 —— 只在没有输入焦点时生效
+      const el = document.activeElement;
+      const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      if (typing) return;
+      e.preventDefault();
+      setArranging(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [arranging, arrange.drag]);
 
   /**
    * 展开/收起一个分组（§15.13 手风琴）。
@@ -964,13 +1130,26 @@ function Main(props: { user: User; onLogout: () => void }) {
 
   const scopeHasEntries = readTailTotal > 0 || items.length > 0;
 
+  // 日号栏的分层标记（设计方案 §2.2）：只在"这一天的第一行"上带日期，
+  // 其余行为空 —— 日期是结构，重复 30 次就退化成元信息了。
+  // 计算结果按 items 的顺序一一对应，长度始终与 items 相等。
+  const dayMarks = useMemo(() => markDays(items.map((x) => x.publishedAt)), [items]);
+
   return (
     <div className="app">
       {/* ── 侧栏 ─────────────────────────────────────────── */}
       <aside className="sidebar">
         <div className="brand">
-          <IconRss size={19} />
-          <span>AI RSS</span>
+          {/* 标记：三道逐级变短的横线 —— 浑浊静置后逐层沉底。
+              这是"澄"这个字在做的事，也是这个工具对信息做的事。
+              比直接把字再写一遍更有信息量。 */}
+          <span className="brand-mark" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <path d="M2 4h12M2 8h8M2 12h4" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </span>
+          <span className="brand-name">澄</span>
         </div>
 
         <nav className="nav">
@@ -1026,16 +1205,160 @@ function Main(props: { user: User; onLogout: () => void }) {
             那 2 个源在侧栏完全不可见。 */}
         {(folders.length > 0 || looseFeeds.length > 0) && (
           <>
-            <div className="nav-section">分组</div>
-            <nav className="nav tree" aria-label="分组与订阅源">
-              {folders.map((f) => {
-                const open = expanded.has(f.id);
+            {/* 区块标题在排列模式下换成操作条（§15.28）：标题说了现在是什么
+                状态、右侧给出口。不用浮层工具条 —— 侧栏只有 196px，
+                浮层会盖住正在排的那几行。 */}
+            {arranging ? (
+              <div className="nav-section arrange-head">
+                <span>调整顺序</span>
+                <button
+                  className="btn tiny"
+                  onClick={() => setArranging(false)}
+                  title="结束调整（Esc）"
+                >
+                  完成
+                </button>
+              </div>
+            ) : (
+              <div className="nav-section">分组</div>
+            )}
+            <nav
+              className={`nav tree ${arranging ? 'arranging' : ''}`}
+              aria-label="分组与订阅源"
+              aria-grabbed={arrange.drag ? 'true' : undefined}
+            >
+              {/* 未分组源在最前（§15.28 位置调整，推翻 §15.26 的"排在所有分组之后"）。
+                  仍然不造伪分组：它是个不可展开的行。
+                  排列模式下它们也参与 —— 可以拖动，拖到分组行上 = 放进该组。
+                  外面这层 div 保留 `data-testid`：m1-26 ⑥ 靠"块整块不渲染"
+                  判断"全部源都有分组后不留空壳"，去掉它那条断言会失去抓手。 */}
+              {looseFeeds.length > 0 && (
+              <div className="tree-loose" data-testid="loose-feeds">
+              {looseFeeds.map((fd) => {
+                const on = scope.feedId === fd.id && scope.folderId === 'none';
+                const row: ArrangeRow = {
+                  key: rowKey('loose', fd.id), kind: 'loose', id: fd.id, folderId: null,
+                  label: fd.title ?? hostOf(fd.url) ?? '未命名源',
+                };
+                const t = arrange.target;
+                const isTargetLine = t?.kind === 'line' && t.key === row.key;
+                return (
+                  <div
+                    key={fd.id}
+                    // ⚠️ 这个外层 div **不带** `data-arrange-kind`：
+                    // 那是"一行"的标记，会被 `findDropTarget` 与验收脚本按行计数。
+                    // 容器也带上的话，行数会翻倍，落点也会命中容器而不是行。
+                    className={`arrange-row tree-loose-row-wrap`}
+                  >
+                    <button
+                      // 与分组行**同级**：不加 tree-leaf 的缩进、不加脊线。
+                      // 用 tree-row 的形状（含一个空白箭头位）让文字起点
+                      // 与分组行对齐 —— 差 15px 会让"它们是一类"这件事垮掉。
+                      className={`nav-item tree-row tree-loose-row ${on ? 'active' : ''} ${
+                        arrange.drag?.row.key === row.key ? 'dragging' : ''
+                      } ${isTargetLine ? 'drop-' + t.pos : ''}`}
+                      onClick={() => { if (!arranging) pickFeed('none', fd.id); }}
+                      onPointerDown={(e) => arrange.press(row, e)}
+                      title={arranging ? `拖动调整「${row.label}」` : (fd.title ?? hostOf(fd.url) ?? fd.url)}
+                      aria-pressed={arranging ? undefined : on}
+                      data-feed-id={fd.id}
+                      data-arrange-kind="loose"
+                      data-arrange-id={fd.id}
+                      data-arrange-folder=""
+                    >
+                      <span className="tree-caret" aria-hidden="true">
+                        {arranging ? <span className="drag-grip"><i /><i /><i /></span> : null}
+                      </span>
+                      <span className="nav-label">{row.label}</span>
+                      {!arranging && fd.unread > 0 && (
+                        <span className="badge">{fd.unread > 999 ? '999+' : fd.unread}</span>
+                      )}
+                    </button>
+                    {arranging && (
+                      <span className="arrange-move">
+                        <button
+                          className="arrange-arrow"
+                          disabled={looseFeeds.findIndex((x) => x.id === fd.id) === 0}
+                          onClick={() => void moveFeedBy(null, fd.id, -1)}
+                          title="上移一位"
+                          aria-label={`「${row.label}」上移`}
+                        >↑</button>
+                        <button
+                          className="arrange-arrow"
+                          disabled={looseFeeds.findIndex((x) => x.id === fd.id) === looseFeeds.length - 1}
+                          onClick={() => void moveFeedBy(null, fd.id, 1)}
+                          title="下移一位"
+                          aria-label={`「${row.label}」下移`}
+                        >↓</button>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              </div>
+              )}
+
+              {folders.map((f, fi) => {
+                const open = expanded.has(f.id) && !arranging;
                 const kids = feedsByFolder.get(f.id) ?? [];
                 // 选中整组（没有源筛选）时组行才是"当前范围"；
                 // 选了组内某个源时高亮转移到子行，组行只保留展开箭头的高亮。
                 const groupActive = scope.folderId === f.id && !scope.feedId;
+                const row: ArrangeRow = {
+                  key: rowKey('folder', f.id), kind: 'folder', id: f.id, folderId: f.id, label: f.name,
+                };
+                const t = arrange.target;
+                const isDropLine = t?.kind === 'line' && t.key === row.key;
+                // 拖着一个源悬在这一组上 = "放进这一组"
+                const isInto = t?.kind === 'into' && t.folderId === f.id
+                  && arrange.drag?.row.kind !== 'folder';
                 return (
                   <div className="tree-group" key={f.id}>
+                    {/* ⚠️ 排列模式下 ↑↓ **不能**嵌在行按钮里 —— `<button>` 里
+                        套 `<button>` 是无效 HTML：浏览器会把它拆成兄弟节点，
+                        键盘焦点与无障碍树都跟着坏，而 React 不会报错。
+                        所以排列模式下这一行改成 div 容器 + 行按钮 + 箭头兄弟。
+
+                        非排列模式仍是单个 `<button>`：m1-26 量的 labelLeft /
+                        height / caretW 全挂在 `.tree-row` 上，多包一层会让那三条
+                        一起偏。也正因为如此，包与不包必须条件切换而不是统一包。 */}
+                    {arranging ? (
+                      <div
+                        className={`arrange-row ${isDropLine ? 'drop-' + t.pos : ''} ${
+                          isInto ? 'into' : ''
+                        } ${arrange.drag?.row.key === row.key ? 'dragging' : ''}`}
+                        data-arrange-kind="folder"
+                        data-arrange-id={f.id}
+                      >
+                        <button
+                          className="nav-item tree-row"
+                          onPointerDown={(e) => arrange.press(row, e)}
+                          title={`拖动调整「${f.name}」的位置${arrange.drag?.row.kind === 'feed' ? '，或把源放进来' : ''}`}
+                          tabIndex={0}
+                        >
+                          <span className="tree-caret" aria-hidden="true">
+                            <span className="drag-grip"><i /><i /><i /></span>
+                          </span>
+                          <span className="nav-label">{f.name}</span>
+                        </button>
+                        <span className="arrange-move">
+                          <button
+                            className="arrange-arrow"
+                            disabled={fi === 0}
+                            onClick={() => void moveFolderBy(f.id, -1)}
+                            title="上移一位"
+                            aria-label={`「${f.name}」上移`}
+                          >↑</button>
+                          <button
+                            className="arrange-arrow"
+                            disabled={fi === folders.length - 1}
+                            onClick={() => void moveFolderBy(f.id, 1)}
+                            title="下移一位"
+                            aria-label={`「${f.name}」下移`}
+                          >↓</button>
+                        </span>
+                      </div>
+                    ) : (
                     <button
                       className={`nav-item tree-row ${groupActive ? 'active' : ''} ${
                         // in-path 只表示"路径上但不是终点"：选了组内某个源时，
@@ -1052,6 +1375,14 @@ function Main(props: { user: User; onLogout: () => void }) {
                       }}
                       aria-expanded={open}
                       title={`「${f.name}」${open ? '收起' : '展开'}组内 ${kids.length} 个源`}
+                      // 非排列模式下 `data-arrange-*` 也必须挂在这一行上：
+                      // 长按要按它找到这一行的矩形（算抓取点偏移），
+                      // 而验收脚本按它数行 —— 只在排列分支加的话，
+                      // 进模式前一行都数不到，长按也无从开始。
+                      data-arrange-kind="folder"
+                      data-arrange-id={f.id}
+                      // 长按从这里起算：不进模式的那一下仍是普通点击
+                      onPointerDown={(e) => arrange.press(row, e)}
                     >
                       <span className="tree-caret" aria-hidden="true">
                         <IconChevronRight size={13} />
@@ -1061,24 +1392,71 @@ function Main(props: { user: User; onLogout: () => void }) {
                         <span className="badge">{f.unread > 999 ? '999+' : f.unread}</span>
                       )}
                     </button>
+                    )}
 
                     {/* 子行：组内每个源一行。0 未读也显示 —— "没新内容"是信息。
-                        组里 0 个源时不渲染，避免一条空脊线。 */}
-                    {open && kids.length > 0 && (
+                        组里 0 个源时不渲染，避免一条空脊线。
+                        排列模式下也渲染（否则组内源没法排），但收起状态不渲染。 */}
+                    {(open || (arranging && kids.length > 0)) && kids.length > 0 && (
                       <ul className="tree-kids">
-                        {kids.map((fd) => {
+                        {kids.map((fd, ki) => {
                           const on = scope.feedId === fd.id;
+                          const krow: ArrangeRow = {
+                            key: rowKey('feed', fd.id), kind: 'feed', id: fd.id,
+                            folderId: f.id, label: fd.title ?? hostOf(fd.url) ?? '未命名源',
+                          };
+                          const kIsLine = t?.kind === 'line' && t.key === krow.key;
                           return (
                             <li key={fd.id}>
+                              {/* 同组行：排列模式下拆成 div + 按钮 + 箭头兄弟，
+                                  避免 `<button>` 套 `<button>`（无效 HTML）。 */}
+                              {arranging ? (
+                                <div
+                                  className={`arrange-row ${kIsLine ? 'drop-' + t.pos : ''} ${
+                                    arrange.drag?.row.key === krow.key ? 'dragging' : ''
+                                  }`}
+                                  data-arrange-kind="feed"
+                                  data-arrange-id={fd.id}
+                                  data-arrange-folder={f.id}
+                                >
+                                  <button
+                                    className="tree-leaf"
+                                    onPointerDown={(e) => arrange.press(krow, e)}
+                                    title={`拖动调整「${krow.label}」的位置`}
+                                    tabIndex={0}
+                                  >
+                                    <span className="tree-leaf-name">{krow.label}</span>
+                                  </button>
+                                  <span className="arrange-move">
+                                    <button
+                                      className="arrange-arrow"
+                                      disabled={ki === 0}
+                                      onClick={() => void moveFeedBy(f.id, fd.id, -1)}
+                                      title="上移一位"
+                                      aria-label={`「${krow.label}」上移`}
+                                    >↑</button>
+                                    <button
+                                      className="arrange-arrow"
+                                      disabled={ki === kids.length - 1}
+                                      onClick={() => void moveFeedBy(f.id, fd.id, 1)}
+                                      title="下移一位"
+                                      aria-label={`「${krow.label}」下移`}
+                                    >↓</button>
+                                  </span>
+                                </div>
+                              ) : (
                               <button
                                 className={`tree-leaf ${on ? 'active' : ''}`}
                                 onClick={() => pickFeed(f.id, fd.id)}
                                 title={fd.title ?? hostOf(fd.url) ?? fd.url}
                                 aria-pressed={on}
+                                // 同上：非排列模式也要能长按这一行
+                                data-arrange-kind="feed"
+                                data-arrange-id={fd.id}
+                                data-arrange-folder={f.id}
+                                onPointerDown={(e) => arrange.press(krow, e)}
                               >
-                                <span className="tree-leaf-name">
-                                  {fd.title ?? hostOf(fd.url) ?? '未命名源'}
-                                </span>
+                                <span className="tree-leaf-name">{krow.label}</span>
                                 {/* 未读数用文字而不是 badge：子行里再挂一个
                                     胶囊会和父行的角标抢同一种视觉重量，
                                     展开后整块看起来像一排按钮。 */}
@@ -1086,6 +1464,7 @@ function Main(props: { user: User; onLogout: () => void }) {
                                   {fd.unread > 999 ? '999+' : fd.unread}
                                 </span>
                               </button>
+                              )}
                             </li>
                           );
                         })}
@@ -1094,37 +1473,6 @@ function Main(props: { user: User; onLogout: () => void }) {
                   </div>
                 );
               })}
-
-              {/* 未分组源平铺（§15.26，v2.0）。
-                  不造「未分组」伪分组：需求方说的是"在最外面直接看"，
-                  而伪分组多一次点击 —— 未分组通常只有个位数个源。
-                  排序固定排在所有真分组之后，让人一眼看出"这些不归属任何组"。 */}
-              {looseFeeds.length > 0 && (
-                <div className="tree-loose" data-testid="loose-feeds">
-                  {looseFeeds.map((fd) => {
-                    const on = scope.feedId === fd.id;
-                    return (
-                      <button
-                        key={fd.id}
-                        // 与分组行**同级**：不加 tree-leaf 的缩进、不加脊线。
-                        // 用 tree-row 的形状（含一个空白箭头位）让文字起点
-                        // 与分组行对齐 —— 差 15px 会让"它们是一类"这件事垮掉。
-                        className={`nav-item tree-row tree-loose-row ${on ? 'active' : ''}`}
-                        onClick={() => pickFeed('none', fd.id)}
-                        title={fd.title ?? hostOf(fd.url) ?? fd.url}
-                        aria-pressed={on}
-                        data-feed-id={fd.id}
-                      >
-                        <span className="tree-caret" aria-hidden="true" />
-                        <span className="nav-label">
-                          {fd.title ?? hostOf(fd.url) ?? '未命名源'}
-                        </span>
-                        {fd.unread > 0 && <span className="badge">{fd.unread > 999 ? '999+' : fd.unread}</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
             </nav>
           </>
         )}
@@ -1179,6 +1527,14 @@ function Main(props: { user: User; onLogout: () => void }) {
           onClose={() => { setSettingsOpen(false); refreshShell(); }}
           onLogout={props.onLogout}
           onChanged={refreshShell}
+          // 配置页的「移到…」也走应用级 toast（§15.28）：
+          // ≤640px 没有侧栏，那是手机上唯一能搬动源的入口，
+          // 不给它撤销入口的话「移出分组可撤销」这条在手机上就达不到
+          onToast={(t) => showToast({
+            text: t.text,
+            tone: t.tone,
+            action: t.onUndo ? { label: '撤销', onRun: t.onUndo } : undefined,
+          })}
         />
       )}
 
@@ -1375,13 +1731,14 @@ function Main(props: { user: User; onLogout: () => void }) {
 
           {view !== 'history' && (
           <ul className="entry-list">
-            {items.map((it) => (
+            {items.map((it, i) => (
               <EntryRow
                 key={it.id}
                 it={it}
                 active={openId === it.id}
                 onOpen={() => void open(it.id)}
                 onStar={() => void toggleStar(it.id)}
+                day={dayMarks[i]}
               />
             ))}
             {/* 分割线 + 已读尾段（§15.24，v1.18）。
@@ -1516,6 +1873,34 @@ function Main(props: { user: User; onLogout: () => void }) {
           <span className="tab-label">配置</span>
         </button>
       </nav>
+
+      {/* 浮起的拖动卡片（§15.28）。
+          为什么用 fixed 且 pointer-events: none：
+            · fixed 才能脱离侧栏的 overflow 裁剪 —— 侧栏是 overflow-y: auto，
+              拖出侧栏右边界的部分会被切掉；
+            · pointer-events: none 关掉自身命中，否则它永远在指针正下方，
+              findDropTarget 会一直落回它自己，落点永远不动。
+          位置用 transform 而不是 left/top：拖动每帧都要改，transform 走合成层，
+          left/top 会触发布局。 */}
+      {arrange.drag && (
+        <div
+          className="drag-ghost"
+          style={{
+            transform: `translate(${arrange.drag.x - arrange.drag.grabX}px, ${
+              arrange.drag.y - arrange.drag.grabY}px)`,
+          }}
+          aria-hidden="true"
+        >
+          {arrange.drag.row.kind === 'folder' ? <IconFolder size={13} /> : <IconRss size={13} />}
+          <span className="drag-ghost-label">{arrange.drag.row.label}</span>
+        </div>
+      )}
+
+      {/* 底部提示条（§15.28）：跨组移动后的确认与撤销。
+          挂在根 div 里而不是每个视图里 —— 它跟着操作走，不跟着视图走。 */}
+      <ToastHost toast={toast} onDone={(id) => {
+        setToast((cur) => (cur && cur.id === id ? null : cur));
+      }} />
     </div>
   );
 }
@@ -1927,6 +2312,35 @@ function Reader(props: {
           <IconArrowLeft size={17} />
         </button>
         <div className="grow" />
+
+        {/* AI 动作组（设计方案 §5.4）：摘要 / 总结 收成一组，放在顶部右侧。
+            为什么收到这里：它们是"对这篇文章做点什么"，与返回、收藏、设置
+            属于同一类动作 —— 都属于工具条，而非文章内容。
+            之前总结按钮埋在纸面里、摘要折叠头埋在正文上方，两个 AI 动作
+            分居两处，用户找不到"这类功能在哪"。 */}
+        {a && (
+          <div className="ai-group" role="group" aria-label="AI 功能">
+            <button
+              className={`ai-btn ${aiOpen ? 'on' : ''}`}
+              onClick={() => setAiOpen((v) => !v)}
+              aria-pressed={aiOpen}
+              title={aiOpen ? '收起 AI 摘要' : '展开 AI 摘要'}
+            >
+              <IconSparkle size={13} />
+              摘要
+            </button>
+            <button
+              className={`ai-btn ${sum.state === 'done' ? 'on' : ''}`}
+              onClick={() => void makeSummary(sum.state === 'done')}
+              disabled={sum.state === 'busy'}
+              title={sum.state === 'done' ? '按当前提示词重新生成' : '按当前提示词生成一份速读摘要'}
+            >
+              <IconSparkle size={13} />
+              {sum.state === 'busy' ? '生成中' : sum.state === 'done' ? '重总结' : '总结'}
+            </button>
+          </div>
+        )}
+
         {/* 去源站：站点首页，不是这篇文章（§15.11 双出口）。
             没有 feed 的条目（网页捕获）不渲染，避免死链。 */}
         {hasSite && (
@@ -2017,91 +2431,78 @@ function Reader(props: {
               detail.siteName && <span className="src">{detail.siteName}</span>
             )}
             {detail.author && <span>{detail.author}</span>}
-            <span>{new Date(detail.publishedAt).toLocaleString('zh-CN', {
+            <span className="time">{new Date(detail.publishedAt).toLocaleString('zh-CN', {
               year: 'numeric', month: '2-digit', day: '2-digit',
               hour: '2-digit', minute: '2-digit',
             })}</span>
             {a?.readingTime ? <span>约 {a.readingTime} 分钟</span> : null}
           </div>
 
-          {a && (
-            <div className={`ai-card ${aiOpen ? '' : 'collapsed'}`}>
-              <button className="ai-head" onClick={() => setAiOpen((v) => !v)}>
-                <IconSparkle size={15} />
+          {a && aiOpen && (
+            <div className="ai-card">
+              <div className="ai-label">
                 <span>AI 摘要</span>
                 {a.tier && <span className={`tier tier-${a.tier}`}>{tierLabel(a.tier)}</span>}
-                <div className="grow" />
-                <IconChevronRight size={14} className={`chev ${aiOpen ? 'down' : ''}`} />
-              </button>
-              {aiOpen && (
-                <div className="ai-body">
-                  <p className="ai-summary">{a.summary}</p>
-                  {a.keyPoints.length > 0 && (
-                    <ul className="ai-points">
-                      {a.keyPoints.map((k, i) => <li key={i}>{k}</li>)}
-                    </ul>
-                  )}
-                  {(a.topics.length > 0 || a.importance > 0) && (
-                    <div className="ai-foot">
-                      {a.topics.map((t) => <span key={t} className="topic">{t}</span>)}
-                      {a.importance > 0 && <span className="meta">重要度 {a.importance}</span>}
-                    </div>
-                  )}
+              </div>
+              <div className="ai-body">
+                <p className="ai-summary">{a.summary}</p>
+                {a.keyPoints.length > 0 && (
+                  <ul className="ai-points">
+                    {a.keyPoints.map((k, i) => <li key={i}>{k}</li>)}
+                  </ul>
+                )}
+                {(a.topics.length > 0 || a.importance > 0) && (
+                  <div className="ai-foot">
+                    {a.topics.map((t) => <span key={t} className="topic">{t}</span>)}
+                    {a.importance > 0 && <span className="meta">重要度 {a.importance}</span>}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 单篇总结（§15.27，v2.0）。
+              触发按钮在顶部工具条的 AI 组里，这里只渲染结果 ——
+              一个动作只有一个入口，按钮与内容分居两处会让人以为
+              它们是两件事。
+
+              放在正文之前：先看结论再决定读不读；放正文之后等于读完
+              才看到，那时它已经没用了。 */}
+          {(sum.state === 'busy' || sum.state === 'done' || sum.fail) && (
+            <div className="sum-card" data-testid="summary-card" data-state={sum.state}>
+              <div className="ai-label">
+                <span>总结</span>
+                {sum.state === 'done' && sum.createdAt && (
+                  <span className="ai-label-time">
+                    {new Date(sum.createdAt).toLocaleString('zh-CN', {
+                      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+                    })}
+                  </span>
+                )}
+              </div>
+
+              {sum.state === 'busy' && (
+                <div className="sum-skeleton" aria-live="polite" aria-label="正在生成总结">
+                  <span /><span /><span />
+                </div>
+              )}
+
+              {sum.state === 'done' && sum.text && (
+                <div className="sum-body">
+                  {/* 复用简报页的 Markdown 渲染器（§8.9）：它产出 React 节点、
+                      不用 dangerouslySetInnerHTML，所以模型输出不经过 HTML 解析。 */}
+                  <SummaryMarkdown md={sum.text} />
+                </div>
+              )}
+
+              {sum.fail && (
+                <div className="sum-fail" role="alert">
+                  {sumFailHint(sum.fail.kind)}
+                  <div className="sum-fail-hint">{sum.fail.message}</div>
                 </div>
               )}
             </div>
           )}
-
-          {/* 单篇总结（§15.27，v2.0）：紧贴 AI 摘要卡片之下、正文之上。
-              放正文前是"先看结论再决定读不读"；放正文后等于读完才看到，
-              那时它已经没用了。
-
-              按钮独立于摘要卡片而不是塞进它的头部：摘要是自动产出的，
-              总结是按需生成的 —— 两个动作的成本与时机都不同。 */}
-          <div className="sum-card" data-testid="summary-card">
-            <div className="sum-head">
-              <IconSparkle size={14} />
-              <span>总结</span>
-              {sum.state === 'done' && sum.createdAt && (
-                <span className="muted" style={{ fontSize: 11.5 }}>
-                  · {new Date(sum.createdAt).toLocaleString('zh-CN', {
-                    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-                  })}
-                </span>
-              )}
-              <span className="grow" />
-              <button
-                className="btn sm"
-                onClick={() => void makeSummary(sum.state === 'done')}
-                disabled={sum.state === 'busy'}
-                title={sum.state === 'done' ? '按当前提示词重新生成' : '按当前提示词生成一份速读摘要'}
-              >
-                {sum.state === 'busy' ? '总结中…'
-                  : sum.state === 'done' ? '重新总结' : '总结'}
-              </button>
-            </div>
-
-            {sum.state === 'busy' && (
-              <div className="sum-skeleton" aria-live="polite" aria-label="正在生成总结">
-                <span /><span /><span />
-              </div>
-            )}
-
-            {sum.state === 'done' && sum.text && (
-              <div className="sum-body">
-                {/* 复用简报页的 Markdown 渲染器（§8.9）：它产出 React 节点、
-                    不用 dangerouslySetInnerHTML，所以模型输出不经过 HTML 解析。 */}
-                <SummaryMarkdown md={sum.text} />
-              </div>
-            )}
-
-            {sum.fail && (
-              <div className="sum-fail" role="alert">
-                {sumFailHint(sum.fail.kind)}
-                <div className="sum-fail-hint">{sum.fail.message}</div>
-              </div>
-            )}
-          </div>
 
           {/* 正文 + 划词工具条（§11.3）。
               **工具条必须和正文同一个定位父级**：`useHighlights` 算的
@@ -2141,10 +2542,7 @@ function Reader(props: {
                 x={hl.sel.x}
                 y={hl.sel.y}
                 onPick={(c) => void hl.create(c)}
-                onAnnotate={() => {
-                  const t = window.prompt('这条为什么重要？');
-                  if (t !== null) void hl.annotate(t);
-                }}
+                onAnnotate={(note) => void hl.annotate(note)}
               />
             )}
           </div>
@@ -2292,6 +2690,8 @@ function EntryRow(props: {
   onStar: () => void;
   /** 元信息行里的时间部分。默认是"发布多久以前"，历史页换成"读多久以前" */
   meta?: React.ReactNode;
+  /** 日号栏（设计方案 §2.2）：只有当天的第一行带日期，其余为 undefined */
+  day?: DayMark;
 }) {
   const { it } = props;
   // 历史条目没有 highlightCount（服务端的历史接口不返回它）——历史页按
@@ -2313,6 +2713,12 @@ function EntryRow(props: {
           }
         }}
       >
+        {props.day && (
+          <span className="day-mark" data-month-start={props.day.monthStart ? '' : undefined}>
+            <b>{props.day.day}</b>
+            <i>{props.day.week}</i>
+          </span>
+        )}
         <div className="entry-top">
           {it.faviconUrl
             ? <img className="favicon" src={it.faviconUrl} alt="" loading="lazy"
@@ -2411,7 +2817,9 @@ function HistoryMeta(props: { it: HistoryEntry }) {
 // ── 工具 ───────────────────────────────────────────────────
 
 function tierLabel(tier: string): string {
-  return ({ must_read: '必读', worth: '值得', noise: '噪音' } as Record<string, string>)[tier] ?? tier;
+  // normal 也要有中文：漏掉它会直接显示英文 "normal"，
+  // 而 .ai-label 带 text-transform: uppercase，屏幕上就是 "NORMAL"。
+  return ({ must_read: '必读', worth: '值得', normal: '一般', noise: '噪音' } as Record<string, string>)[tier] ?? tier;
 }
 
 function hostOf(url: string): string | null {
@@ -2425,4 +2833,47 @@ function timeAgo(ms: number): string {
   if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
   if (s < 86400 * 30) return `${Math.floor(s / 86400)} 天前`;
   return new Date(ms).toLocaleDateString('zh-CN');
+}
+
+/** 日号栏的标记：日号、星期，以及这是否当月的第一行 */
+interface DayMark {
+  /** 当日两位数，如 "02" */
+  day: string;
+  /** 星期，如 "周六" */
+  week: string;
+  /** 这是当月的第一行 —— 上方要多留出月界的位置 */
+  monthStart: boolean;
+}
+
+const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+/**
+ * 给按时间倒序的条目算出日号栏标记（设计方案 §2.2）。
+ *
+ * 只在"日期变了"的那一行返回标记，其余返回 undefined —— 由调用方
+ * 逐项取用。**不改变 items 顺序**：列表的顺序由服务端的游标决定，
+ * 这里只读不写。
+ *
+ * 日期按**本地时区**归一化（不是 UTC）：用户看到的"今天"是他所在时区的
+ * 今天。用 UTC 归一化的话，东八区上午 8 点之前的条目会被算到前一天。
+ */
+function markDays(times: number[]): (DayMark | undefined)[] {
+  const out: (DayMark | undefined)[] = [];
+  let lastDay = '';
+  let lastMonth = '';
+  for (const ms of times) {
+    const d = new Date(ms);
+    const dayKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const monthKey = `${d.getFullYear()}-${d.getMonth()}`;
+    if (dayKey === lastDay) { out.push(undefined); continue; }
+    const monthStart = monthKey !== lastMonth;
+    lastDay = dayKey;
+    lastMonth = monthKey;
+    out.push({
+      day: String(d.getDate()).padStart(2, '0'),
+      week: WEEK[d.getDay()] ?? '',
+      monthStart,
+    });
+  }
+  return out;
 }

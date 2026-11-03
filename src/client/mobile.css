@@ -201,7 +201,7 @@
   margin-bottom: 8px;
   background: var(--bg-elev);
 }
-.feed-row.broken { border-color: rgba(255, 107, 107, 0.3); }
+.feed-row.broken { border-color: color-mix(in srgb, var(--err) 30%, transparent); }
 .feed-row.paused { opacity: 0.6; }
 
 .feed-icon {
@@ -285,7 +285,7 @@
   color: var(--fg-faint);
   font-weight: 500;
 }
-.tag.bad { background: rgba(255, 107, 107, 0.15); color: var(--must); }
+.tag.bad { background: color-mix(in srgb, var(--err) 15%, transparent); color: var(--must); }
 
 .feed-ops { display: flex; gap: 2px; align-items: center; flex-shrink: 0; }
 
@@ -303,7 +303,7 @@
   margin-right: 4px;
   font-weight: 500;
 }
-.icon-btn.danger:hover { color: var(--must); background: rgba(255, 107, 107, 0.1); }
+.icon-btn.danger:hover { color: var(--must); background: color-mix(in srgb, var(--err) 10%, transparent); }
 
 .feeds-foot {
   display: flex;
@@ -347,19 +347,33 @@
   position: relative;
 }
 .tab:hover { background: none; }
-.tab.active { color: var(--accent); }
+.tab.active { color: var(--fg); }
+.tab.active { color: var(--fg); }
+/* 激活态是一道墨线，压在 tab 上沿。
+   放上沿而不是下沿：下沿被 tabbar 的底部安全区与标签文字挤着，
+   换个字号就会贴到文字上。 */
+.tab.active::after {
+  content: '';
+  position: absolute; left: 50%; transform: translateX(-50%);
+  top: 0; width: 18px; height: 2px; border-radius: 1px;
+  background: var(--fg);
+}
 .tab-icon { position: relative; display: inline-flex; }
 .tab-label { font-size: 10px; line-height: 1.2; }
 .tab-badge {
   position: absolute;
-  top: -5px; right: -9px;
-  min-width: 15px; height: 15px;
+  /* 角标要压在图标右上角之外，而不是盖在图标上：
+     盖上去之后图标就剩下半颗，分不清是"未读"还是"有通知"。 */
+  top: -6px; right: -13px;
+  min-width: 14px; height: 14px;
   padding: 0 3px;
   border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: #fff;
+  /* 角标是压力源不是主信息：用一档抬升底 + 淡墨字，不用强调色。
+     --accent 现在是墨色，拿它当底色会变成一颗白团压住图标。 */
+  background: var(--bg-active);
+  color: var(--fg-dim);
   font-size: 9px;
-  line-height: 15px;
+  line-height: 14px;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -430,8 +444,39 @@
 
   /* 触摸目标放大 */
   .nav-item, .tab { min-height: 44px; }
-  .entry-item { padding: 12px 14px 12px 16px; }
+  /* 手机上日号栏收到 44px，把宽度还给标题。
+     这里只改列宽与内边距，**不能**写成单一 padding —— .entry-item 是
+     两列 grid，写成 padding 会让日号栏失去它的列位，日期压到标题上。 */
+  .entry-item {
+    grid-template-columns: 44px minmax(0, 1fr);
+    column-gap: 12px;
+    padding: 10px 12px 11px 0;
+  }
+  .entry-item::before { left: 43px; }
+  .day-mark b { font-size: 15px; }
   .icon-btn { width: 40px; height: 40px; }
+
+  /* 提示条要抬到 tab bar 之上（§15.28）：56px 的底栏 + 安全区正好
+     把 bottom:24px 那个位置盖住，撤销按钮会点不到。 */
+  .toast {
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 12px);
+    left: 12px;
+    right: 12px;
+    max-width: none;
+    transform: none;
+  }
+  /* 手机上不能用 translateX(-50%)：左右已经贴边定宽了 */
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes toast-out {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(8px); }
+  }
+  /* 撤销按钮要真能点到：桌面那 24px 在手指上偏小 */
+  .toast-action { height: 32px; padding: 0 11px; font-size: 13px; }
+  .toast-close { width: 32px; height: 32px; }
 
   /* 搜索框字号 ≥16px：iOS 上小于 16px 会在聚焦时自动放大页面 */
   .search-box input { font-size: 16px; }

@@ -36,7 +36,7 @@ function readVersion(): string {
   }
 }
 
-const USAGE = `AI RSS —— 自托管 AI RSS 阅读分析器
+const USAGE = `澄 (cheng) —— 自托管的私人知识库：订阅进来，AI 沉淀，剩下的留给你
 
 用法: ai-rss <命令> [选项]
 

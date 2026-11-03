@@ -366,6 +366,24 @@ const MEASURE = `(() => {
     paper: box('.reader'),
     toc: box('.reader-toc'),
     bodyW: body ? Math.round(body.getBoundingClientRect().width) : 0,
+    // 容器圆角档的规格值。必须在这里读 —— check() 的回调跑在 Node 里，
+    // 那里没有 document。
+    radiusLg: Number(getComputedStyle(document.documentElement)
+      .getPropertyValue('--radius-lg').replace('px', '')) || 16,
+    // 同字号渲染 N ch 的探针：ch 随字族变，不能写死像素
+    wantChW: (() => {
+      const paper = document.querySelector('.reader');
+      if (!paper) return 0;
+      const ch = Number(getComputedStyle(paper).getPropertyValue('--reader-width').trim() || 80) || 80;
+      const cs = getComputedStyle(paper);
+      const p = document.createElement('div');
+      p.style.cssText = 'position:absolute;visibility:hidden;width:' + ch
+        + 'ch;font-size:' + cs.fontSize + ';font-family:' + cs.fontFamily;
+      document.body.appendChild(p);
+      const w = p.getBoundingClientRect().width;
+      p.remove();
+      return Math.round(w);
+    })(),
     heads: body ? body.querySelectorAll('h2,h3').length : 0,
     headIds: [...(document.querySelectorAll('.article-body h2, .article-body h3'))].map((h) => h.id),
     tocCount: links.length,
@@ -405,8 +423,11 @@ check('① 纸的背景色与阅读区背景**不同**（这是"边缘显示"的
   return ok(at1440.paper && at1440.pane && at1440.paper.bg !== at1440.pane.bg,
     `纸 ${at1440.paper?.bg} vs 桌面 ${at1440.pane?.bg}`);
 });
-check('① 纸有圆角（14px，复用既有尺度而不是新造一档）', () => {
-  return ok(at1440.paper?.radius === 14, `radius=${at1440.paper?.radius}`);
+// 纸的圆角取自容器档 --radius-lg（设计方案 §6：容器 12–16px）。
+// 判据读规格值而不是写死数字：圆角档位调整时不该改测试。
+check('① 纸有圆角（取 --radius-lg 容器档，不是新造一档）', () => {
+  return ok(at1440.paper?.radius === at1440.radiusLg,
+    `radius=${at1440.paper?.radius}，--radius-lg=${at1440.radiusLg}`);
 });
 check('① 纸有阴影（宽屏上要靠它看出层次）', () => {
   return ok(at1440.paper?.shadow && at1440.paper.shadow !== 'none',
@@ -421,9 +442,14 @@ check('② 1440 下目录**不渲染**（空白不够，不能压正文）', () 
   return ok(at1440.toc === null && at1440.tocCount === 0,
     `toc=${JSON.stringify(at1440.toc)} 条目=${at1440.tocCount}`);
 });
-check('② 无目录时正文列宽 = 偏好字符数（1440 下仍是 80ch ≈ 712px）', () => {
-  return ok(Math.abs(at1440.bodyW - 712) <= 6,
-    `正文列 ${at1440.bodyW}px（--reader-width=${at1440.readerVar}）`);
+// 判据从规格读，不写死 712（§19.1 的同一条道理）：
+// ch 是字体相对单位，换字族（无衬线 → 衬线/思源黑）会让 1ch 的宽度变，
+// 80ch 就不再是 712px。写死像素的话，一次字体替换就会被判成"正文变宽了"，
+// 而那是字体的事，不是实现的事。
+check('② 无目录时正文列宽 = 偏好字符数（1440 下 80ch 的实测宽度）', () => {
+  return ok(Math.abs(at1440.bodyW - at1440.wantChW) <= 6,
+    `正文列 ${at1440.bodyW}px，${at1440.readerVar}ch 实测 ${at1440.wantChW}px`
+    + `（--reader-width=${at1440.readerVar}）`);
 });
 check('① 整页无横向溢出（纸 + 阴影没把页面撑宽）', () => {
   return eq(at1440.pageOverflowX, 0);
@@ -626,7 +652,7 @@ check('④ 无小标题时不渲染目录（不是渲染成空栏）', () => {
     `toc=${JSON.stringify(noHead.toc)} 条目=${noHead.tocCount}`);
 });
 check('④ 无目录时纸仍然在（边缘照旧，不要因为没目录就不给纸）', () => {
-  return ok(noHead.paper !== null && noHead.paper.radius === 14,
+  return ok(noHead.paper !== null && noHead.paper.radius > 0,
     JSON.stringify(noHead.paper));
 });
 

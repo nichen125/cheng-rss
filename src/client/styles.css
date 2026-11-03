@@ -5,86 +5,118 @@
  * 构建链路，而本项目最终只用到 8 个组件。手写 500 行 CSS 换来零构建
  * 依赖 + 首屏 14KB 样式，这个交换在小项目里更划算。
  *
- * 设计约束：暗色优先、正文默认 80ch（可调到 64/96）、列表一屏 8~10 条、动效不超过 200ms。
+ * 设计约束见 docs/界面设计方案.md。四条最容易在重构时被破坏的：
+ *   ① 亮色是主色，暗色跟随系统；三层底色靠明度差分隔，不靠粗线。
+ *   ② 强调色只用三处：主按钮、当前导航项、正文链接。其余全是灰。
+ *   ③ 时间是结构：列表左侧保留日号栏，相对时间降为行内注脚。
+ *   ④ 两种字体两种任务：扫描用无衬线，阅读用衬线。
+ *
+ * 三条硬预算没变：正文默认 80ch（可调 64/96）、列表一屏 8~10 条、动效不超过 200ms。
  */
 
 :root {
-  /* 中性色偏冷，贴近编辑器而不是"后台管理系统" */
-  --bg: #0b0d11;
-  --bg-elev: #12151b;
-  --bg-elev2: #171b23;
-  --bg-hover: #1c212b;
-  --bg-active: #222835;
-  --fg: #e7eaef;
-  --fg-dim: #a2acbb;
-  --fg-faint: #6d7686;
-  --border: #222834;
-  --border-soft: #1a1f28;
-  --accent: #5b9dff;
-  --accent-dim: rgba(91, 157, 255, 0.12);
-  --must: #ff6b6b;
-  --worth: #ffab4d;
-  --normal: #5d6675;
-  --noise: #39404b;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --err: #ff6b6b;
-  --radius: 10px;
-  --radius-lg: 14px;
-  --radius-sm: 7px;
+  /* ── 配色（设计方案 §3）────────────────────────────────────
+   *
+   * 亮色是主色。理由不是审美偏好，而是使用场景：这个工具的正文
+   * 超过七成是在白天、办公室、外接屏上读的，暗底白字在那种环境下
+   * 只是看起来"酷"，长时间读并不舒服。
+   *
+   * 三层底色，靠明度差而不是粗线条分隔：
+   *   --bg-sunken  侧栏 / 阅读区桌面（最暗的一层，退后）
+   *   --bg         列表 / 内容（白）
+   *   --bg-elev    卡片、弹窗、纸（与 bg 同色，靠阴影浮起）
+   *
+   * 强调色只用在三处：主按钮、当前导航项、正文链接。其余全部是灰。
+   * 一个界面里强调色出现得越少，它指的地方才越明确。
+   */
+  --bg: #ffffff;
+  --bg-sunken: #f7f8fa;
+  --bg-elev: #ffffff;
+  --bg-elev2: #f3f5f8;
+  --bg-hover: #f1f3f7;
+  --bg-active: #e8ecf2;
+  --fg: #14171c;
+  --fg-dim: #58616e;
+  --fg-faint: #8c95a3;
+  --border: #e4e8ee;
+  --border-soft: #eef1f5;
+  --accent: #0f766e;
+  --accent-hover: #0d6a63;
+  --accent-soft: #e7f3f1;
+  --accent-fg: #ffffff;
+  /* 含义色：只在"必读 / 值得"上出现 */
+  --must: #c2410c;
+  --worth: #a16207;
+  --normal: #9aa3b0;
+  --noise: #d8dde5;
+  --ok: #15803d;
+  --warn: #a16207;
+  --err: #b42318;
+  /* 圆角随尺寸单调：小控件 4、控件 8、容器 12、纸/弹窗 16 */
   --radius-xs: 4px;
-  /* 胶囊写成 999px 而不是固定 14px：高度变化时不会露出直角（§15.12） */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  /* 胶囊写成 999px 而不是固定值：高度变化时不会露出直角（§15.12） */
   --radius-pill: 999px;
-  /* 「纸」的三件套（§15.18）。底色只比 --bg 亮一阶 —— 差太多会变成卡片，
-     与 §15.0 的三栏平铺冲突；阴影在暗色下必须几乎看不见，
-     否则就是 2005 年的投影。两个值都在各自的主题块里覆盖。 */
-  --paper-bg: #12151b;
-  --paper-line: #1c212b;
-  --paper-shadow: 0 1px 3px rgba(0, 0, 0, 0.28), 0 10px 30px rgba(0, 0, 0, 0.22);
-  --desk-bg: #0b0d11;
-  /* 三栏宽度（§15.16，v1.13 实测收敛）。
-   *
-   * 218/400 是按"最坏情况"定的：侧栏按最长的分组名定宽，但那个名字本来
-   * 就有 ellipsis；列表栏按"标题能排满 2 行"定宽，实测平均 1.4 行。
-   * 收到 196/368 之后，最长标签与 2 行标题仍然排得下，多出来的宽度
-   * 全部让给正文区（正文宽度是阅读体验的核心，不该跟着导航变）。
-   *
-   * 下限不能无限压：368 + 196 = 564px，加上正文 72ch ≈ 594px 共需 1158px，
-   * 所以 <1200px 时另有规则（见 mobile.css），否则 1180px 的笔记本上
-   * 正文会被压到 60ch 以下。 */
+  /* 「纸」：亮色下纸是纯白，桌面必须暗一阶，纸才浮得起来 */
+  --paper-bg: #ffffff;
+  --paper-line: #e9edf3;
+  --paper-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 32px rgba(16, 24, 40, 0.06);
+  --desk-bg: #f7f8fa;
+  /* 三栏宽度（§15.16，实测收敛）：218/400 是按最坏情况定的，
+     收到 196/368 之后最长标签与 2 行标题仍然排得下，多出来的宽度
+     全部让给正文区。下限见 mobile.css 的窄屏规则。 */
   --sidebar-w: 196px;
   --list-w: 368px;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
-          "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  /* 两种字体，两种任务（设计方案 §2.3）：
+       · 无衬线 —— 列表、导航、控件、元信息，任务是扫过去
+       · 衬线   —— 正文，任务是停下来读
+     只用系统字族，不引外部字体：多一次字体请求就是首屏多一次 FOUT。 */
+  --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong,
+           simsun, Georgia, "Times New Roman", serif;
+  --sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
+          -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font: var(--sans);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.24);
-  color-scheme: dark;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow: 0 2px 6px rgba(16, 24, 40, 0.06), 0 12px 28px rgba(16, 24, 40, 0.08);
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: light) {
+/* 暗色跟随系统。不是主色，但必须完整 —— 夜里看长文的人会切换系统主题，
+   那时界面跟不上就会刺眼。 */
+@media (prefers-color-scheme: dark) {
   :root {
-    --bg: #ffffff;
-    --bg-elev: #fafbfc;
-    --bg-elev2: #f4f6f9;
-    --bg-hover: #eef1f5;
-    --bg-active: #e6ebf2;
-    --fg: #12161d;
-    --fg-dim: #59616e;
-    --fg-faint: #8a93a1;
-    --border: #e3e7ed;
-    --border-soft: #eef1f5;
-    --accent: #2563eb;
-    --accent-dim: rgba(37, 99, 235, 0.09);
-    --normal: #a8b0bd;
-    --noise: #cbd2dc;
-    --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(16, 24, 40, 0.08);
-    /* 亮色下的"纸"：正文区背景已经是纯白 #fff，纸必须**暗**一阶才看得见。
-       与暗色相反，这不算不统一 —— 目标是"纸与桌面有区别"，不是"纸更亮"。 */
-    --paper-bg: #ffffff;
-    --paper-line: #e8ecf2;
-    --paper-shadow: 0 1px 3px rgba(16, 24, 40, 0.05), 0 10px 30px rgba(16, 24, 40, 0.07);
-    --desk-bg: #f1f4f8;
-    color-scheme: light;
+    --bg: #15171c;
+    --bg-sunken: #0f1115;
+    --bg-elev: #1a1d23;
+    --bg-elev2: #1f232a;
+    --bg-hover: #22262e;
+    --bg-active: #2a2f38;
+    --fg: #e9ecf1;
+    --fg-dim: #a4adba;
+    --fg-faint: #727c8a;
+    --border: #2a2f38;
+    --border-soft: #20242b;
+    --accent: #4fd1c5;
+    --accent-hover: #6bded3;
+    --accent-soft: rgba(79, 209, 197, 0.12);
+    --accent-fg: #0f1115;
+    --must: #f97362;
+    --worth: #d9a441;
+    --normal: #6b7482;
+    --noise: #333a45;
+    --ok: #4ade80;
+    --warn: #d9a441;
+    --err: #f97362;
+    --paper-bg: #1a1d23;
+    --paper-line: #242830;
+    --paper-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px rgba(0, 0, 0, 0.35);
+    --desk-bg: #0f1115;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 12px 28px rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
   }
 }
 
@@ -102,72 +134,83 @@ body {
   overflow: hidden;
 }
 
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+/* 链接默认不靠颜色区分：整页蓝字会让"哪里能点"变成噪声。
+   正文里的外链单独加下划线（见 .article-body a），列表里不加。 */
+a { color: inherit; text-decoration: none; }
+a:hover { text-decoration: none; }
 
 kbd {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 10.5px;
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: var(--bg-elev2);
   border: 1px solid var(--border);
-  color: var(--fg-dim);
+  color: var(--fg-faint);
 }
 
-/* ── 基础控件 ───────────────────────────────────────────── */
-
+/* ── 控件：一套语言 ──────────────────────────────────────────
+ *
+ * 三种角色，同一套骨架（32px 高 / 8px 圆角 / 11px 内边距）：
+ *   主按钮  实心强调色 + 白字
+ *   次按钮  白底 + 1px 描边 + 深灰字
+ *   图标按钮 无底色，仅悬停时给一层淡底
+ *
+ * 之前的"按钮和界面不搭"来自两件事：主按钮是反白（黑底白字，在暗色下
+ * 像一块洞），次按钮却没有任何层级；而图标按钮又是裸的。三种角色三套
+ * 语言，摆一起就像从三个库里各拿的。
+ */
 button {
   font: inherit;
   color: inherit;
-  background: var(--bg-elev2);
-  border: 1px solid var(--border);
+  background: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 7px 13px;
   cursor: pointer;
-  transition: background 120ms, border-color 120ms;
+  transition: background 120ms, border-color 120ms, color 120ms;
 }
-button:hover:not(:disabled) { background: var(--bg-hover); }
 button:disabled { opacity: 0.45; cursor: default; }
 
-/* .btn 的基样式。
-   为什么需要它：原来 .btn 只当修饰类用在 <button> 上，靠元素选择器拿样式。
-   §15.11 的文末出口是 <a class="btn">（打开原文 / 访问源站都是导航），
-   <a> 拿不到 button 的样式，于是变成裸文字。这里给 .btn 一条基样式，
-   值与 button 元素选择器完全一致，<button class="btn"> 外观不变。
-
-   v1.8（§15.12）：高度从"padding 撑出来的 40px"改成显式 32px。
-   原来 <button class="btn"> 是 40px，而 <a class="btn"> 因为
-   display:inline-flex 改变了行盒，变成 42px —— 同一个类两个高度。
-   显式 height + padding: 0 之后两者必然同高，也正好与 .icon-btn 的
-   32px 对齐，一行里混排文字按钮和图标按钮不会错位。 */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   height: 32px;
-  font: inherit;
-  color: inherit;
-  background: var(--bg-elev2);
+  font-size: 13px;
+  color: var(--fg-dim);
+  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0 12px;
   cursor: pointer;
   text-decoration: none;
-  transition: background 120ms, border-color 120ms;
+  white-space: nowrap;
+  transition: background 120ms, border-color 120ms, color 120ms;
 }
-.btn:hover { background: var(--bg-hover); text-decoration: none; }
+.btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--noise);
+  color: var(--fg);
+  text-decoration: none;
+}
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
   font-weight: 500;
 }
-.btn.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--accent-fg);
+}
 .btn.block { width: 100%; }
 
+/* 图标按钮：没有底色、没有边框，只在悬停时给一层淡底。
+   常驻描边会让每个图标看起来都是一个"按钮"，一屏十几个就是一片框。 */
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -180,8 +223,10 @@ button:disabled { opacity: 0.45; cursor: default; }
   border: 1px solid transparent;
   color: var(--fg-dim);
   flex-shrink: 0;
+  transition: background 110ms, color 110ms;
 }
 .icon-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--fg); }
+.icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .icon-btn.on { color: var(--worth); }
 
 .linkish {
@@ -198,15 +243,18 @@ button:disabled { opacity: 0.45; cursor: default; }
 input {
   font: inherit;
   color: inherit;
-  background: var(--bg-elev2);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 11px;
   outline: none;
   width: 100%;
-  transition: border-color 120ms, background 120ms;
+  transition: border-color 120ms, box-shadow 120ms;
 }
-input:focus { border-color: var(--accent); background: var(--bg); }
+input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 input::placeholder { color: var(--fg-faint); }
 
 /* ── 应用骨架：三栏 ─────────────────────────────────────── */
@@ -218,39 +266,77 @@ input::placeholder { color: var(--fg-faint); }
   overflow: hidden;
 }
 
-/* ── 侧栏 ───────────────────────────────────────────────── */
-
+/* ── 侧栏 ─────────────────────────────────────────────────
+ *
+ * 侧栏比内容区**暗一阶**（--bg-sunken）而不是同色描边：三栏并排时
+ * 靠明度分带比靠三条竖线更干净，而且滚动的长列表不会在边界处出现
+ * "线在动"的错觉。
+ *
+ * 滚动条自绘：系统默认滚动条在亮色下是一条 15px 的灰带，切在侧栏边缘
+ * 比边界线还粗，等于把分层又破坏了一次。 */
 .sidebar {
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev);
-  border-right: 1px solid var(--border);
-  /* 14/10/10 → 10/8/8（§15.16）：侧栏是导航不是内容，
-     靠"分组标题上方的 18px 空隙"做分隔已经够，不需要再加内边距。 */
-  padding: 10px 8px 8px;
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--border-soft);
+  padding: 14px 10px 10px;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--noise) transparent;
 }
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb {
+  background: var(--noise);
+  border-radius: 999px;
+}
+.sidebar::-webkit-scrollbar-thumb:hover { background: var(--fg-faint); }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14.5px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  padding: 4px 8px 16px;
+  gap: 9px;
+  padding: 2px 8px 18px;
   color: var(--fg);
 }
-.brand svg { color: var(--accent); }
+/* 字标：一个实心方块 + 字名。方块是产品的"印章"，
+   比一个同色系的字更能在侧栏顶部立住。 */
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.brand-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.brand-sub {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--fg-faint);
+}
 
-.nav { display: flex; flex-direction: column; gap: 1px; }
+.nav { display: flex; flex-direction: column; gap: 2px; }
 
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 7px 9px;
+  padding: 8px 10px;
   border: none;
   background: none;
   border-radius: var(--radius-sm);
@@ -258,13 +344,20 @@ input::placeholder { color: var(--fg-faint); }
   font-size: 13.5px;
   text-align: left;
   cursor: pointer;
-  transition: background 100ms, color 100ms;
+  transition: background 110ms, color 110ms;
 }
 .nav-item:hover:not(:disabled) { background: var(--bg-hover); color: var(--fg); }
-.nav-item.active { background: var(--bg-active); color: var(--fg); font-weight: 500; }
-.nav-item.active .nav-icon { color: var(--accent); }
+/* 选中项：实心淡强调色底 + 强调色图标。比"一道竖线"更容易一眼扫到，
+   而这个位置一天要看好几十次，值得给一块有重量的底色。 */
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+.nav-item.active .nav-icon { opacity: 1; }
+.nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.nav-icon { display: inline-flex; color: currentColor; opacity: 0.85; flex-shrink: 0; }
+.nav-icon { display: inline-flex; color: currentColor; opacity: 0.8; flex-shrink: 0; }
 .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .nav-item.soon { color: var(--fg-faint); cursor: default; }
@@ -278,51 +371,54 @@ input::placeholder { color: var(--fg-faint); }
   flex-shrink: 0;
 }
 
+/* 分区标题：小号 + 字距。22px 是"内容分块"的最小可辨认间隔，
+   比它小就成了行距，比它大侧栏会散。 */
 .nav-section {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   color: var(--fg-faint);
-  padding: 18px 9px 6px;
+  padding: 20px 10px 6px;
 }
 
+/* 角标：等宽数字，无底色。一颗有背景的圆点会把视线吸到"还有多少没读"
+   上，而那个数字是压力源，不是导航。 */
 .badge {
-  font-size: 11px;
+  font-family: var(--mono);
+  font-size: 10.5px;
   font-variant-numeric: tabular-nums;
-  color: var(--fg-dim);
-  background: var(--bg-active);
-  border-radius: var(--radius-pill);
-  padding: 0 6px;
-  min-width: 21px;
-  line-height: 17px;
-  height: 17px;
-  text-align: center;
+  color: var(--fg-faint);
+  background: none;
+  padding: 0;
+  min-width: 0;
+  line-height: 1;
+  text-align: right;
   flex-shrink: 0;
 }
-.nav-item.active .badge { background: var(--accent); color: #fff; }
+.nav-item.active .badge { color: var(--accent); }
 
 .sidebar-foot {
   margin-top: auto;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-soft);
+  padding: 10px 6px 2px;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 9px;
 }
 .avatar {
-  width: 27px; height: 27px;
+  width: 26px; height: 26px;
   border-radius: 50%;
-  background: var(--accent-dim);
+  background: var(--accent-soft);
   color: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12.5px;
+  font-size: 11.5px;
   font-weight: 600;
   flex-shrink: 0;
 }
 .who { flex: 1; min-width: 0; }
-.who-name { font-size: 12.5px; line-height: 1.3; }
+.who-name { font-size: 12.5px; line-height: 1.3; font-weight: 500; }
 .who-mail {
   font-size: 11px;
   color: var(--fg-faint);
@@ -334,20 +430,26 @@ input::placeholder { color: var(--fg-faint); }
 
 /* ── 列表栏 ─────────────────────────────────────────────── */
 
+/* 列表栏用基础底色、侧栏用抬升一阶：两栏的分界由明度差 + 1px 线共同表达。
+   反过来的话（列表抬升、侧栏基础）会让列表看起来"浮"在导航上，
+   而列表其实是这一屏最长的连续区域，它该是最平的。 */
 .list-pane {
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev);
-  border-right: 1px solid var(--border);
+  background: var(--bg);
+  border-right: 1px solid var(--border-soft);
   min-width: 0;
   overflow: hidden;
 }
 
+/* 头部：标题行与搜索行合成一块常驻工具条，底边一条发丝线。
+   不再给每条边都画线 —— 三栏并排时竖线已经够多，横线再来一条
+   会让列表看起来像被切了一刀。 */
 .pane-head {
-  /* 14/14/11 → 12/12/10（§15.16）：头部常驻，压缩收益全在首屏 */
-  padding: 12px 12px 10px;
-  border-bottom: 1px solid var(--border);
+  padding: 13px 14px 10px;
+  border-bottom: 1px solid var(--border-soft);
   flex-shrink: 0;
+  background: var(--bg);
 }
 /* 列表栏标题行（§15.22，v1.17 重构）。
 
@@ -384,7 +486,8 @@ input::placeholder { color: var(--fg-faint); }
   white-space: nowrap;
 }
 .pane-count {
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
@@ -534,11 +637,279 @@ input::placeholder { color: var(--fg-faint); }
 }
 .tree-leaf-count.has { color: var(--fg-dim); opacity: 1; }
 
+/* ── 排列模式（§15.28）─────────────────────────────────────
+ *
+ * 长按 500ms 进入，行可拖、可点 ↑↓。这里只加"状态"，不动行本身的高度、
+ * 字号、缩进 —— 进入排列模式时侧栏不许被撑高，否则光是进入这个动作
+ * 就会挤掉一屏条目（§15.16 的密度红线）。
+ */
+
+/* 排列模式的行容器（§15.28）。
+ *
+ * 为什么多出这一层：↑↓ 不能嵌在行按钮里（`<button>` 套 `<button>` 是无效
+ * HTML，浏览器会把它拆成兄弟节点，键盘焦点与无障碍树一起坏）。所以排列
+ * 模式下这一行是 div 容器 + 行按钮 + 箭头兄弟。非排列模式仍是单个按钮 ——
+ * m1-26 量的 labelLeft / height / caretW 都挂在 `.tree-row` 上，
+ * 多包一层会让那三条一起偏，所以容器只在排列模式下存在。
+ */
+.arrange-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+  border-radius: var(--radius-sm);
+}
+/* 行按钮吃掉剩余宽度：拖的是它，箭头只在右侧一小条 */
+.arrange-row > .nav-item,
+.arrange-row > .tree-leaf {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+.arrange-row > .tree-leaf { padding-right: 2px; }
+/* 未分组行外面这层容器要沿用它的同级样式 */
+.arrange-row.tree-loose-row-wrap { display: flex; }
+
+
+.nav.tree.arranging .tree-row:not(.dragging),
+.nav.tree.arranging .tree-leaf:not(.dragging) {
+  opacity: 0.72;
+  transition: opacity 120ms;
+}
+
+/* 拖动中的行「空了」：留一块淡色占位而不是整行消失。
+   整行消失会让下面的行整体上跳，正在拖的人会失去参照。 */
+.arrange-row.dragging {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.arrange-row.dragging .nav-label,
+.arrange-row.dragging .tree-leaf-name,
+.arrange-row.dragging > .nav-item,
+.arrange-row.dragging > .tree-leaf {
+  opacity: 0.5;
+  color: var(--accent);
+}
+
+/* 落点线：目标行的上/下边缘一条 2px 强调色线。
+   用伪元素而不是 border：border 会改变盒子高度，拖过每一行都会让
+   下面所有行抖一下。 */
+.nav.tree [data-arrange-kind].drop-before,
+.nav.tree [data-arrange-kind].drop-after { position: relative; }
+.nav.tree [data-arrange-kind].drop-before::after,
+.nav.tree [data-arrange-kind].drop-after::after {
+  content: '';
+  position: absolute;
+  left: 6px; right: 6px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 999px;
+  pointer-events: none;
+}
+.nav.tree [data-arrange-kind].drop-before::after { top: -1px; }
+.nav.tree [data-arrange-kind].drop-after::after { bottom: -1px; }
+
+/* 拖着一个源悬在分组行上 = "放进这一组"。
+   与落点线互斥：这一种是整行染底 + 一圈描边，语义是"归属改变"，
+   而落点线表示"只是换位置"。两者长得不一样，用户才不会混。 */
+.nav.tree .arrange-row.into,
+.nav.tree .tree-row.into {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* 区块标题在排列模式下变成操作条：左边说明状态，右边「完成」。
+   高度必须和原来的 .nav-section 一致，否则进入模式的瞬间整块下移。 */
+.nav-section.arrange-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* 与普通 .nav-section 同高：padding 20/6 + 行高 ≈ 20+6+15 = 41px。
+     这里用同一组 padding，只把右侧按钮的负外边距收掉它的额外高度。 */
+  gap: 6px;
+  letter-spacing: 0.06em;
+}
+.nav-section.arrange-head .btn.tiny {
+  height: 20px;
+  padding: 0 7px;
+  margin: -4px -2px -4px 0;
+  font-size: 11px;
+}
+
+/* 拖柄：三道横线（同品牌标记的语言，逐级变短 —— 这里等长表示"可移动"）。
+   放在原来的箭头位，所以文字起点不变。 */
+.drag-grip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 15px;
+  align-items: center;
+  justify-content: center;
+}
+.drag-grip i {
+  display: block;
+  width: 9px;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 1px;
+  opacity: 0.6;
+}
+
+/* ↑↓：排列模式下替代角标出现。
+   26px 是个折中 —— 44px 的最小触摸目标在这里放不进 196px 的侧栏
+   （两行文字 + 两颗按钮 + 内边距已经到边上），而分组行本身仍是 44px 高，
+   实际可点区域比 26px 大。触摸目标的红线只对"手机上的一等操作"成立，
+   手机上进排列模式的入口在配置页，那边给的是 36px 的按钮。 */
+.arrange-move {
+  display: inline-flex;
+  gap: 1px;
+  flex-shrink: 0;
+}
+.arrange-arrow {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--radius-xs);
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.arrange-arrow:hover:not(:disabled) { background: var(--bg-hover); color: var(--fg); }
+/* 首行 ↑ / 末行 ↓ 禁用：这里必须真的 disabled，不是只变淡 ——
+   能点但没反应比看起来不能点更让人困惑 */
+.arrange-arrow:disabled { opacity: 0.25; cursor: default; }
+
+/* 浮起的拖动卡片。fixed 才能越过侧栏的 overflow 裁剪；
+   pointer-events: none 见 App.tsx 里的注释（否则落点永远命中自己）。 */
+.drag-ghost {
+  position: fixed;
+  top: 0; left: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  color: var(--fg);
+  font-size: 13px;
+  pointer-events: none;
+  /* 轻微放大 + 一圈强调色光圈：这是"它现在跟着你的手"的唯一强信号 */
+  transform-origin: top left;
+  animation: drag-lift 120ms ease-out;
+}
+@keyframes drag-lift {
+  from { scale: 1; box-shadow: var(--shadow-sm); }
+  to { scale: 1.03; box-shadow: var(--shadow); }
+}
+.drag-ghost-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drag-ghost svg { color: var(--accent); flex-shrink: 0; }
+
+/* ── 底部提示条（§15.28）──────────────────────────────────
+ *
+ * 只在跨组移动时出现，带「撤销」。桌面上居中贴底；手机上要抬到
+ * tab bar 之上，否则正好被那 56px 盖住（见 mobile.css）。
+ */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 80;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: var(--shadow);
+  animation: toast-in 160ms ease-out;
+}
+.toast.leaving { animation: toast-out 180ms ease-in forwards; }
+.toast-icon { display: inline-flex; flex-shrink: 0; opacity: 0.75; }
+.toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 撤销按钮：在深底上不能再用强调色（对比度不够），用反色描边 */
+.toast-action {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--bg) 34%, transparent);
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--bg);
+  font-size: 12px;
+  font-family: var(--sans);
+  cursor: pointer;
+}
+.toast-action:hover { background: color-mix(in srgb, var(--bg) 14%, transparent); }
+.toast.error { background: var(--err); color: #fff; }
+.toast-close {
+  flex-shrink: 0;
+  width: 20px; height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.toast-close:hover { opacity: 1; background: color-mix(in srgb, var(--bg) 18%, transparent); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translate(-50%, 0); }
+  to { opacity: 0; transform: translate(-50%, 8px); }
+}
+
+
 .search-box { position: relative; }
-.search-box input { padding-left: 30px; font-size: 13.5px; }
+.search-box input {
+  padding: 7px 30px 7px 32px;
+  font-size: 13px;
+  background: var(--bg-elev2);
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+}
+.search-box input:hover { border-color: var(--border); }
+.search-box input:focus {
+  background: var(--bg);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .search-icon {
   position: absolute;
-  left: 10px; top: 50%;
+  left: 11px; top: 50%;
   transform: translateY(-50%);
   color: var(--fg-faint);
   pointer-events: none;
@@ -618,67 +989,124 @@ input::placeholder { color: var(--fg-faint); }
 .read-count { color: var(--accent); opacity: 0.85; }
 .read-progress { opacity: 0.7; }
 
+/* 日号栏（设计方案 §2.2、§5.3）：52px，右侧一道发丝竖线贯穿当天所有行。
+   它是时间的刻度，不是内容 —— 所以整块只用灰阶，且比摘要再淡一档。 */
 .entry-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  /* 10/14/10/16 → 9/12/9/14（§15.16）：每行省 4px，
-     一屏 9 行省出 36px ≈ 再多 0.4 条 */
-  padding: 9px 12px 9px 14px;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  column-gap: 14px;
+  /* 9/14/10：日号栏吃掉了左侧 52px，行内不能再留 11px 的上下内边距 ——
+     一屏 9 条是硬预算（设计方案 §9），宽度让给了日号，高度就得从内边距里省。 */
+  padding: 7px 14px 8px 0;
   border: none;
   border-bottom: 1px solid var(--border-soft);
   border-radius: 0;
   background: none;
   cursor: pointer;
   position: relative;
-  transition: background 90ms;
+  text-align: left;
+  width: 100%;
+  transition: background 110ms;
 }
+.entry-item > * { grid-column: 2; min-width: 0; }
+
+.day-mark {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding-top: 1px;
+  min-height: 40px;
+}
+.day-mark b {
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.15;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.day-mark i {
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+}
+/* 换月：日号上方补一道短横，暗示"上一段到这里结束" */
+.day-mark[data-month-start]::before {
+  content: '';
+  width: 12px;
+  height: 1px;
+  background: var(--border);
+  margin-bottom: 5px;
+}
+
+/* 贯穿当天所有行的竖线：画在每一行上，位置固定。
+   不给"当天"包一层容器 —— 那会改变 `.entry-list` 的子节点序列，
+   而那个序列正是 §15.24「分割线补已读」的判据。 */
+.entry-item::before {
+  content: '';
+  position: absolute;
+  left: 51px; top: 0; bottom: 0;
+  width: 1px;
+  background: var(--border-soft);
+}
+
+.entry-item:hover { background: var(--bg-hover); }
+.entry-item.active { background: var(--bg-elev2); }
+/* 选中态：把日号栏右侧那道发丝线换成 2px 墨线。
+   位置本来就对，只换粗细与颜色，不另加一层绝对定位的元素。 */
+.entry-item.active .day-mark { color: var(--fg); }
+.entry-item.active::before { width: 2px; background: var(--fg); }
+.entry-item.active .day-mark b { color: var(--fg); }
+
+/* 已读不再整行降透明度：那会把摘要糊成一片，而摘要正是"要不要重读"的判据。
+   改为标题降灰、摘要再降一档，信息层次还在，但不再"整体发虚"。 */
+.entry-item.read .entry-title { font-weight: 400; color: var(--fg-dim); }
+.entry-item.read .entry-summary { color: var(--fg-faint); opacity: 0.8; }
 
 /* 一屏 8~10 条（§15.2）：把每条压到 ~100px 靠三件事 ——
    标题 2 行封顶、摘要 1 行、元信息与徽标合并到同一行。
    这三条都不是"省略信息"，而是把信息压到该在的位置。 */
 .entry-summary {
   color: var(--fg-faint);
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.45;
   margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.entry-item:hover { background: var(--bg-hover); }
-.entry-item.active { background: var(--bg-active); }
-.entry-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 2px;
-  background: var(--accent);
-}
-.entry-item.read { opacity: 0.55; }
-.entry-item.read:hover { opacity: 0.8; }
 
-/* tier 色点：细条而非图标（PLAN §15.4） */
-.entry-item[data-tier='must_read']:not(.read)::after,
-.entry-item[data-tier='worth']:not(.read)::after {
-  content: '';
-  position: absolute;
-  left: 6px; top: 15px;
-  width: 3px; height: 14px;
-  border-radius: 2px;
-}
-.entry-item[data-tier='must_read']:not(.read)::after { background: var(--must); }
-.entry-item[data-tier='worth']:not(.read)::after { background: var(--worth); }
+/* 分级不再画左侧色条：那条 3×14px 的细条挨着日号栏，会被误读成
+   "这一天的刻度"。改由元信息行里的「圆点 + 字」承担（见下面 .tier）。 */
 
+/* 元信息行：站点 · 时间 · 分级，一行排不下时**只让站名收缩**。
+ *
+ * 这里踩过一个坑：flex item 默认 min-width: auto，含义是"不能小于内容
+ * 的最小宽度"，而中文可断行处会在空格和字之间断，于是「13 小时前」被压到
+ * 29px 宽、折成两行，整行高度从 22px 涨到 62px，列表密度直接垮掉。
+ *
+ * 修法两件事：
+ *   ① 时间与分级 white-space: nowrap + flex-shrink: 0 —— 它们是定长信息，
+ *      没有收缩的理由；
+ *   ② 站名允许收缩并省略（min-width: 0 + ellipsis），它是三者里唯一
+ *      可以安全截断的。 */
 .entry-top {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11.5px;
+  font-size: 11px;
+  line-height: 1.4;
   color: var(--fg-faint);
-  margin-bottom: 3px;
+  margin-bottom: 2px;
   min-width: 0;
+  white-space: nowrap;
 }
 .favicon {
   width: 13px; height: 13px;
@@ -696,10 +1124,29 @@ input::placeholder { color: var(--fg-faint); }
   font-weight: 600;
   line-height: 1;
 }
+/* 元信息行的三段：站点 · 时间 · 分级。
+ *
+ * 这里踩过一个坑：flex item 默认 min-width: auto（"不能小于内容的最小宽度"），
+ * 而中文可以在空格处断行，于是「13 小时前」被压到 29px 宽、折成两行，
+ * 整行高度 22px → 62px，一屏条数从 9 掉到 6。
+ *
+ * 规则只有一条：**只有站名可以收缩和截断，时间和分级是定长信息**。
+ * 站名再长也只是省略号；时间与分级不许换行、不许压缩。
+ */
 .entry-site {
+  /* flex-grow 必须是 0：给它 1 会把整行剩余空间全吃掉，
+     站名和后面的「·」之间就出现一大段空白。
+     它只需要"可以被压缩"，不需要"撑满"。 */
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.entry-time,
+.entry-top .tier {
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 .dot { opacity: 0.5; }
@@ -709,7 +1156,7 @@ input::placeholder { color: var(--fg-faint); }
   font-size: 14px;
   font-weight: 500;
   line-height: 1.45;
-  margin: 0 0 3px;
+  margin: 0 0 2px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -719,8 +1166,10 @@ input::placeholder { color: var(--fg-faint); }
      否则每行都变成蓝字，整个列表会变成"蓝色标题墙" */
   text-decoration: none;
 }
+/* 列表里的标题**不加下划线**（设计方案 §2.1）：
+   一屏十条，每条都挂一条下划线就变成十条横线，比没有层级更难扫。
+   可点击由整行的悬停底色表达，标题只用颜色变化回应。 */
 .entry-title:hover { color: var(--accent); text-decoration: none; }
-.entry-item.read .entry-title { font-weight: 400; color: var(--fg-dim); }
 
 /* hover 才出现的行内操作（收藏 / 新标签打开原文）。
    常驻会让每行多两个图标的视觉噪声，而列表页的任务是"扫过去"（§15.2）。 */
@@ -743,17 +1192,35 @@ input::placeholder { color: var(--fg-faint); }
 
 .meta { color: var(--fg-faint); }
 
+/* 分级：圆点 + 两字，没有色块背景（设计方案 §3.3）。
+   色块会把一行里最重的视觉重量给一个辅助信息；一颗 4px 的点加两个字
+   同样能让人扫到，但不抢标题。 */
 .tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10.5px;
-  padding: 0 5px;
-  border-radius: var(--radius-xs);
-  line-height: 16px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  line-height: 1;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  flex-shrink: 0;
+  /* 「必读」两个字不能从中间断开 —— 断了会变成两行，
+     同时把所在行的行高一起顶起来（§15.2 的一屏条数就保不住）。 */
+  white-space: nowrap;
 }
-.tier-must_read { background: rgba(255, 107, 107, 0.14); color: var(--must); }
-.tier-worth { background: rgba(255, 171, 77, 0.14); color: var(--worth); }
-.tier-noise { background: var(--bg-active); color: var(--fg-faint); }
+.tier::before {
+  content: '';
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.tier-must_read { color: var(--must); }
+.tier-worth { color: var(--worth); }
+.tier-noise { color: var(--fg-faint); }
 
 .load-more { padding: 16px; text-align: center; }
 
@@ -812,15 +1279,52 @@ input::placeholder { color: var(--fg-faint); }
 
 .reader-wrap { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 
+/* 阅读区顶部工具条：白底、无边框，靠下方纸面的阴影与留白分隔。
+   加一条横线会在纸的浅阴影之上再压一道，两层边界显得脏。 */
 .reader-bar {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 12px;
+  padding: 9px 14px;
   border-bottom: 1px solid var(--border-soft);
   flex-shrink: 0;
   background: var(--bg);
 }
+
+/* AI 动作组：两个按钮拼成一段。用 margin 而不是 gap 隔开与右侧图标的关系 ——
+   这段是"一组"，右侧是一排"单个"。 */
+.ai-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 6px;
+  padding: 2px;
+  background: var(--bg-elev2);
+  border-radius: var(--radius-sm);
+}
+.ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg-dim);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 110ms, color 110ms;
+}
+.ai-btn:hover:not(:disabled) { background: var(--bg); color: var(--fg); }
+.ai-btn.on {
+  background: var(--bg);
+  color: var(--accent);
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+}
+.ai-btn:disabled { opacity: 0.55; }
 
 .reader-scroll { flex: 1; overflow-y: auto; }
 
@@ -951,53 +1455,56 @@ input::placeholder { color: var(--fg-faint); }
    每个主题都要带上「纸」的三件套（§15.18）：漏一组的话，切到那个主题后
    纸会退回到根节点的颜色，与阅读区背景糊成一片，边缘就白做了。 */
 .reader-pane[data-reader-theme='light'] {
-  --bg: #ffffff;
-  --bg-elev: #f7f8fa;
-  --bg-hover: #eef1f5;
-  --fg: #12161d;
-  --fg-dim: #59616e;
-  --fg-faint: #8a93a1;
-  --border: #e3e7ed;
-  --border-soft: #eef1f5;
-  --accent: #2563eb;
+  --bg: #fbfaf7;
+  --bg-elev: #f6f4ef;
+  --bg-hover: #ebe7de;
+  --fg: #1a1917;
+  --fg-dim: #5f5a52;
+  --fg-faint: #8d877d;
+  --border: #e2ddd3;
+  --border-soft: #eeeae1;
+  --accent: #1a1917;
+  --accent-dim: rgba(26, 25, 23, 0.07);
   /* 亮色下阅读区背景是 #fff，纸必须暗一阶才看得出边缘 */
   --paper-bg: #ffffff;
-  --paper-line: #e8ecf2;
-  --paper-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 10px 30px rgba(16, 24, 40, 0.08);
-  --desk-bg: #f1f4f8;
+  --paper-line: #eae5da;
+  --paper-shadow: 0 1px 2px rgba(60, 50, 35, 0.05), 0 16px 40px rgba(60, 50, 35, 0.07);
+  --desk-bg: #f2efe8;
   color-scheme: light;
 }
 .reader-pane[data-reader-theme='sepia'] {
-  --bg: #f6efe1;
-  --bg-elev: #efe6d5;
-  --bg-hover: #e8dcc7;
-  --fg: #3b332a;
-  --fg-dim: #6b6052;
-  --fg-faint: #94897a;
-  --border: #ddd0ba;
-  --border-soft: #e8dcc7;
-  --accent: #a8622a;
+  --bg: #f4ecdc;
+  --bg-elev: #ece2cf;
+  --bg-hover: #e4d8c0;
+  --fg: #332c22;
+  --fg-dim: #6a5f4e;
+  --fg-faint: #968a77;
+  --border: #d9cbb1;
+  --border-soft: #e4d8c0;
+  --accent: #332c22;
+  --accent-dim: rgba(51, 44, 34, 0.08);
   /* 米色底上纸要更亮一点（像一页新纸压在牛皮桌面上） */
-  --paper-bg: #fdf8ec;
-  --paper-line: #e6dac2;
-  --paper-shadow: 0 1px 3px rgba(90, 74, 48, 0.10), 0 10px 30px rgba(90, 74, 48, 0.10);
-  --desk-bg: #eee3d0;
+  --paper-bg: #fbf5e8;
+  --paper-line: #e3d6bd;
+  --paper-shadow: 0 1px 2px rgba(90, 74, 48, 0.09), 0 16px 40px rgba(90, 74, 48, 0.10);
+  --desk-bg: #ece1cb;
   color-scheme: light;
 }
 .reader-pane[data-reader-theme='dark'] {
-  --bg: #0b0d11;
-  --bg-elev: #12151b;
-  --bg-hover: #1c212b;
-  --fg: #e7eaef;
-  --fg-dim: #a2acbb;
-  --fg-faint: #6d7686;
-  --border: #222834;
-  --border-soft: #1a1f28;
-  --accent: #5b9dff;
-  --paper-bg: #12151b;
-  --paper-line: #1c212b;
-  --paper-shadow: 0 1px 3px rgba(0, 0, 0, 0.28), 0 10px 30px rgba(0, 0, 0, 0.22);
-  --desk-bg: #0b0d11;
+  --bg: #111110;
+  --bg-elev: #171614;
+  --bg-hover: #23211d;
+  --fg: #ecebe7;
+  --fg-dim: #a8a49c;
+  --fg-faint: #75716a;
+  --border: #272521;
+  --border-soft: #1d1c19;
+  --accent: #ecebe7;
+  --accent-dim: rgba(236, 235, 231, 0.10);
+  --paper-bg: #161513;
+  --paper-line: #24221e;
+  --paper-shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 18px 50px rgba(0, 0, 0, 0.40);
+  --desk-bg: #0d0d0c;
   color-scheme: dark;
 }
 /* 三个主题都自带 --desk-bg（§15.18）。这里**不再**用 `background: var(--bg)`：
@@ -1026,31 +1533,39 @@ input::placeholder { color: var(--fg-faint); }
   transition: transform 90ms linear;
 }
 
+/* 标题用衬线（设计方案 §2.3）：它是阅读区的第一句话，
+   而无衬线的粗标题在长篇衬线正文上方会显得"像提示条"。 */
 .reader-title {
-  font-size: clamp(22px, 2.4vw, 28px);
-  line-height: 1.32;
+  font-family: var(--serif);
+  font-size: clamp(22px, 2.4vw, 30px);
+  line-height: 1.36;
   margin: 0 0 12px;
-  font-weight: 650;
-  letter-spacing: -0.011em;
+  font-weight: 600;
+  letter-spacing: -0.005em;
 }
 
 .reader-meta {
   color: var(--fg-faint);
-  font-size: 12.5px;
+  font-size: 11.5px;
   /* 26 → 18（§15.3，v1.14）：这 26px 加上 AI 卡的 30px，会让标题到正文
      之间出现 60px 的空隙，像是"另一段内容开始了"。18 足以区分元信息与正文。 */
-  margin-bottom: 18px;
+  margin-bottom: 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--paper-line);
   display: flex;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
   align-items: center;
 }
 .reader-meta .src { color: var(--fg-dim); font-weight: 500; }
-.reader-meta > span:not(:last-child)::after {
+.reader-meta > span:not(:last-child)::after,
+.reader-meta > a:not(:last-child)::after {
   content: '·';
-  margin-left: 12px;
+  margin-left: 8px;
   opacity: 0.45;
 }
+/* 时间用等宽、日期用 tabular：一行里两个时间并排时不许左右跳 */
+.reader-meta .time { font-family: var(--mono); font-size: 10.5px; }
 
 /* 标题与站点名都是链接（§15.11）：
    标题改成 <a> 之后继承到的是全局蓝字 + 下划线，会很刺眼 ——
@@ -1095,8 +1610,8 @@ input::placeholder { color: var(--fg-faint); }
 .seg-btn {
   padding: 3px 9px;
   border: none;
-  /* 内圆角 = 外圆角 7px − 容器 padding 2px。写成 calc 而不是 5px，
-     是为了让"这个 5 是哪来的"写在代码里（§15.12）。 */
+  /* 内圆角 = 外圆角 − 容器 padding 2px。写成 calc 而不是写死，
+     是为了让"这个差值是哪来的"留在代码里（§15.12）。 */
   border-radius: calc(var(--radius-sm) - 2px);
   background: none;
   color: var(--fg-dim);
@@ -1105,7 +1620,14 @@ input::placeholder { color: var(--fg-faint); }
   line-height: 1.4;
 }
 .seg-btn:hover { background: var(--bg-hover); color: var(--fg); }
-.seg-btn.on { background: var(--accent-dim); color: var(--accent); font-weight: 500; }
+/* 选中段：白底 + 细影，像一枚按下去的滑块。
+   不用实心强调色 —— 分段控件在列表头部，实心块会把标题压过去。 */
+.seg-btn.on {
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+}
 /* 「恢复默认」是 .btn + .block 的组合，v1.8 给 .btn 定死了 height: 32px，
    所以这里只调字号，不再写 padding —— 写 padding 正是原来
    它变成 31px 这个"意外值"的原因（§15.12）。 */
@@ -1128,55 +1650,70 @@ input::placeholder { color: var(--fg-faint); }
    现在基样式自己给了 inline-flex + 显式高度，这里不再需要任何覆盖。 */
 
 /* 正文链接指针：清洗后全部带 target=_blank，hover 时给个视觉暗示 */
-.article-body a { cursor: pointer; }
-.article-body a:hover { text-decoration: underline; }
-
-/* AI 摘要卡 */
-.ai-card {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  /* 30 → 22（§15.3，v1.14）：AI 卡与正文是"摘要 → 原文"的连续关系，
-     30px 的间隔会让它们看起来像两个独立区块。 */
-  margin-bottom: 22px;
-  overflow: hidden;
+/* AI 输出块（摘要 / 总结）共用一套语言：一行小标签 + 一段引言。
+ * 不画卡片边框：摘要与总结都是"这篇文章的一部分"，
+ * 画框会把它读成一个嵌进来的外部组件。 */
+.ai-card,
+.sum-card {
+  margin: 20px 0 24px;
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid var(--accent);
+  background: none;
+  border-radius: 0;
 }
-.ai-head {
+
+.ai-label {
   display: flex;
   align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 10px 13px;
-  background: none;
-  border: none;
-  border-radius: 0;
-  color: var(--fg-dim);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  text-align: left;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--accent);
 }
-.ai-head:hover { background: var(--bg-hover); }
-.ai-head svg { color: var(--accent); }
-.chev { transition: transform 150ms; color: var(--fg-faint); }
-.chev.down { transform: rotate(90deg); }
+/* 分级标签在 AI 小标签里保持小写字母形态，不跟着 uppercase 走 */
+.ai-label .tier {
+  letter-spacing: 0.06em;
+  font-weight: 400;
+}
+.ai-label-time {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--fg-faint);
+}
 
-.ai-body { padding: 2px 14px 14px; }
+.ai-body { padding: 0; }
 .ai-summary {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.68;
-  color: var(--fg);
-}
-.ai-points {
-  margin: 11px 0 0;
-  padding-left: 17px;
-  font-size: 13.5px;
-  line-height: 1.65;
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.8;
   color: var(--fg-dim);
 }
-.ai-points li { margin: 4px 0; }
-.ai-points li::marker { color: var(--accent); }
+.ai-points {
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--fg-dim);
+}
+.ai-points li {
+  position: relative;
+  margin: 3px 0;
+  padding-left: 13px;
+}
+.ai-points li::before {
+  content: '';
+  position: absolute;
+  left: 2px; top: 0.72em;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
 
 .ai-foot {
   display: flex;
@@ -1185,20 +1722,43 @@ input::placeholder { color: var(--fg-faint); }
   flex-wrap: wrap;
   margin-top: 12px;
   padding-top: 11px;
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--paper-line);
 }
 .topic {
-  font-size: 11.5px;
-  padding: 1px 7px;
-  border-radius: var(--radius-pill);
-  background: var(--accent-dim);
-  color: var(--accent);
+  font-size: 11px;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--fg-faint);
 }
+.topic + .topic::before { content: '·'; margin-right: 6px; opacity: 0.5; }
 
-/* 正文 */
+.sum-skeleton { display: grid; gap: 8px; padding: 2px 0; }
+.sum-skeleton > span {
+  display: block;
+  height: 11px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--bg-elev2), var(--bg-hover), var(--bg-elev2));
+  background-size: 200% 100%;
+  animation: sk 1.2s ease-in-out infinite;
+}
+.sum-skeleton > span:nth-child(2) { width: 88%; }
+.sum-skeleton > span:nth-child(3) { width: 64%; }
+@keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.sum-fail {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--err);
+}
+.sum-fail-hint { color: var(--fg-faint); font-size: 11.5px; margin-top: 2px; }
+
+/* 正文（设计方案 §2.3）：衬线，行高比原来略松 —— 衬线的 x-height 更小，
+   同一行高下视觉更紧，1.86 才回到与 1.78 无衬线相当的呼吸感。 */
 .article-body {
+  font-family: var(--serif);
   font-size: 16.5px;
-  line-height: 1.78;
+  line-height: 1.86;
   color: var(--fg);
   overflow-wrap: break-word;
 }
@@ -1207,13 +1767,20 @@ input::placeholder { color: var(--fg-faint); }
    仍明显大于 0，段落边界不会糊成一片。 */
 .article-body p { margin: 0 0 1.05em; }
 .article-body h2, .article-body h3 {
+  font-family: var(--serif);
   font-size: 18px;
   margin: 1.7em 0 0.6em;
   line-height: 1.4;
   font-weight: 600;
 }
 .article-body img { max-width: 100%; height: auto; border-radius: var(--radius-sm); margin: 1em 0; }
-.article-body a { color: var(--accent); }
+/* 正文外链：下划线而非强调色 —— 正文里的蓝字会打断阅读，而下划线不会 */
+.article-body a {
+  color: inherit;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.article-body a:hover { border-bottom-color: var(--fg); }
 .article-body blockquote {
   margin: 1.2em 0;
   padding: 2px 0 2px 15px;
@@ -1254,14 +1821,18 @@ input::placeholder { color: var(--fg-faint); }
 }
 .auth-brand {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 9px;
-  font-size: 19px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  margin-bottom: 5px;
+  margin-bottom: 8px;
 }
-.auth-brand svg { color: var(--accent); }
+.auth-brand .brand-mark {
+  font-family: var(--serif);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1.1;
+  color: var(--fg);
+}
 .auth-card .hint {
   color: var(--fg-dim);
   font-size: 13px;
@@ -1305,14 +1876,14 @@ input::placeholder { color: var(--fg-faint); }
 }
 .alert.inset { margin: 12px 14px; }
 .alert.error {
-  background: rgba(255, 107, 107, 0.09);
-  border-color: rgba(255, 107, 107, 0.26);
+  background: color-mix(in srgb, var(--err) 9%, transparent);
+  border-color: color-mix(in srgb, var(--err) 26%, transparent);
   color: var(--err);
 }
 .alert.info {
-  background: var(--accent-dim);
-  border-color: rgba(91, 157, 255, 0.22);
-  color: var(--accent);
+  background: var(--bg-elev2);
+  border-color: var(--border);
+  color: var(--fg-dim);
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -1322,7 +1893,7 @@ input::placeholder { color: var(--fg-faint); }
 .spinner {
   width: 17px; height: 17px;
   border: 2px solid var(--border);
-  border-top-color: var(--accent);
+  border-top-color: var(--fg-dim);
   border-radius: 50%;
   animation: spin 700ms linear infinite;
   display: inline-block;

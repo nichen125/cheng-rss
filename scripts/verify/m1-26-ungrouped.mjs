@@ -162,7 +162,7 @@ await send('Runtime.enable');
 await send('Network.enable');
 await send('Emulation.setEmulatedMedia', {
   media: 'screen',
-  features: [{ name: 'prefers-color-scheme', value: 'dark' }],
+  features: [{ name: 'prefers-color-scheme', value: 'light' }],
 });
 await send('Network.setCookie', {
   name: 'ai_rss_sid', value: cookie.split('=')[1] ?? '',

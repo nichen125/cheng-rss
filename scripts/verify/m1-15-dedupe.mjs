@@ -295,11 +295,28 @@ function makeRss(name, items) {
 <title>${name}</title><link>${P}/</link><description>去重验收</description>
 ${items.map((it, i) => `<item>
   <title>${esc(it.title)}</title><link>${P}${it.path}</link><guid>${it.guid}</guid>
-  <pubDate>Wed, ${String(20 + (i % 9)).padStart(2, '0')} Oct 2026 10:00:00 GMT</pubDate>
+  <pubDate>${rfc822DaysAgo(1 + (i % 5))}</pubDate>
   <description><![CDATA[${it.html}]]></description>
   <content:encoded><![CDATA[${it.html}]]></content:encoded>
 </item>`).join('\n')}
 </channel></rss>`;
+}
+
+/**
+ * 相对"现在"的发布日期，RFC 822 格式。
+ *
+ * ⚠️ 为什么不能用写死的日期：这一版原来写的是 `Oct 2026` + `20 + i%9` 日。
+ * 向量判重只看近 `VECTOR_WINDOW_DAYS`（14）天的候选（§dedupe/index.ts），
+ * 于是当真实日期走到 11 月 3 日时，写死的 10 月 20 日 10:00 正好落在
+ * `now - 14 天` 之前 51 分钟 —— a1 掉出候选窗，**三条向量判重断言一起红**，
+ * 而代码完全正确。实测 timeline：`published_at` 与 cutoff 相差 0.0 天。
+ *
+ * 这类"测试随日期腐烂"的失败有个共同特征：报错说的是被测功能坏了，
+ * 但切回任何历史提交都一样红。所以时间相关的夹具一律相对当前时间生成。
+ */
+function rfc822DaysAgo(days) {
+  const d = new Date(Date.now() - days * 86400_000);
+  return d.toUTCString();
 }
 
 const esc = (s) => String(s)
@@ -447,6 +464,7 @@ for (let i = 0; i < 40; i++) {
   if (Number(pending?.c) === 0) break;
   await sleep(150);
 }
+
 
 const dupA2 = one("SELECT duplicate_of FROM entries WHERE guid = 'a-2'");
 const dupA3 = one("SELECT duplicate_of FROM entries WHERE guid = 'a-3'");

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { nextSortInFolder } from './store.ts';
 
 // 订阅分组（folders 表）。
 //
@@ -138,12 +139,98 @@ export function renameFolder(
  * feeds.folder_id 是 ON DELETE SET NULL，所以源会退回「未分组」，
  * **不会**被一起删掉。这是刻意的：删分组是最容易被误触的操作，
  * 让它连带删掉 20 个订阅是灾难。
+ *
+ * §15.28 起还要多做一步：**删之前把组内源的 sort 重编号到未分组的末尾**。
+ * `ON DELETE SET NULL` 是 SQLite 内部执行的，没有任何 JS 代码在里面跑，
+ * 于是那些源会带着"在原组里的序号"（0、1、2…）落到未分组，插进未分组
+ * 已有源**中间**去。用户看到的是"删了一个组，未分组列表顺序莫名其妙变了"。
+ * 只能显式 UPDATE 一遍再删 —— SET NULL 自己修不了这个问题。
  */
 export function deleteFolder(db: DatabaseSync, userId: string, id: string): boolean {
   const cur = getFolder(db, userId, id);
   if (!cur) return false;
-  db.prepare('DELETE FROM folders WHERE id = ? AND user_id = ?').run(id, userId);
+
+  const orphans = db.prepare(
+    'SELECT id FROM feeds WHERE user_id = ? AND folder_id = ? ORDER BY sort, title',
+  ).all(userId, id) as unknown as { id: string }[];
+  const looseTail = nextSortInFolder(db, userId, null);
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    // 先给源换组并接着未分组的末尾编号，再删分组 —— 反过来的话
+    // 此刻它们已经 folder_id = NULL，就分不出哪些是这次被解散的了
+    const upd = db.prepare('UPDATE feeds SET folder_id = NULL, sort = ? WHERE id = ? AND user_id = ?');
+    orphans.forEach((r, i) => { upd.run(looseTail + i, r.id, userId); });
+    db.prepare('DELETE FROM folders WHERE id = ? AND user_id = ?').run(id, userId);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
   return true;
+}
+
+/**
+ * 重排分组（PLAN §15.28）。
+ *
+ * 语义：「`ids` 就是这些分组从现在开始的顺序」。列出的拿 0..n-1，
+ * **未列出的保持原有相对次序排在后面**。
+ *
+ * 为什么允许只给一部分 id：两个标签页同时开着，A 页新建了一个分组，
+ * B 页此时提交它自己看到的那几个 —— 如果要求"必须给出全部 id"，
+ * B 页的提交会被拒绝；如果按"未出现即删除"处理，那个新分组就没了。
+ * 两种都不对，所以未列出的留在原地、顺延到后面。
+ *
+ * 为什么是整表提交而不是"把 X 移到第 k 位"：一次拖动可能跨好几行，
+ * 逐条移动要么变成 N 次请求，要么前后端各算一遍插值 —— 谁算谁就容易
+ * 对不上。整表提交只有一种真相。
+ */
+export function reorderFolders(
+  db: DatabaseSync,
+  userId: string,
+  ids: string[],
+): FolderWithCount[] {
+  // 只认属于本用户的分组。有不认识的 id 就整体拒绝，不静默跳过 ——
+  // 静默跳过会让"我提交了 5 个，怎么只动了 4 个"变成无法解释的现象。
+  const known = new Set(
+    (db.prepare('SELECT id FROM folders WHERE user_id = ?').all(userId) as unknown as { id: string }[])
+      .map((r) => r.id),
+  );
+  const unknown = ids.filter((id) => !known.has(id));
+  if (unknown.length > 0) {
+    throw new FolderError('NOT_FOUND', `不认识的分组：${unknown.join(', ')}`);
+  }
+
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) throw new FolderError('BAD_NAME', '同一个分组出现了两次');
+    seen.add(id);
+  }
+
+  const upd = db.prepare('UPDATE folders SET sort = ? WHERE id = ? AND user_id = ?');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    // 提交的这批按给出的顺序拿 0..n-1
+    ids.forEach((id, i) => { upd.run(i, id, userId); });
+
+    // 剩下的保持原相对次序，顺延在后。先按原 sort 取出来再依次编号 ——
+    // 不能直接 `sort = sort + n`：原 sort 里可能有空洞（删过分组），
+    // 平移之后仍会与提交的这批在数值上交错，ORDER BY 就乱了。
+    const rest = db.prepare(
+      'SELECT id FROM folders WHERE user_id = ? ORDER BY sort, name',
+    ).all(userId) as unknown as { id: string }[];
+    let k = ids.length;
+    for (const r of rest) {
+      if (seen.has(r.id)) continue;
+      upd.run(k, r.id, userId);
+      k++;
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  return listFolders(db, userId);
 }
 
 /** 批量把订阅放进某个分组（folderId=null 表示移出分组） */
@@ -159,14 +246,17 @@ export function assignFeedsToFolder(
   if (feedIds.length === 0) return 0;
 
   const upd = db.prepare(
-    'UPDATE feeds SET folder_id = ? WHERE id = ? AND user_id = ?',
+    'UPDATE feeds SET folder_id = ?, sort = ? WHERE id = ? AND user_id = ?',
   );
+  // 追加到目标组末尾（§15.28）。不写 sort 的话它会带着旧组的序号插到中间。
+  let next = nextSortInFolder(db, userId, folderId);
   let n = 0;
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const fid of feedIds) {
-      const r = upd.run(folderId, fid, userId);
+      const r = upd.run(folderId, next, fid, userId);
       n += Number(r.changes ?? 0);
+      next += 1;
     }
     db.exec('COMMIT');
   } catch (e) {

@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { deleteFeed, type FeedStatus } from './store.ts';
+import { deleteFeed, nextSortInFolder, type FeedStatus } from './store.ts';
 
 // 订阅的批量操作（PLAN §15.10、§18）。
 //
@@ -81,12 +81,17 @@ export function bulkMoveToFolder(
     return { requested: ids.length, done: 0, skipped: 0, missing };
   }
 
-  const upd = db.prepare('UPDATE feeds SET folder_id = ? WHERE id = ? AND user_id = ?');
+  const upd = db.prepare('UPDATE feeds SET folder_id = ?, sort = ? WHERE id = ? AND user_id = ?');
+  // 目标组当前的末尾序号（§15.28）。不显式给 sort 的话它保持原来的值，
+  // 于是从别的组移过来的源会带着**旧组的序号**插进新组中间 ——
+  // 看起来像是随机位置，而且完全不可复现（取决于它在旧组排第几）。
+  let next = nextSortInFolder(db, userId, folderId);
   let done = 0;
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const id of existing) {
-      done += Number(upd.run(folderId, id, userId).changes ?? 0);
+      done += Number(upd.run(folderId, next, id, userId).changes ?? 0);
+      next += 1;
     }
     db.exec('COMMIT');
   } catch (e) {

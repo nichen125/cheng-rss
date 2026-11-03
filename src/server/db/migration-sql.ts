@@ -18,6 +18,7 @@ declare const __SQL_0003_ANALYSIS_FINGERPRINT__: string | undefined;
 declare const __SQL_0004_DIGEST_DAY_KEY__: string | undefined;
 declare const __SQL_0005_DIGEST_CITES__: string | undefined;
 declare const __SQL_0006_SUMMARIES__: string | undefined;
+declare const __SQL_0007_FEED_SORT__: string | undefined;
 
 /**
  * 按文件名查内嵌 SQL。
@@ -39,6 +40,8 @@ function bundledSqlFor(name: string): string | null {
       return typeof __SQL_0003_ANALYSIS_FINGERPRINT__ === 'string' ? __SQL_0003_ANALYSIS_FINGERPRINT__ : null;
     case '0006_summaries.sql':
       return typeof __SQL_0006_SUMMARIES__ === 'string' ? __SQL_0006_SUMMARIES__ : null;
+    case '0007_feed_sort.sql':
+      return typeof __SQL_0007_FEED_SORT__ === 'string' ? __SQL_0007_FEED_SORT__ : null;
     default:
       return null;
   }

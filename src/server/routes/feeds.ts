@@ -8,7 +8,7 @@ import { parseFeed } from '../feeds/parse.ts';
 import { buildOpml, parseOpml } from '../feeds/opml.ts';
 import {
   assignFeedsToFolder, createFolder, deleteFolder, ensureFolder, folderNameMap,
-  FolderError, getFolder, listFolders, renameFolder,
+  FolderError, getFolder, listFolders, renameFolder, reorderFolders,
 } from '../feeds/folders.ts';
 import { sanitizeHtml } from '../feeds/sanitize.ts';
 import {
@@ -16,7 +16,7 @@ import {
 } from '../feeds/bulk.ts';
 import {
   createFeed, deleteFeed, dueFeeds, enqueueFetch, findFeedByUrl, getFeed,
-  listFeeds, updateFeed, upsertItems, recordFetchError, scheduleNextFetch,
+  listFeeds, updateFeed, upsertItems, recordFetchError, scheduleNextFetch, arrangeFeeds,
   type FeedRow, type FeedStatus,
 } from '../feeds/store.ts';
 
@@ -74,6 +74,25 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     try {
       const folder = createFolder(ctx.dbh.db, uid, body.name ?? '');
       return c.json({ folder }, 201);
+    } catch (e) {
+      throw toAppError(e);
+    }
+  });
+
+  // ⚠️ 路由顺序：`/folders/reorder` 必须排在 `/folders/:id` **之前**。
+  // Hono 按注册顺序匹配，反了的话 "reorder" 会被当成分组 id，
+  // 接口永远返回 404「分组不存在」。和下面 `/folders/unfile/feeds`、
+  // `/feeds/bulk/refresh` 是同一类坑，那几个都还留着注释。
+  r.patch('/folders/reorder', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as { ids?: unknown };
+    if (!Array.isArray(body.ids)) throw badRequest('需要 ids 数组');
+    const ids = body.ids.filter((x): x is string => typeof x === 'string' && x.length > 0);
+    if (ids.length !== body.ids.length) throw badRequest('ids 里只能是分组 id');
+    if (ids.length === 0) throw badRequest('ids 不能为空');
+    try {
+      const items = reorderFolders(ctx.dbh.db, uid, ids);
+      return c.json({ items });
     } catch (e) {
       throw toAppError(e);
     }
@@ -170,6 +189,40 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     const uid = requireUserId(c);
     const body = await c.req.json().catch(() => ({})) as { feedIds?: unknown };
     return c.json(bulkDelete(ctx.dbh.db, uid, bulkIds(body)));
+  });
+
+  // `POST /feeds/arrange` 放在参数段之前。
+  //
+  // 目前**没有** `POST /feeds/:id`（只有 `/feeds/:id/refresh` 和
+  // `/feeds/:id/fetch-now`，都是三段路径，不会和这里的二段路径撞），
+  // 所以这一条今天不是必需的 —— 但 `/folders/unfile/feeds` 与
+  // `/feeds/bulk/refresh` 都是"补一个两段参数路由时才会炸"的类型，
+  // 等炸了再查要绕一圈。这里提前排好，以后加 `POST /feeds/:id` 也不会中招。
+  //
+  // 一个端点覆盖三种动作：组内调序、移入某组、移出到未分组。
+  // 语义是「这批源现在归 folderId，顺序就是 ids」—— 见 store.ts 的注释。
+  r.post('/feeds/arrange', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as { folderId?: unknown; ids?: unknown };
+    if (!Array.isArray(body.ids)) throw badRequest('需要 ids 数组');
+    const ids = body.ids.filter((x): x is string => typeof x === 'string' && x.length > 0);
+    if (ids.length !== body.ids.length) throw badRequest('ids 里只能是订阅 id');
+    if (ids.length === 0) throw badRequest('ids 不能为空');
+    if (ids.length > BULK_MAX) throw badRequest(`一次最多 ${BULK_MAX} 个`);
+    // folderId 缺省/ null = 未分组（"移出分组"不是另一个接口）
+    const raw = body.folderId;
+    if (raw !== undefined && raw !== null && typeof raw !== 'string') {
+      throw badRequest('folderId 只能是字符串或 null');
+    }
+    try {
+      const moved = arrangeFeeds(ctx.dbh.db, uid, (raw as string | null | undefined) ?? null, ids);
+      return c.json({ ok: true, moved });
+    } catch (e) {
+      if (e instanceof Error && e.message === 'NOT_FOUND_FOLDER') throw notFound('分组不存在');
+      if (e instanceof Error && e.message === 'NOT_FOUND_FEED') throw notFound('订阅不存在');
+      if (e instanceof Error && e.message === 'DUPLICATE_FEED') throw badRequest('同一个订阅出现了两次');
+      throw e;
+    }
   });
 
   r.post('/feeds/bulk/refresh', async (c) => {
@@ -639,6 +692,8 @@ interface ShapedFeed {
   errorCount: number;
   unread: number;
   total: number;
+  /** 组内顺序（§15.28）。前端排序要用，缺了它所有并列项会退回标题序 */
+  sort: number;
 }
 
 function shapeFeed(f: FeedRow & { unread?: number; total?: number }): ShapedFeed {
@@ -655,6 +710,7 @@ function shapeFeed(f: FeedRow & { unread?: number; total?: number }): ShapedFeed
     errorCount: Number(f.error_count),
     unread: Number(f.unread ?? 0),
     total: Number(f.total ?? 0),
+    sort: Number(f.sort ?? 0),
   };
 }
 

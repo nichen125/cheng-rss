@@ -31,6 +31,8 @@ export interface FeedRow {
   last_modified: string | null;
   error_count: number;
   status: FeedStatus;
+  /** 组内顺序（0007，PLAN §15.28）。全部并列 0 时退回按标题比 */
+  sort: number;
   source_kind: string;
 }
 
@@ -60,7 +62,7 @@ export function listFeeds(db: DatabaseSync, userId: string): (FeedRow & { unread
              WHERE e.feed_id = f.id AND e.duplicate_of IS NULL) AS total
       FROM feeds f
      WHERE f.user_id = ?
-     ORDER BY f.status = 'broken', f.title IS NULL, f.title
+     ORDER BY f.status = 'broken', f.sort, f.title IS NULL, f.title
   `).all(userId) as unknown as (FeedRow & { unread: number; total: number })[];
   return rows.map((r) => ({ ...r, unread: Number(r.unread), total: Number(r.total) }));
 }
@@ -86,19 +88,50 @@ export interface CreateFeedInput {
   sourceKind?: string;
 }
 
+/**
+ * 某个组（`null` = 未分组）当前的末尾序号 + 1（§15.28）。
+ *
+ * 每一个**改变 `folder_id`** 的写路径都必须调它，否则源会带着旧组的序号
+ * 插到新组中间：看起来像随机位置，且完全不可复现（取决于它在旧组排第几）。
+ * 五个调用点：createFeed、assignFeedsToFolder、bulkMoveToFolder、
+ * updateFeed({folderId})、deleteFolder 之后的收尾。
+ *
+ * ⚠️ `folder_id = ?` 在 SQL 里对 NULL 永不成立（NULL = NULL 是 NULL），
+ * 所以要分两种写法，不能指望一个绑定的 null 同时管住未分组。
+ */
+export function nextSortInFolder(
+  db: DatabaseSync,
+  userId: string,
+  folderId: string | null,
+): number {
+  const row = (folderId === null
+    ? db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM feeds WHERE user_id = ? AND folder_id IS NULL')
+      .get(userId)
+    : db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM feeds WHERE user_id = ? AND folder_id = ?')
+      .get(userId, folderId)) as { s: number };
+  return Number(row.s);
+}
+
 export function createFeed(db: DatabaseSync, input: CreateFeedInput): FeedRow {
   const id = newId('f');
   const now = Date.now();
   const interval = input.fetchInterval ?? DEFAULT_INTERVAL;
+  // 新源排到**所在组**的末尾（0007，PLAN §15.28）。
+  //
+  // 不用 `sort = 0`：0 是迁移给老数据的默认值，新源也写 0 的话它会插到
+  // 所有老源前面 —— 用户刚加一个源，它跑到了列表最顶上，而用户从没排过。
+  // 按"组内 MAX+1"追加，符合"新东西在后面"的直觉。
+  const nextSort = nextSortInFolder(db, input.userId, input.folderId ?? null);
+
   db.prepare(`
     INSERT INTO feeds (id, user_id, folder_id, url, site_url, title, icon_url,
                        fetch_interval, last_fetched_at, next_fetch_at, error_count,
-                       status, source_kind)
-    VALUES (?,?,?,?,?,?,?,?,NULL,?,0,'active',?)
+                       status, sort, source_kind)
+    VALUES (?,?,?,?,?,?,?,?,NULL,?,0,'active',?,?)
   `).run(
     id, input.userId, input.folderId ?? null, input.url,
     input.siteUrl ?? null, input.title ?? null, input.iconUrl ?? null,
-    interval, now, input.sourceKind ?? 'rss',
+    interval, now, nextSort, input.sourceKind ?? 'rss',
   );
   return getFeed(db, input.userId, id)!;
 }
@@ -119,7 +152,17 @@ export function updateFeed(
     sets.push('fetch_interval = ?');
     params.push(Math.max(300, Math.min(86400 * 7, patch.fetchInterval)));
   }
-  if (patch.folderId !== undefined) { sets.push('folder_id = ?'); params.push(patch.folderId); }
+  if (patch.folderId !== undefined) {
+    sets.push('folder_id = ?');
+    params.push(patch.folderId);
+    // 换组时必须同时重置序号（§15.28），否则它会带着旧组的 sort
+    // 插进新组中间。同组内改其它字段（标题、间隔）不该动序号，
+    // 所以只在 folderId **真的变了**的时候才写。
+    if (patch.folderId !== cur.folder_id) {
+      sets.push('sort = ?');
+      params.push(nextSortInFolder(db, userId, patch.folderId));
+    }
+  }
   if (patch.status !== undefined) {
     sets.push('status = ?');
     params.push(patch.status);
@@ -134,6 +177,74 @@ export function updateFeed(
   params.push(id, userId);
   db.prepare(`UPDATE feeds SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).run(...params);
   return getFeed(db, userId, id);
+}
+
+/**
+ * 安排一批源：把它们归到 `folderId`，顺序就是 `ids`（PLAN §15.28）。
+ *
+ * 一个函数同时覆盖三种动作 —— 组内调序、移入某组、移出到未分组 ——
+ * 因为它们说的是同一句话："这批源现在归这儿，顺序是这样"。
+ * 拆成三个接口的话，前端每做一次拖动都要先判断"这是调序还是换组"，
+ * 而这个判断正是最容易写错的地方（跨组拖动两者同时发生）。
+ *
+ * 与 reorderFolders 同一条规则：未列出的同组源保持原相对次序，顺延在后。
+ * `folderId = null` 表示未分组 —— 注意 SQL 里 `folder_id = ?` 对 NULL
+ * 永不成立，所以下面分了两种写法。
+ */
+export function arrangeFeeds(
+  db: DatabaseSync,
+  userId: string,
+  folderId: string | null,
+  ids: string[],
+): number {
+  if (folderId !== null) {
+    const exists = db.prepare('SELECT 1 AS x FROM folders WHERE id = ? AND user_id = ?')
+      .get(folderId, userId);
+    if (!exists) throw new Error('NOT_FOUND_FOLDER');
+  }
+
+  // 所有 id 必须属于本用户。有不认识的整体拒绝 —— 静默跳过会让
+  // "我拖了 6 个，怎么只动了 5 个"变成无法解释的现象。
+  const owned = new Set(
+    (db.prepare('SELECT id FROM feeds WHERE user_id = ?').all(userId) as unknown as { id: string }[])
+      .map((r) => r.id),
+  );
+  const unknown = ids.filter((id) => !owned.has(id));
+  if (unknown.length > 0) throw new Error('NOT_FOUND_FEED');
+
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) throw new Error('DUPLICATE_FEED');
+    seen.add(id);
+  }
+
+  // 目标组里"其它的"源（不含这次提交的），它们要顺延到这批次后面
+  const siblings = (folderId === null
+    ? db.prepare('SELECT id FROM feeds WHERE user_id = ? AND folder_id IS NULL ORDER BY sort, title')
+      .all(userId)
+    : db.prepare('SELECT id FROM feeds WHERE user_id = ? AND folder_id = ? ORDER BY sort, title')
+      .all(userId, folderId)) as unknown as { id: string }[];
+
+  const upd = db.prepare('UPDATE feeds SET folder_id = ?, sort = ? WHERE id = ? AND user_id = ?');
+  let moved = 0;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    ids.forEach((id, i) => {
+      const r = upd.run(folderId, i, id, userId);
+      moved += Number(r.changes ?? 0);
+    });
+    let k = ids.length;
+    for (const s of siblings) {
+      if (seen.has(s.id)) continue;
+      upd.run(folderId, k, s.id, userId);
+      k++;
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  return moved;
 }
 
 /**

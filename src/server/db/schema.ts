@@ -64,6 +64,8 @@ export const feeds = sqliteTable('feeds', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   folderId: text('folder_id').references(() => folders.id, { onDelete: 'set null' }),
+  /** 组内顺序（0007）。全部并列 0 时退回按标题比，见 store.ts 的 ORDER BY */
+  sort: integer('sort').notNull().default(0),
   url: text('url').notNull(),
   siteUrl: text('site_url'),
   title: text('title'),

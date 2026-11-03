@@ -220,6 +220,8 @@ export interface FeedItem {
   total: number;
   folderId: string | null;
   folderName: string | null;
+  /** 组内顺序（PLAN §15.28）。迁移前的老数据全是 0，并列时退回按标题比 */
+  sort: number;
 }
 
 /** 简报摘要（列表用，不含 bodyMd） */
@@ -656,6 +658,24 @@ export const api = {
     }),
   deleteFolder: (id: string) =>
     request<{ ok: boolean }>('/folders/' + id, { method: 'DELETE' }),
+  /** 重排分组（PLAN §15.28）：ids 就是新顺序，未列出的顺延在后 */
+  reorderFolders: (ids: string[]) =>
+    request<{ items: FolderItem[] }>('/folders/reorder', {
+      method: 'PATCH',
+      body: JSON.stringify({ ids }),
+    }),
+  /**
+   * 安排一批源（PLAN §15.28）：归到 `folderId`（null=未分组），顺序就是 `ids`。
+   *
+   * 一个方法覆盖组内调序、移入某组、移出分组三种动作 —— 它们说的是
+   * 同一句话。拆成三个 API 的话，跨组拖动（同时换组又定序）还得前端
+   * 先判断是哪一种，而那正是最容易写错的地方。
+   */
+  arrangeFeeds: (folderId: string | null, ids: string[]) =>
+    request<{ ok: boolean; moved: number }>('/feeds/arrange', {
+      method: 'POST',
+      body: JSON.stringify({ folderId, ids }),
+    }),
   moveFeedsToFolder: (folderId: string, feedIds: string[]) =>
     request<{ ok: boolean; moved: number }>('/folders/' + folderId + '/feeds', {
       method: 'POST',

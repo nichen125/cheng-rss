@@ -42,11 +42,23 @@ export interface FeedsStore {
   totalUnread: number;
   /** 标记为「失效」的源数（§15.23 v1.17）：>0 时订阅页顶部出现「重试失效源」 */
   brokenCount: number;
+  /** 弹应用级 toast（§15.28）；配置弹窗没拿到时不弹，不报错 */
+  toast: (t: { text: string; tone?: 'ok' | 'error'; onUndo?: () => void | Promise<void> }) => void;
 }
 
 const Ctx = createContext<FeedsStore | null>(null);
 
-export function FeedsProvider(props: { children: ReactNode; onChanged?: () => void }) {
+export function FeedsProvider(props: {
+  children: ReactNode;
+  onChanged?: () => void;
+  /**
+   * 弹一条应用级 toast（§15.28）。配置页的「移到…」也要能用它 ——
+   * ≤640px 时侧栏是 display:none，配置页是手机上**唯一**能把源在组间
+   * 搬动的入口。如果那里只能弹一条没有撤销的内联 notice，那么
+   * "进入/移出分组可撤销"这条目标在手机上就完全达不到。
+   */
+  onToast?: (t: { text: string; tone?: 'ok' | 'error'; onUndo?: () => void | Promise<void> }) => void;
+}) {
   const [feeds, setFeeds] = useState<FeedItem[]>([]);
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,11 +129,13 @@ export function FeedsProvider(props: { children: ReactNode; onChanged?: () => vo
     feeds, folders, loading, err, notice, busy,
     filter, setFilter, setErr, setNotice, setBusy,
     reload, fail, visible, grouped, unfiledCount, totalUnread, brokenCount,
+    // 配置弹窗没被传 onToast 时退化成一个空实现：调用方不用到处判空，
+    // 而代价只是"这条提示没弹出来"—— 比让整个配置页崩掉好。
+    toast: props.onToast ?? (() => {}),
   };
 
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>;
 }
-
 export function useFeeds(): FeedsStore {
   const v = useContext(Ctx);
   // 不返回一个"空 store"当兜底：那样组件会渲染成一片空列表，

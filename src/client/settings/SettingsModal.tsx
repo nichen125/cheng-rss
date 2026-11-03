@@ -57,6 +57,8 @@ export function SettingsModal(props: {
   onLogout: () => void;
   /** 配置里改了数据（分组/订阅）时通知外层刷新侧栏 */
   onChanged: () => void;
+  /** 弹应用级 toast（§15.28）：配置页的「移到…」靠它给出可撤销的提示 */
+  onToast?: (t: { text: string; tone?: 'ok' | 'error'; onUndo?: () => void | Promise<void> }) => void;
 }) {
   // Esc 关闭。挂在 window 上而不是弹窗上：焦点可能在右侧输入框里，
   // 依赖事件冒泡也能工作，但显式监听更稳（输入框里有自己的 onKeyDown）。
@@ -112,7 +114,7 @@ export function SettingsModal(props: {
           {/* 订阅与分组共享同一份数据源。Provider 放在这里而不是整个 App：
               弹窗关闭时它卸载，下次打开重新拉一次 —— 这正是"配置里的数据
               永远新鲜"需要的，也省掉一份全局缓存的一致性维护。 */}
-          <FeedsProvider onChanged={props.onChanged}>
+          <FeedsProvider onChanged={props.onChanged} onToast={props.onToast}>
             {/* 六个分类**全部挂载**，只把非当前的用 hidden 藏起来（§15.15 ③）。
                 为什么不按需条件渲染：那样每次切分类都会卸载再挂载，用户在
                 「添加订阅」里填了一半的 URL 会凭空消失 —— 而这恰恰是

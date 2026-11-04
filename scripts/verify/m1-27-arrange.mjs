@@ -319,7 +319,43 @@ const snap = async () => ev(`(() => {
       return t ? { text: (t.querySelector('.toast-text')?.textContent ?? '').trim(), action: (t.querySelector('.toast-action')?.textContent ?? '').trim() } : null;
     })(),
     groupTitle: (document.querySelector('.pane-title h1')?.textContent ?? '').trim(),
+    // 触摸屏的长按保护：真机长按会被浏览器的选字/上下文菜单抢走
+    longPressGuard: (() => {
+      const row = document.querySelector('.nav.tree .tree-row')
+        ?? document.querySelector('.nav.tree [data-arrange-kind]');
+      if (!row) return null;
+      const cs = getComputedStyle(row);
+      // -webkit-touch-callout 在 Chrome 里既读不出 computed 值，
+      // 也不出现在 CSSStyleDeclaration.cssText 里（Chrome 不建模这个属性，
+      // 序列化时就丢了），所以只能拉样式表**原文**来查。
+      return {
+        userSelect: cs.userSelect ?? '',
+        touchAction: cs.touchAction,
+        hasCallout: window.__cssHasCallout === undefined
+          ? null : window.__cssHasCallout,
+      };
+    })(),
   };
+})()`);
+
+// 先把样式表原文抓一次（fetch 而不是读 cssRules：Chrome 的
+// CSSStyleDeclaration.cssText 会丢掉 -webkit-touch-callout 这类它不建模的属性）
+await ev(`(async () => {
+  if (window.__cssHasCallout !== undefined) return;
+  let has = false;
+  const links = [...document.querySelectorAll('link[rel=stylesheet]')];
+  for (const l of links) {
+    try {
+      const t = await (await fetch(l.href)).text();
+      if (/-webkit-touch-callout\\s*:\\s*none/.test(t)) { has = true; break; }
+    } catch { /* 读不到就跳过 */ }
+  }
+  if (!has) {
+    // 内联 <style> 也要扫（dev 模式与嵌入构建都可能走这条路）
+    const inline = [...document.querySelectorAll('style')].map((s) => s.textContent || '').join('\\n');
+    has = /-webkit-touch-callout\\s*:\\s*none/.test(inline);
+  }
+  window.__cssHasCallout = has;
 })()`);
 
 let s = await snap();
@@ -404,6 +440,22 @@ const pressOn = async (kind, id, holdMs, moveBy = 0) => ev(`(async () => {
     return ok(s.arranging === true, `arranging=${s.arranging}`);
   });
   check('⑨ 排列模式出现「完成」按钮', () => ok(s.hasDone === true, '没找到完成'));
+  // 触摸屏保护（§15.7）：没有 user-select:none 时，真机长按会先被浏览器
+  // 接管（iOS 弹「拷贝/查询」、Android 开始选字），用户等不到那 500ms，
+  // 排序在手机上等于不存在。桌面上鼠标长按不会触发这些，所以只能量 CSS。
+  check('⑪b 侧栏行禁用了长按选字（否则真机排序不可用）', () => {
+    const g = s.longPressGuard;
+    // 只断言 Chrome 真正能读到的两个。`-webkit-touch-callout` 在 Chrome 的
+    // computedStyle 里读出来是空串（它是 iOS Safari 的属性，Chrome 不建模），
+    // 所以那个键改成在 CSS 源文本里查 —— 见下面 ⑪c。
+    // 少了 user-select:none，长按会先开始选字；少了 touch-action，
+    // 移动端会把横向位移判成滚动手势，拖动被抢走。
+    return ok(g?.userSelect === 'none' && g?.touchAction === 'pan-y', JSON.stringify(g));
+  });
+  check('⑪c CSS 里有 iOS 的长按菜单保护（-webkit-touch-callout: none）', () => {
+    return ok(s.longPressGuard?.hasCallout === true,
+      JSON.stringify(s.longPressGuard));
+  });
   check('⑨ 排列模式下分组行出现两颗箭头', () => {
     const folderRows = s.rows.filter((r) => r.kind === 'folder');
     const bad = folderRows.filter((r) => r.disabled.length !== 2);

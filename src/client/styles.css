@@ -565,6 +565,28 @@ input::placeholder { color: var(--fg-faint); }
   /* 箭头占位：收起与展开时文字起点不动，否则整块会左右跳 13px */
   padding-left: 5px;
 }
+
+/* ── 长按排序在触摸屏上要先把浏览器的默认手势挡掉（§15.28）───
+ *
+ * 不加这几条时，手机上长按一行会先被浏览器接管：iOS 弹「拷贝 / 查询」，
+ * Android 开始选字或弹上下文菜单 —— 用户等不到那 500ms，
+ * 排序功能在手机上等于不存在。桌面上看不出来（鼠标长按不弹选择菜单），
+ * 所以这个缺陷只在真机暴露。
+ *
+ *   user-select: none            不让长按开始选字
+ *   -webkit-touch-callout: none  iOS 的长按菜单
+ *   touch-action: pan-y          允许上下滚动，横向意图留给我们
+ *
+ * 只作用于侧栏树的行。**正文必须能选中**（划词批注要它），
+ * 所以这条不能往上提到 .sidebar 或 body。
+ */
+.tree-row,
+.tree-leaf {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: pan-y;
+}
 .tree-caret {
   display: inline-flex;
   align-items: center;

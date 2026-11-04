@@ -4144,49 +4144,74 @@ CMD ["serve"]
 
 ## 十七、项目结构
 
+> 这一节按**实际落地**的结构写（v2.2 校正）。此前它描述的是规划态 ——
+> `services/`、`packages/prompts/`、`middleware/` 等目录从未创建，
+> 而真实模块按业务域分（`feeds/` `extract/` `dedupe/` `ai/` `cluster/` `digest/`）。
+> 规划态的结构图留在 git 历史里，不再维护。
+
 ```
-ai-rss/
+cheng-rss/
 ├─ .toolchain/node/               # 项目内 Node 24 + npm（bootstrap 下载，gitignored）
 ├─ .cache/{npm,docker}/           # npm 与 docker 构建缓存（gitignored）
-├─ .tmp/                          # 构建临时目录（gitignored）
+├─ .tmp/                          # 临时文件（gitignored，§19.10c）
 ├─ .npmrc                         # cache=./.cache/npm（prefix 不能写，见 §4.3）
+├─ README.md                      # 面向使用者：快速开始 / 配置 / 成本 / 已知限制
+├─ PLAN.md                        # 本文档：规格与决策记录
+├─ LICENSE                        # MIT
+├─ docs/
+│  ├─ configuration.md            # 全部配置项、AI 提供方、预算、排查
+│  ├─ architecture.md             # 模块划分、数据流、选型与放弃的方案
+│  ├─ design.md                   # 界面规格、正文提取、去重、聚类、引用安全
+│  ├─ development.md              # 本地开发、验收机制、写断言的规矩
+│  ├─ 界面设计方案.md               # 视觉规格（配色/密度/控件尺度）
+│  ├─ 分组排序方案.md               # 1.27 的两个入口与长按判定
+│  └─ mockups/                    # 静态草图与截图（可直接在浏览器打开）
 ├─ scripts/
-│  ├─ bootstrap.mjs               # 下载并解压 .toolchain/node
-│  ├─ dev.sh  build.sh            # 统一用 .toolchain/node/bin/node 启动
-│  ├─ build-server.mjs            # esbuild → dist/server.js
-│  ├─ build-sea.mjs               # bundle + postject/--build-sea
+│  ├─ bootstrap.{sh,ps1}          # 下载并解压 .toolchain/node
+│  ├─ dev.{sh,ps1}  build.{sh,ps1}
+│  ├─ build-client.mjs            # Vite 构建前端
+│  ├─ build-server.mjs            # esbuild → dist/server.cjs（内嵌 .sql）
+│  ├─ build-sea.mjs               # bundle + postject → 单文件二进制
 │  ├─ pack-client-zip.mjs         # dist/client → dist/client.zip
-│  ├─ lib/proc.mjs                # killTree / onExit（验收脚本的子进程收尾）
+│  ├─ verify-all.mjs              # 验收总入口（55 个脚本）
+│  ├─ clean-tmp.mjs               # 清 .tmp/verify
+│  ├─ check-no-residue.mjs        # 确认没留临时文件
+│  ├─ lib/{proc,tmp,cdp}.mjs      # 子进程收尾 / 临时目录 / 无头浏览器
 │  └─ verify/                     # 每步一个验收脚本 + harness.mjs
 ├─ src/
-│  ├─ index.ts                    # 单一入口：serve|worker|migrate|doctor|version|mcp|export|import
-│  ├─ cli.ts                      # 子命令实现
+│  ├─ index.ts                    # 入口：serve|worker|migrate|doctor|version|mcp|export|import
+│  ├─ cli.ts                      # 子命令实现（mcp/export/import 尚未落地）
 │  ├─ server/
-│  │  ├─ app.ts                   # Hono 装配
-│  │  ├─ routes/{feeds,entries,categories,clusters,digests,search,chat,settings,stats,highlights,rsshub,page}.ts
-│  │  ├─ rsshub/{library,index}.ts  # 路由模板 / 三层缓存 + 搜索 + 试订阅
-│  │  ├─ middleware/{auth,error,logger}.ts
-│  │  ├─ db/{schema.ts,client.ts,migrate.ts,adapter.ts}   # adapter = 可换驱动的那层
-│  │  ├─ db/migrations/*.sql
-│  │  ├─ services/{feed,entry,digest,search,stats,highlight,rsshub,backup}.ts
-│  │  ├─ ai/{client,schemas,analyze,embed,cluster,digest,rag,vector}.ts
-│  │  ├─ mcp/server.ts
-│  │  ├─ extract/{article,run}.ts  # 正文提取（Readability）与落库
-│  │  ├─ dedupe/{url,cosine,index,types}.ts  # URL 规范化 / 向量 / 三层判重
-│  │  ├─ entries/history.ts       # 阅读历史的时间分桶与分组
-│  │  ├─ jobs/{runner,handlers,queue}.ts
-│  │  ├─ auth/require-user.ts     # 多人预留的唯一开关点
-│  │  └─ compat/huntly/           # 插件兼容层（§14）
-│  ├─ embed-static.ts             # 静态资源/迁移/提示词的导入清单
-│  └─ client/                     # React SPA
-│     ├─ routes/{inbox,digest,highlights,feeds,settings,search}/
-│     ├─ components/{reader,highlight,rsshub-search}/
-│     └─ lib/api.ts
-├─ packages/prompts/*.md          # 带 version 头
+│  │  ├─ app.ts                   # 组装 AppContext（cfg + db + 版本）
+│  │  ├─ config.ts                # 三层配置解析
+│  │  ├─ errors.ts  logger.ts     # 错误类型 / 模板限速日志
+│  │  ├─ static.ts                # 静态资源（SEA 内嵌 zip → fflate 解压）
+│  │  ├─ routes/                  # 7 个路由组
+│  │  │   {auth,feeds,entries,digests,highlights,rsshub,settings}.ts
+│  │  ├─ feeds/                   # RSS/Atom/RDF 解析、OPML、自动发现、抓取
+│  │  ├─ extract/                 # 正文提取（Readability + linkedom）
+│  │  ├─ dedupe/                  # URL 规范化 / SimHash / 余弦向量
+│  │  ├─ ai/                      # client / service / prompt / schema / usage / budget
+│  │  ├─ cluster/                 # 事件聚类 + 逐簇归约
+│  │  ├─ digest/                  # 简报：run / index / schedule / render / md-parse
+│  │  ├─ search/                  # FTS5 + 程序侧 bigram
+│  │  ├─ highlights/              # 划词高亮（三选择器降级）+ 简报联动
+│  │  ├─ entries/history.ts       # 阅读历史的时间分桶
+│  │  ├─ jobs/                    # 队列 + 内联 runner + handlers
+│  │  ├─ auth/                    # session / require-user
+│  │  └─ db/                      # client / schema / migrate / migration-sql / text-blob
+│  └─ client/                     # React 19（无路由库，useReducer 管视图）
+│     ├─ App.tsx                  # 三栏 + 视图状态
+│     ├─ feeds.css mobile.css     # 样式（手写，非 Tailwind）
+│     ├─ settings/                # 配置中心各分类
+│     ├─ digest/                  # 简报页 + markdown 渲染
+│     ├─ highlights/  summary/    # 高亮与单篇总结
+│     └─ api.ts  arrange.ts  icons.tsx
 ├─ Dockerfile
 ├─ docker-compose.yml
-├─ .github/workflows/{ci,release,nightly}.yml
-└─ data/                          # 唯一状态：app.db, files/, config.json, backups/
+├─ .github/workflows/ci.yml
+├─ tests/fixtures/                # HTML 快照、AI 响应样本
+└─ data/                          # 唯一状态：app.db, secrets.json, config.json, files/, backups/
 ```
 
 `.gitignore` 关键项（决定「删目录即卸载」能否成立）：
@@ -4202,6 +4227,10 @@ data/
 ```
 
 **只有 `data/` 需要备份**，其余全部可重建。
+
+**文档分工**（v2.2 建立）：README 面向使用者，只留"怎么用"；`docs/` 四份按主题
+分（配置/架构/设计/开发）；PLAN 保留规格与决策记录。三者的关系是
+**README 不重复 PLAN 的取舍理由，PLAN 不重复 README 的操作步骤**。
 
 ---
 

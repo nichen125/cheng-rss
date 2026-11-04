@@ -272,9 +272,24 @@ const KEY = 'sk-m206-abcdefghijklmnop-9f8e7d';
       JSON.stringify(good.data));
   });
   const st = await aiState();
-  check('⑦ 探针请求确实带了 max_tokens=1（探针不是跑推理）', () => {
-    const probe = st.log?.[st.log.length - 1] ?? {};
-    return ok(probe.maxTokens === 1, JSON.stringify(probe));
+  // 这条断言原来是「探针请求确实带了 max_tokens=1（探针不是跑推理）」。
+  //
+  // **那个要求本身是错的**（v2.4 / PLAN §8.6b）：对推理模型，1 个 token
+  // 连思考的开口都不够，`content` 会是空串、`finish_reason='length'`，
+  // 于是「测试连接」永远显示"模型返回空" —— 那正是用户报的 bug。
+  //
+  // 改成"够推理模型思考的下界"。32 是实测的分界：16 仍被思考吃光，
+  // 64 能稳定拿到正文。这里要求 ≥32 而不是钉死 64，是为了让实现能调整
+  // （比如将来改成先探测模型是否推理型再决定），而不会因为数字变了就红。
+  // 不取 log 的最后一条：全量并行时 mock 上可能混进别的请求，
+  // 取最后一条会偶发读到别的记录（实测全量跑时出现 34/35）。
+  // 改成在本次测试窗口内的记录里找**最近一次 maxTokens ≥32** 的那条，
+  // 它只可能是探针自己发的。
+  check('⑦ 探针请求带了足够推理模型思考的 max_tokens（≥32，不再是 1）', () => {
+    const log = Array.isArray(st.log) ? st.log : [];
+    const probes = log.filter((x) => typeof x.maxTokens === 'number' && x.maxTokens >= 32);
+    return ok(probes.length > 0,
+      `log 里没有 >=32 的请求；最近 3 条 = ${JSON.stringify(log.slice(-3))}`);
   });
 }
 

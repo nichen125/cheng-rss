@@ -126,6 +126,16 @@ export type AiFailureKind =
   | 'bad-json'
   | 'schema'
   | 'empty'
+  /**
+   * 推理模型把 `max_tokens` 全花在 `reasoning_content` 上，`content` 是空的
+   * （`finish_reason === 'length'`）。§8.6b。
+   *
+   * **与 `empty` 是两件事，且处置相反**：`empty` 是"这套提示词让模型无话可说"
+   * （换提示词或换模型，`retryable: false`）；`reasoning-only` 是"预算不够写完
+   * 答案"（加 `max_tokens` 就有救，`retryable: true`）。
+   * 混成一个 kind，调用方无法决定该重试还是放弃。
+   */
+  | 'reasoning-only'
   | 'budget'
   | 'dim-mismatch'
   | 'rate-limited';
@@ -305,6 +315,10 @@ export class AiClient {
       await this.waitForRateLimit();
       const t0 = this.now();
       const url = `${this.config.baseURL.replace(/\/+$/, '')}/chat/completions`;
+      // 记下**本次实际用的**预算。重试会把它翻倍（§8.6b），所以不能在
+      // 错误信息里读 opts.maxTokens —— 那会报出翻倍后的值，而用户要的是
+      // "这次失败时用的是什么"，好据此判断该加多少。
+      const maxTokensThisCall = opts.maxTokens;
       const body: Record<string, unknown> = {
         model,
         messages: [
@@ -384,19 +398,58 @@ export class AiClient {
         continue;
       }
 
-      const choices = (json.choices ?? []) as { message?: { content?: unknown } }[];
-      const content = choices[0]?.message?.content;
-      const u = (json.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
+      const choices = (json.choices ?? []) as {
+        message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown };
+        finish_reason?: unknown;
+      }[];
+      const ch0 = choices[0];
+      const content = ch0?.message?.content;
+      const finish = String(ch0?.finish_reason ?? '');
+      const u = (json.usage ?? {}) as {
+        prompt_tokens?: number; completion_tokens?: number;
+        completion_tokens_details?: { reasoning_tokens?: number };
+      };
+      const reasoningTokens = u.completion_tokens_details?.reasoning_tokens ?? null;
+      const hasText = typeof content === 'string' && content.trim() !== '';
+
+      // 推理模型（§8.6b）：token 先花在 `reasoning_content` 上，预算不够时
+      // `content` 是空串而 `finish_reason` 是 `length`。这与"模型无话可说"
+      // 是两件事，处置也相反 —— 前者加预算就能救，后者加多少都救不了。
+      const reasoningText = readReasoning(ch0?.message);
+      const truncatedByReasoning = !hasText && finish === 'length'
+        && (reasoningText !== '' || (reasoningTokens ?? 0) > 0);
+
       const usage: AiUsageRecord = {
         purpose: opts.purpose, model, userId: opts.userId,
         inTokens: u.prompt_tokens ?? null, outTokens: u.completion_tokens ?? null,
         costUsd: estimateCost(this.config.pricing, model, u.prompt_tokens, u.completion_tokens),
-        latencyMs, ok: typeof content === 'string' && content.trim() !== '',
-        error: typeof content === 'string' && content.trim() !== '' ? undefined : 'empty: 模型返回空内容',
+        latencyMs, ok: hasText,
+        error: hasText ? undefined
+          : truncatedByReasoning
+            ? `reasoning-only: 思考消耗 ${reasoningTokens ?? '?'} token 后被 max_tokens=${
+              maxTokensThisCall ?? '未设'} 截断，未产出正文`
+            : 'empty: 模型返回空内容',
       };
       this.record(usage);
 
-      if (typeof content !== 'string' || content.trim() === '') {
+      if (!hasText) {
+        if (truncatedByReasoning) {
+          // 可重试：把预算翻倍再问一次。原样重发只会再截断一次 ——
+          // 那正是修复前 379 次调用全失败却毫无进展的原因。
+          const failure: AiFailure = {
+            kind: 'reasoning-only',
+            message: `模型把 max_tokens 用在了思考上（reasoning_tokens=${
+              reasoningTokens ?? '?'}），正文为空。本次 max_tokens=${maxTokensThisCall ?? '未设'}`,
+            retryable: true,
+          };
+          last = { ok: false, failure, usage };
+          if (attempt >= TRANSPORT_RETRIES) return last;
+          // 翻倍而不是加固定值：思考长度随输入变，加 500 长短都不合适。
+          // 见 §8.6b。
+          if (opts.maxTokens) opts.maxTokens *= 2;
+          await this.sleep(this.backoffMs(attempt));
+          continue;
+        }
         // 空内容不重试：原样重发大概率还是空，而它常常意味着提示词
         // 让模型无话可说（例如要求总结一篇只有标题的文章）。
         return { ok: false, usage, failure: { kind: 'empty', message: '模型返回空内容', retryable: false } };
@@ -548,6 +601,12 @@ export class AiClient {
       if (res.retryWithFormat) return last;
       if (!failure.retryable) return last;
 
+      // 推理模型吃掉了预算（§8.6b）：原样重发只会再截断一次，
+      // 必须把 max_tokens 翻倍才有意义。
+      if (failure.kind === 'reasoning-only' && opts.maxTokens) {
+        opts.maxTokens *= 2;
+      }
+
       // 最后一次不再睡
       if (attempt < TRANSPORT_RETRIES) {
         await this.sleep(this.backoffMs(attempt, res.retryAfterMs));
@@ -677,12 +736,38 @@ export class AiClient {
       return { ok: false, latencyMs, failure: { kind: 'bad-json', message: '响应体不是 JSON', retryable: true } };
     }
 
-    const choices = (json.choices ?? []) as { message?: { content?: unknown } }[];
+    const choices = (json.choices ?? []) as {
+      message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown };
+      finish_reason?: unknown;
+    }[];
     const content = choices[0]?.message?.content;
-    const usage = (json.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
+    const usage = (json.usage ?? {}) as {
+      prompt_tokens?: number; completion_tokens?: number;
+      completion_tokens_details?: { reasoning_tokens?: number };
+    };
 
     if (typeof content !== 'string' || content.trim() === '') {
-      // 空内容不是网络问题，原样重发大概率还是空；记为可重试但只一次
+      // 与 chat() 同一套判定（§8.6b）：思考被截断 ≠ 模型无话可说。
+      // 这里也要分开，否则 JSON 路径会把"预算不够"报成"无话可说"，
+      // 而调用方对两者的处置相反。
+      const finish = String(choices[0]?.finish_reason ?? '');
+      const reasoningText = readReasoning(choices[0]?.message);
+      const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? null;
+      const truncated = finish === 'length'
+        && (reasoningText !== '' || (reasoningTokens ?? 0) > 0);
+      if (truncated) {
+        return {
+          ok: false, latencyMs,
+          inTokens: usage.prompt_tokens ?? null, outTokens: usage.completion_tokens ?? null,
+          failure: {
+            kind: 'reasoning-only',
+            message: `模型把 max_tokens 用在了思考上（reasoning_tokens=${
+              reasoningTokens ?? '?'}，finish_reason=length），正文为空`,
+            retryable: true,
+          },
+        };
+      }
+      // 空内容不是网络问题，原样重发大概率还是空
       return {
         ok: false, latencyMs,
         inTokens: usage.prompt_tokens ?? null, outTokens: usage.completion_tokens ?? null,
@@ -904,6 +989,25 @@ function tryParse(s: string): boolean {
 
 async function safeText(resp: Response): Promise<string> {
   try { return await resp.text(); } catch { return ''; }
+}
+
+/**
+ * 取模型响应里的推理内容（§8.6b）。
+ *
+ * 三个名字都要认：
+ *   · `reasoning_content` —— DeepSeek 系与多数 OpenAI 兼容实现
+ *   · `reasoning`         —— OpenRouter / 部分网关
+ *   · 它可能不存在（非推理模型），返回空串而不是 undefined，
+ *     让调用方少一次判空
+ *
+ * 这个字段**不参与业务**，只用来判断"模型是不是在思考" ——
+ * 把思考内容写进摘要或简报是错的（它是过程，不是结论）。
+ */
+function readReasoning(msg: { reasoning_content?: unknown; reasoning?: unknown } | undefined): string {
+  for (const v of [msg?.reasoning_content, msg?.reasoning]) {
+    if (typeof v === 'string' && v.trim() !== '') return v.trim();
+  }
+  return '';
 }
 
 /**

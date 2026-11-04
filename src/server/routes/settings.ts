@@ -94,14 +94,22 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
     const { aiForUser, runtimeAiBase } = await import('../ai/service.ts');
     const { client } = aiForUser(ctx.dbh.db, uid, runtimeAiBase(ctx.cfg));
     const r = await client.chat({
-      system: '你是连通性探针。只回复 OK。',
+      system: '你是连通性探针。只回复 OK 两个字符，不要解释。',
       user: 'ping',
       model: client.config.models.fast,
       purpose: 'test',
       userId: uid,
-      // 1 个 token 就够：这里验的是"这个 key 能不能通过鉴权"，
-      // 不是测模型能力。省钱且不给服务商增加真正的负载。
-      maxTokens: 1,
+      // 64 token 而不是 1（§8.6b）。
+      //
+      // 这里验的是"这个 key 能不能通过鉴权"，不是测模型能力，所以想省 token
+      // 是对的。但 1 个 token 对**推理模型**必然失败：它们会先输出思考
+      // （reasoning_content），1 个 token 连思考的开口都不够，于是 content
+      // 是空串、finish_reason='length'，看起来像"模型返回空"。
+      //
+      // 实测 deepseek-flash：max_tokens=1 → content 为空，思考只输出 "The"；
+      // max_tokens=16 → 仍在思考；64 才能稳定拿到 "OK"。
+      // 多花的这 63 个 token 是"测试连接能不能用"的必要成本。
+      maxTokens: 64,
       temperature: 0,
     });
     if (r.ok) return c.json({ ok: true, text: r.text.slice(0, 40), model: client.config.models.fast });
@@ -111,6 +119,8 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
       // 401 与 network 的处置完全不同，UI 靠 kind 给不同文案
       hint: r.failure.kind === 'no-key' ? '先在上面填一个 key 再测试'
         : r.failure.kind === 'http-401' || r.failure.kind === 'http-403' ? 'key 无效或没有权限'
+          : r.failure.kind === 'reasoning-only'
+            ? '这个模型是推理模型，思考占满了 token 预算。换一个非推理模型，或调大 max_tokens'
           : r.failure.kind === 'network' || r.failure.kind === 'timeout' ? '连不上接口地址，检查 baseURL 与网络'
             : undefined,
     });

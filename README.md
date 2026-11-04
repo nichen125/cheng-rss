@@ -222,7 +222,7 @@ sqlite3 data/app.db "VACUUM INTO 'backup.db'"
 
 ```bash
 ./scripts/build.sh          # 构建
-./scripts/verify-all.mjs    # 跑全部验收（55 个脚本、2030 条断言，约 13 分钟）
+./scripts/verify-all.mjs    # 跑全部验收（56 个脚本、2046 条断言，约 13 分钟）
 npm run typecheck:all       # 类型检查
 ```
 

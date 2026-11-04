@@ -9,9 +9,14 @@ import {
 import {
   clusterVectors, loadClusterWindow, thresholdFor, CLUSTER_WINDOW_HOURS,
 } from '../cluster/index.ts';
-import { summarizeCluster, saveCluster, clearWindowClusters, type ClusterMember } from '../cluster/summarize.ts';
+import {
+  summarizeCluster, saveCluster, clearWindowClusters, type ClusterMember,
+  PER_ENTRY_CLIP,
+} from '../cluster/summarize.ts';
 import { digestDue, recordAttempt, recordSkip, parseDigestConfig, localDayStart } from './schedule.ts';
 import { listDayHighlights, renderDigestHighlightSection } from '../highlights/insight.ts';
+import { htmlToText } from '../feeds/parse.ts';
+import { unpackText } from '../db/text-blob.ts';
 
 // 简报的端到端流水线：取窗口 → 聚类 → 归约 → 生成 → 落库。
 //
@@ -60,11 +65,32 @@ export interface DigestOptions {
  *
  * **不抛异常**：失败要能被调度器记进 digest_attempts 并退避重试，
  * 抛出去的话调用点只能看到"跑了但没结果"，无法区分"没内容"和"挂了"。
+ *
+ * ## 这条契约之前没兑现（v2.2 修复）
+ *
+ * 上面那段话一直在这里，但实现只在**显式判定的四条路径**上返回，
+ * 主链上的任何异常（DB 列名写错、解压失败、聚类抛错……）都会直接冒出去。
+ * 而它冒出去的代价比"看到异常"更糟：
+ *
+ *   · `recordAttempt` 在异常之后那几行上，所以**一次都不会落**
+ *     → `digestDue` 看到 attempts=0，判定"今天还没试过"，
+ *       第二天、下一分钟都照跑，退避完全不存在
+ *   · job handler 把异常吞成一句"简报未生成"（它自己写明"ok=false 不抛"），
+ *     于是日志里那是 info 级的一行，不是错误
+ *   · UI 停在 `pending`「正在准备今天的简报」，用户以为在排队
+ *
+ * 实测症状：`data/app.db` 里 `digest_attempts` 17 行全部是"没配置 API key"，
+ * 而真正跑主链的那些次**一行都没有** —— 因为它们都抛在记 attempt 之前。
+ *
+ * 所以这里给整条主链包一层：**任何异常都记一次失败尝试并返回 ok:false**，
+ * 让退避与世界可见性都回到契约上。异常本身仍然写进日志（带 reason 返回），
+ * 不吞成静默。
  */
 export async function runDigest(
   ctx: AppContext,
   opts: DigestOptions,
 ): Promise<RunDigestResult> {
+  // 配置读取放在 try 外面：它不依赖主链，且失败时连"记 attempt"都没法做。
   const db = ctx.dbh.db;
   const now = opts.now ?? Date.now();
   const userId = opts.userId;
@@ -75,8 +101,35 @@ export async function runDigest(
     .get(userId) as { digest_config: string } | undefined;
   const cfg = { ...parseDigestConfig(safeJson(rawCfg?.digest_config)), kind };
 
+  try {
+    return await runDigestInner(ctx, {
+      db, now, userId, kind, dayKey, cfg, manual: Boolean(opts.manual),
+      allowSingle: Boolean(opts.allowSingle),
+    });
+  } catch (e) {
+    // 记 attempt 本身也可能失败（库挂了）。那时只能返回，不能二次抛 ——
+    // 调度器下一轮会再试，而抛出去会让整个 sweep 循环中断。
+    const msg = `简报生成异常：${(e as Error).message}`;
+    try {
+      recordAttempt(db, userId, cfg, dayKey, false, msg.slice(0, 500), now);
+    } catch { /* 库不可写时无处可记 */ }
+    return { ...EMPTY, reason: msg };
+  }
+}
+
+/** 主链本体。异常由 runDigest 统一兜底，这里只关心业务流程。 */
+async function runDigestInner(
+  ctx: AppContext,
+  a: {
+    db: DatabaseSync; now: number; userId: string; kind: string;
+    dayKey: number; cfg: ReturnType<typeof parseDigestConfig> & { kind: string };
+    manual: boolean; allowSingle: boolean;
+  },
+): Promise<RunDigestResult> {
+  const { db, now, userId, kind, dayKey, cfg } = a;
+
   // 手工触发跳过"时间到没到 / 今天做过没"这两关，但**不跳过**"有内容没"。
-  if (!opts.manual) {
+  if (!a.manual) {
     const due = digestDue(db, userId, cfg, now);
     if (!due.due) return { ...EMPTY, reason: due.reason };
   }
@@ -105,7 +158,7 @@ export async function runDigest(
     { threshold: thresholdFor(win.source), now },
   ).filter((c) => c.entryCount >= MIN_ENTRIES_FOR_DIGEST);
 
-  const minClusters = opts.allowSingle ? 1 : MIN_CLUSTERS_FOR_DIGEST;
+  const minClusters = a.allowSingle ? 1 : MIN_CLUSTERS_FOR_DIGEST;
   if (clusters.length < minClusters) {
     const r = `只有 ${clusters.length} 个事件，不足以构成简报`;
     recordSkip(db, userId, cfg, dayKey, r, now);
@@ -225,6 +278,24 @@ function safeJson(s: string | undefined): unknown {
  * bodyText 用摘要 + 正文开头：喂给模型的是"这篇说了什么"，不是全文。
  * 全文会撑爆 token，而摘要在 2.2 已经生成过了 —— 那是我们花钱算出来的
  * 中间产物，这里正是它第二次发挥价值的地方。
+ *
+ * ## 正文不在 entries 上（v2.2 修复）
+ *
+ * 这里原本查 `e.content_text` / `e.feed_content_text`，而**这两列从 0001
+ * 起就不存在** —— 正文一直存在 `entry_contents.html`（gzip BLOB，§13.3）。
+ * 于是 `runDigest` 在"窗口里有条目"这条路上必然抛
+ * `no such column: e.content_text`，而它抛在第一个 `recordAttempt` 之前，
+ * 所以 digest_attempts 连一行都不落、退避机制不生效，handler 只记一句
+ * "简报未生成"。症状是**简报从来没成功过一次，而日志像正常跳过**。
+ *
+ * 为什么既有 3.1~3.5 的验收没抓到：它们要么是纯函数（聚类 / 引用替换 /
+ * 调度判定），要么像 m3-04 那样只走"没 key""窗口为空"两条**在调模型之前
+ * 就返回**的路径。主链上一次都没被真正跑过。
+ *
+ * SQL 侧只取 BLOB，解压与转纯文本放在 JS 里：
+ * `unpackText` 与 `htmlToText` 都是纯函数，放进 SQL 做不到（gzip 是自定义
+ * 标记格式，不是 SQLite 内建能解的）。这也让"截断到 1200 字"发生在**解压
+ * 之后**，避免对 gzip 字节做 substr 切出半截流。
  */
 function loadMembers(db: DatabaseSync, ids: string[]): ClusterMember[] {
   if (ids.length === 0) return [];
@@ -233,26 +304,35 @@ function loadMembers(db: DatabaseSync, ids: string[]): ClusterMember[] {
     SELECT e.id, e.title, e.published_at,
            COALESCE(f.title, '未知来源') AS source_name,
            a.summary AS summary,
-           substr(COALESCE(e.content_text, e.feed_content_text, ''), 1, 1200) AS body
+           c.html AS body_html
       FROM entries e
       LEFT JOIN feeds f ON f.id = e.feed_id
       LEFT JOIN entry_analysis a ON a.entry_id = e.id
+      LEFT JOIN entry_contents c ON c.entry_id = e.id
      WHERE e.id IN (${ph})
   `).all(...ids) as {
     id: string; title: string; published_at: number; source_name: string;
-    summary: string | null; body: string;
+    summary: string | null; body_html: Uint8Array | null;
   }[];
 
   // 按传入顺序排（SQL 的 IN 不保证顺序，而"第一个"要被当成代表条目）
+  //
+  // 先解压再截断：`substr` 作用在 gzip 字节上会切出半截流，
+  // `unpackText` 随后会在 gunzip 里抛 `unexpected end of file`。
   const map = new Map(rows.map((r) => [r.id, r]));
-  return ids.map((id) => map.get(id)).filter(Boolean).map((r) => ({
-    entryId: r!.id,
-    sourceName: r!.source_name,
-    title: r!.title,
-    summary: r!.summary,
-    bodyText: r!.body ?? '',
-    publishedAt: Number(r!.published_at),
-  }));
+  return ids.map((id) => map.get(id)).filter(Boolean).map((r) => {
+    const text = htmlToText(unpackText(r!.body_html) ?? '');
+    return {
+      entryId: r!.id,
+      sourceName: r!.source_name,
+      title: r!.title,
+      summary: r!.summary,
+      // 留 1200 字给 buildClusterUser 再按 PER_ENTRY_CLIP 截断，
+      // 这里不再切第二次（两处阈值不一致时以 summarize.ts 为准）。
+      bodyText: text.slice(0, PER_ENTRY_CLIP),
+      publishedAt: Number(r!.published_at),
+    };
+  });
 }
 
 export type { AiClient };

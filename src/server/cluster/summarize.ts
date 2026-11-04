@@ -32,8 +32,14 @@ export const CLUSTER_SYSTEM = `你是一名多源情报编辑。给你同一事�
 6. 原文未提及的一律不得推断补充。
 7. 只输出 JSON，不要解释文字或 Markdown 围栏。`;
 
-/** 喂给模型的单篇上限。§8.5 的"只喂标题 + 摘要 + 前 4000 字"同源 */
-const PER_ENTRY_CLIP = 1200;
+/**
+ * 喂给模型的单篇正文上限。§8.5 的"只喂标题 + 摘要 + 前 4000 字"同源。
+ *
+ * 导出给 `run.ts` 用：它在 `loadMembers` 里也要按同一个数截断，
+ * 两处阈值不一致时会变成"这里切 1200、那里切 800"，而症状只是
+ * "模型看到的正文莫名其妙短了一截"，很难归因。
+ */
+export const PER_ENTRY_CLIP = 1200;
 /** 一簇最多喂几篇。再多的话 token 成本翻倍而信息增量几乎为零 */
 export const MAX_ENTRIES_PER_CLUSTER = 8;
 

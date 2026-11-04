@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { AiClient } from '../ai/client.ts';
 import { DigestBodySchema, type DigestBody } from '../ai/schema.ts';
 import { describeSingleSource } from '../cluster/summarize.ts';
+import { localDayStart } from './schedule.ts';
 
 // 简报生成（PLAN §9.3 / §19.5 3.3）。
 //
@@ -227,6 +228,27 @@ export interface SaveDigestInput {
   costUsd: number | null;
   now?: number;
   /**
+   * 这份简报属于**哪一天**（本地日 00:00）。
+   *
+   * 缺省由 `periodStart` 所在的本地日推出 —— 两者在正常路径上相同
+   * （runDigest 传的就是 localDayStart(now)），所以调用方通常不用传。
+   *
+   * **这一列之前没写**（v2.2 修复）：INSERT 的列清单里漏了 day_key，
+   * 于是落库后它恒为 NULL。而 `digestDue` / `digestStatus` 都按 day_key
+   * 判"今天做过没"，后果是：
+   *   · 调度器每分钟判一次"今天还没生成"，**每分钟重跑一遍完整流程**
+   *     （每簇一次归纳 + 一次生成）
+   *   · UI 的状态永远停在 `pending`「正在准备今天的简报」
+   *   · 唯一索引 `uq_digest_day (user_id, kind, day_key)` 对 NULL 不生效
+   *     （SQLite 把 NULL 视为互不相等），所以同一天会落**多份**
+   *
+   * 为什么不让它可空、靠 period_start 兜底判"哪天"：§9.5 已经把这两个
+   * 职责拆开过一次 —— period_start 兼当"覆盖窗口"与"哪一天"时，用户把
+   * 生成时间从 08:00 改到 09:00 就会多出第二份简报。回退这个拆分等于
+   * 把那个 bug 再引回来。
+   */
+  dayKey?: number | null;
+  /**
    * 引用表（`RenderResult.citations` 或 `fallbackCitations()`）。
    *
    * 必须显式传进来，**不能**从 body_md 里反查 —— body_md 落库前已经被
@@ -259,6 +281,12 @@ export function saveDigest(db: DatabaseSync, input: SaveDigestInput): string {
 
   const id = existing?.id ?? `dg_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
+  // 「哪天」必须落。缺省从 periodStart 推 —— 那是本地日 00:00，与
+  // schedule.ts 的 localDayStart 同一个定义（同一个函数，不另写一份）。
+  const dayKey = input.dayKey === null || input.dayKey === undefined
+    ? localDayStart(input.periodStart)
+    : input.dayKey;
+
   // 没有引用时存 NULL，不存 "[]"：两者在页面上表现不同 ——
   // NULL 是"这份简报没有引用表"（老数据），"[]" 是"查了，确实一条都没有"。
   // 存成 "[]" 会让"老数据缺字段"和"新数据无引用"不可区分。
@@ -269,8 +297,9 @@ export function saveDigest(db: DatabaseSync, input: SaveDigestInput): string {
 
   db.prepare(`
     INSERT INTO digests (id, user_id, kind, title, intro, body_md, period_start, period_end,
-      entry_count, cluster_count, model, cost_usd, delivered_at, created_at, cites, worth_reading)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?,?)
+      entry_count, cluster_count, model, cost_usd, delivered_at, created_at, cites, worth_reading,
+      day_key)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?,?,?)
     ON CONFLICT(user_id, kind, period_start) DO UPDATE SET
       title = excluded.title,
       intro = excluded.intro,
@@ -282,7 +311,8 @@ export function saveDigest(db: DatabaseSync, input: SaveDigestInput): string {
       cost_usd = excluded.cost_usd,
       created_at = excluded.created_at,
       cites = excluded.cites,
-      worth_reading = excluded.worth_reading
+      worth_reading = excluded.worth_reading,
+      day_key = excluded.day_key
   `).run(
     id, input.userId, input.kind, input.body.title,
     input.body.highlights.join('\n'),
@@ -290,7 +320,7 @@ export function saveDigest(db: DatabaseSync, input: SaveDigestInput): string {
     input.periodStart, input.periodEnd,
     input.entryCount, input.clusterCount,
     input.model, input.costUsd, now,
-    cites, wr,
+    cites, wr, dayKey,
   );
   return id;
 }

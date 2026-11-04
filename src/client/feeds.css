@@ -761,6 +761,79 @@
 
 .settings-card-head .muted { font-size: 12px; }
 
+/* ── 折叠卡（§15.29，v2.2）──────────────────────────────────
+ *
+ * 高级设置与提示词默认收起。用原生 <details>/<summary> 而不是自绘按钮：
+ * 键盘可达、aria-expanded、屏幕阅读器行为全由浏览器免费给 —— 而自绘版
+ * 在 §15.28.11 已经证明"看起来对、真机上行为不对"很容易发生。
+ *
+ * 三条硬约束：
+ *   · summary 行高 ≥ 44px（触摸红线，与 §15.7 同一标准）
+ *   · 去掉浏览器默认的三角标记，换成自绘的（默认标记在各平台形状不一）
+ *   · summary 上不能有 user-select: none —— 那是侧栏长按用的，
+ *     这里要能选中标题文字
+ */
+.settings-fold { padding: 0; }
+
+.settings-fold > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  /* 垂直 12px + 13.5px 行高 ≈ 44px，左右 18px 与 .settings-card 的 padding 对齐 */
+  min-height: 44px;
+  padding: 13px 18px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 10px;
+}
+
+.settings-fold > summary::-webkit-details-marker { display: none; }
+.settings-fold > summary::marker { content: ''; }
+
+.settings-fold > summary h3 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 自绘三角：收起时指右，展开时指下。用边框做三角形，不引图标。 */
+.settings-fold > summary h3::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  opacity: 0.55;
+  transition: transform 120ms ease;
+}
+
+.settings-fold[open] > summary h3::before {
+  transform: rotate(90deg);
+}
+
+.settings-fold > summary:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.06)); }
+.settings-fold[open] > summary { border-bottom: 1px solid var(--border); border-radius: 10px 10px 0 0; }
+
+/* 展开后的内容自己带内边距 —— summary 是 0 内边距的卡，正文不能贴边。 */
+.settings-fold > *:not(summary) { margin-left: 18px; margin-right: 18px; }
+.settings-fold > *:not(summary):first-of-type { margin-top: 14px; }
+.settings-fold > *:not(summary):last-child { margin-bottom: 16px; }
+
+/* 收起时显示的当前值摘要。等宽数字让"6 个来源"这类数字不左右跳。 */
+.settings-fold-summary {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
 /* 档位横幅。三档靠左侧色条区分 —— 与列表里的 tier 色条同一套语义，
  * 用户不需要再学一遍颜色。 */
 .ai-level {

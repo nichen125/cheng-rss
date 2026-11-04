@@ -477,6 +477,10 @@
   /* 撤销按钮要真能点到：桌面那 24px 在手指上偏小 */
   .toast-action { height: 32px; padding: 0 11px; font-size: 13px; }
   .toast-close { width: 32px; height: 32px; }
+  /* 配置 › 分组的排序控件（折叠箭头 / ↑↓ / 「移到…」）的移动端尺寸
+     **不写在这里**：main.tsx 的导入顺序是 styles → mobile → feeds，
+     feeds.css 里的同名单类规则会覆盖本文件的。写在这儿实测不生效
+     （箭头仍 18×18），所以放在 feeds.css 自己的媒体查询里。 */
 
   /* 搜索框字号 ≥16px：iOS 上小于 16px 会在聚焦时自动放大页面 */
   .search-box input { font-size: 16px; }

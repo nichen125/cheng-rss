@@ -9,10 +9,10 @@
 // 长按拖拽在那里不存在）。所以箭头是常显的，不需要先进入任何模式 ——
 // 配置页是批量整理的场合，一次要动十几项，"点一次走一格"比拖更可控，
 // 而且天然可键盘操作、可被断言精确验证。
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api, ApiFailure, type FolderItem } from '../api.ts';
 import { IconChevronRight, IconFolder } from '../icons.tsx';
-import { feedsOfFolder } from '../arrange.ts';
+import { compareFeedInGroup, feedsOfFolder } from '../arrange.ts';
 import { useFeeds } from './store.tsx';
 
 export function FoldersSection() {
@@ -20,6 +20,30 @@ export function FoldersSection() {
   const [name, setName] = useState('');
   /** 展开着看组内源的组。可以同时展开多个 —— 这里是整理，不是浏览 */
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+
+  /**
+   * 组 id → 组内源（已排好序），一次算完。
+   *
+   * 之前是在 `folders.map` 里逐个调 `feedsOfFolder(feeds, f.id)` ——
+   * 那个函数会 filter 一遍全部源。几十个组 × 几百个源 = 上万次比较，
+   * 而且每次切换展开状态都要重算一遍。这里改成一次 O(n) 归拢：
+   * 遍历源一遍，把它推进所属组的桶里，桶内再排序。
+   *
+   * 与 App.tsx 的 `feedsByFolder` 用的是同一套比较器（`feedsOfFolder`），
+   * 所以侧栏与配置页永远不会给出不同顺序。
+   */
+  const kidsByFolder = useMemo(() => {
+    const buckets = new Map<string, typeof feeds>();
+    for (const f of feeds) {
+      if (!f.folderId) continue;
+      const b = buckets.get(f.folderId);
+      if (b) b.push(f); else buckets.set(f.folderId, [f]);
+    }
+    // 桶内排序。传的是**桶本身**而不是全量 feeds —— 传全量等于又 filter
+    // 了一遍，白省。比较器仍是同一个，两处顺序不会分叉。
+    for (const [id, b] of buckets) buckets.set(id, b.slice().sort(compareFeedInGroup));
+    return buckets;
+  }, [feeds]);
 
   const toggleOpen = (id: string) => {
     setOpenIds((prev) => {
@@ -212,7 +236,7 @@ export function FoldersSection() {
       ) : (
         <ul className="folder-manage-list arrange-list">
           {folders.map((f, fi) => {
-            const kids = feedsOfFolder(feeds, f.id);
+            const kids = kidsByFolder.get(f.id) ?? [];
             const open = openIds.has(f.id);
             return (
               <li key={f.id} className="folder-manage-group" data-folder-id={f.id}>

@@ -76,7 +76,7 @@ export function moveItem<T>(arr: readonly T[], from: number, to: number): T[] {
  * 这两个坑都不报错，只是清单看着不对；而且它们只在 `sort` 并列时出现，
  * 数据一旦被用户排过就再也复现不了 —— 属于"上线一个月后才有人来报"的那类。
  */
-function compareFeedInGroup(a: FeedItem, b: FeedItem): number {
+export function compareFeedInGroup(a: FeedItem, b: FeedItem): number {
   const aBroken = a.status === 'broken' ? 1 : 0;
   const bBroken = b.status === 'broken' ? 1 : 0;
   if (aBroken !== bBroken) return aBroken - bBroken;

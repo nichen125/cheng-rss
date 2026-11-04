@@ -102,6 +102,38 @@ try {
   console.log(`  \u001b[33m!\u001b[0m seed 失败: ${String(e.stderr ?? e.message).slice(0, 150)}`);
 }
 
+// §15.28 起还要有分组：配置 › 分组的排序控件是手机上调顺序的唯一入口。
+//
+// seed-demo **只写 entries，不建 feeds 也不建 folders**（它自己的注释写着
+// "只写 entries / entry_contents / entry_analysis"），所以这里得自己造。
+// 第一版以为 seed 里有源可以挪过去，结果 SELECT 拿到空数组 ——
+// 组内源那一层没有控件，两条断言报"测不到"。那不是通过，是前提不成立。
+try {
+  const { DatabaseSync } = await import('node:sqlite');
+  const d = new DatabaseSync(join(dataDir, 'app.db'));
+  const uid = d.prepare('SELECT id FROM users LIMIT 1').get()?.id;
+  if (uid) {
+    d.exec('BEGIN IMMEDIATE');
+    d.prepare('INSERT INTO folders (id,user_id,name,sort) VALUES (?,?,?,?)')
+      .run('m5_f1', uid, '移动端分组甲', 0);
+    d.prepare('INSERT INTO folders (id,user_id,name,sort) VALUES (?,?,?,?)')
+      .run('m5_f2', uid, '乙组', 1);
+    // 第一组放两个源：组内源那层才有 ↑↓ 与「移到…」可量
+    const now = Date.now();
+    const ins = d.prepare(`INSERT INTO feeds (id,user_id,folder_id,url,site_url,title,
+      icon_url,fetch_interval,last_fetched_at,next_fetch_at,error_count,status,sort,source_kind)
+      VALUES (?,?,?,?,?,?,NULL,1800,?,?,0,'active',?,'rss')`);
+    ins.run('m5_feed1', uid, 'm5_f1', 'https://m5a.example.com/feed',
+      'https://m5a.example.com', '移动端源甲', now, now, 0);
+    ins.run('m5_feed2', uid, 'm5_f1', 'https://m5b.example.com/feed',
+      'https://m5b.example.com', '移动端源乙', now, now, 1);
+    d.exec('COMMIT');
+    d.close();
+  }
+} catch (e) {
+  console.log(`  \u001b[33m!\u001b[0m 造分组失败: ${String(e?.message ?? e).slice(0, 150)}`);
+}
+
 // ── 浏览器 ─────────────────────────────────────────────────
 const profile = mkdtempSync(join(tmpdir(), 'ai-rss-mobprof-'));
 const cdpPort = 9600 + Math.floor(Math.random() * 300);
@@ -439,6 +471,82 @@ check('手机上添加面板的输入框可用（高度 ≥ 40、字号 ≥ 16�
 check('添加面板不超出屏幕', () => {
   return ok(addPanel && addPanel.panelW <= addPanel.vw,
     `${addPanel?.panelW} vs ${addPanel?.vw}`);
+});
+
+// ── ⑨ 配置 › 分组的排序控件（§15.28）─────────────────────
+//
+// 这一组控件在手机上是**唯一**能调分组顺序与组内源顺序的地方：侧栏在
+// ≤640px 是 display:none，长按排列模式根本不存在。所以它必须过触摸红线，
+// 而且不能指望桌面尺寸 —— 桌面是折叠箭头 18×18、↑↓ 24×26、
+// 「移到…」22 高，三个都点不中。
+//
+// 这条原本不存在：m1-05 只量订阅页的按钮，配置 › 分组整页的控件
+// 不在任何触摸断言里。实测 375px 下分别是 18 / 24 / 22，
+// 全都不达标，而整套验收仍然全绿。
+await setPhone(390, 844);
+await sleep(500);
+await evaluate(`(() => {
+  const t = [...document.querySelectorAll('.tab')].find((x) => x.textContent.includes('配置'));
+  if (t) t.click();
+})()`);
+await sleep(800);
+await evaluate(`(() => {
+  const b = [...document.querySelectorAll('.settings-nav-item')]
+    .find((x) => (x.textContent || '').trim().includes('分组'));
+  if (b) b.click();
+})()`);
+await sleep(700);
+// 展开一个分组：组内源那一层的控件也要量
+await evaluate(`(() => {
+  const t = document.querySelector('.folder-twist');
+  if (t) t.click();
+})()`);
+await sleep(500);
+
+const folderCtl = await evaluate(`(() => {
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  return {
+    twist: box(document.querySelector('.folder-twist')),
+    rowArrows: [...document.querySelectorAll('.folder-manage-row .icon-arrow')].map(box),
+    feedArrows: [...document.querySelectorAll('.folder-feed-list .icon-arrow')].map(box),
+    selects: [...document.querySelectorAll('.folder-move-select')].map(box),
+    hasRows: Boolean(document.querySelector('.folder-manage-row')),
+    hasFeeds: Boolean(document.querySelector('.folder-feed-list li')),
+    overflowX: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
+  };
+})()`);
+
+// 先确认真的渲染出了行，否则下面几条"全都不达标"是空真
+check('配置 › 分组 在手机上渲染出分组行', () => {
+  return ok(folderCtl?.hasRows === true, JSON.stringify(folderCtl));
+});
+check('配置 › 分组的折叠箭头 ≥36px（触摸下限，桌面是 18×18）', () => {
+  const t = folderCtl?.twist;
+  return ok(t && t.w >= 36 && t.h >= 36, JSON.stringify(t));
+});
+check('配置 › 分组的 ↑↓ ≥36px（桌面是 24×26）', () => {
+  const bad = (folderCtl?.rowArrows ?? []).filter((a) => !a || a.w < 36 || a.h < 36);
+  return ok(bad.length === 0, `不达标 ${JSON.stringify(bad)}`);
+});
+check('配置 › 组内源的 ↑↓ ≥36px', () => {
+  const list = folderCtl?.feedArrows ?? [];
+  // 没展开出源行时是"测不到"，不是"通过"
+  if (!folderCtl?.hasFeeds) return ok(false, '没有展开出组内源行，测不到');
+  const bad = list.filter((a) => !a || a.w < 36 || a.h < 36);
+  return ok(bad.length === 0, `不达标 ${JSON.stringify(bad)}`);
+});
+check('配置 › 分组的「移到…」下拉 ≥36px 高（桌面是 22）', () => {
+  const list = folderCtl?.selects ?? [];
+  if (!folderCtl?.hasFeeds) return ok(false, '没有展开出组内源行，测不到');
+  const bad = list.filter((s) => !s || s.h < 36);
+  return ok(bad.length === 0, `不达标 ${JSON.stringify(bad)}`);
+});
+check('配置 › 分组 在手机上无横向溢出', () => {
+  return ok(folderCtl?.overflowX === 0, `溢出 ${folderCtl?.overflowX}px`);
 });
 
 // ── ⑦ 横屏不出现侧栏 ─────────────────────────────────────

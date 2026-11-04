@@ -155,6 +155,55 @@
 
 .hint.inset-hint { padding: 2px 9px 6px 33px; margin: 0; font-size: 12px; }
 
+/* ── 手机上把排序控件抬到触摸下限（§15.28）───────────────
+ *
+ * 为什么这段写在 feeds.css 而不是 mobile.css：main.tsx 的导入顺序是
+ * styles → mobile → **feeds**，所以 feeds.css 里的单类规则会覆盖
+ * mobile.css 里的同名单类规则（同权重、后者胜）。第一版写在 mobile.css，
+ * 实测折叠箭头仍是 18×18、↑↓ 仍是 24 宽 —— 规则存在但没生效，
+ * 这种"写了却不管用"比没写更难查。放在被覆盖文件自己的媒体查询里，
+ * 顺序天然正确。
+ *
+ * 这一组是手机上**唯一**能调分组与组内源顺序的地方：侧栏在 ≤640px 是
+ * display:none，长按排列模式不存在。所以不能跟着桌面一起缩。
+ */
+@media (max-width: 640px) {
+  .folder-twist { width: 40px; height: 40px; }
+  .btn.tiny.icon-arrow {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    font-size: 14px;
+  }
+  .folder-manage-row {
+    gap: 4px;
+    padding: 6px 4px;
+    min-height: 52px;
+  }
+  .folder-feed-list li {
+    gap: 4px;
+    padding: 6px 4px 6px 6px;
+    min-height: 52px;
+  }
+  /* 四个控件挤在一行时，源名/组名要主动让位，否则被压成 2~3 个字 */
+  .folder-feed-name { max-width: 12ch; }
+  .folder-manage-list .folder-name { max-width: 14ch; }
+  /* 下拉要能点开，且字号 ≥16 避免 iOS 聚焦时自动放大页面 */
+  .folder-move-select {
+    height: 36px;
+    max-width: 9ch;
+    font-size: 16px;
+    padding: 0 2px;
+  }
+  /* 分组筛选 chip 与订阅页底部操作按钮。
+     这两组原来只有 padding、没有高度，算出来是 30 / 32 ——
+     在手机上点不中，而 m1-05 之前只量了 `.feeds-page button` 的
+     一部分（没分组数据时这些按钮根本不渲染，所以一直没被抓到）。
+     补上分组数据后立刻暴露：全部/组名 chip 30px、刷新全部/去看条目 32px。 */
+  .chip { min-height: 36px; padding: 6px 13px; font-size: 13px; }
+  .feeds-page .btn { height: 36px; }
+}
+
 /* ── 分组筛选条 ─────────────────────────────────────────── */
 
 .folder-filter {

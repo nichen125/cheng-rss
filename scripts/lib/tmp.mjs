@@ -25,7 +25,7 @@ export const TMP_ROOT = join(PROJECT_ROOT, '.tmp/verify');
 
 /** 建目录并把 os.tmpdir() 指过去。返回目标路径。 */
 export function useProjectTmp() {
-  const dir = process.env.AI_RSS_TMP_DIR || TMP_ROOT;
+  const dir = process.env.CHENG_RSS_TMP_DIR || TMP_ROOT;
   mkdirSync(dir, { recursive: true });
   // 三个都设：Linux 读 TMPDIR，Windows 读 TEMP 再退 TMP，macOS 读 TMPDIR
   process.env.TMPDIR = dir;

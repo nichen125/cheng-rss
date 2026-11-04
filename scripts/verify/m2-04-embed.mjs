@@ -154,7 +154,7 @@ check('unpackVec 对 null / 空 / 非 4 倍数不抛', () => ok(
 // ── B. 落库层 ─────────────────────────────────────────────
 group('2.4 Embedding · 落库');
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m204-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m204-'));
 const h = openDb({ dataDir: tmp });
 migrate(h.db);
 const DB = h.db;

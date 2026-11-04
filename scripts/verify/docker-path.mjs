@@ -53,7 +53,7 @@ check('npm ci 用了项目内缓存目录', () => {
 check('运行阶段只 COPY 二进制（不复制 node_modules）', () => {
   const runtime = df.split(/^FROM /m).pop() ?? '';
   return ok(
-    /COPY --from=build[^\n]*ai-rss-linux-x64/.test(runtime) && !/COPY --from=build[^\n]*node_modules/.test(runtime),
+    /COPY --from=build[^\n]*cheng-rss-linux-x64/.test(runtime) && !/COPY --from=build[^\n]*node_modules/.test(runtime),
     '运行阶段可能把 node_modules 也复制了',
   );
 });
@@ -68,7 +68,7 @@ check('以非 root 运行', () => {
 
 // ── ② Dockerfile 里跑的那几条命令，在本机能成立吗 ───────────
 // 这是关键：如果命令本身有问题，有 docker 也会失败。
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-docker-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-docker-'));
 try {
   check('build-client.mjs 可执行', () => {
     return ok(existsSync(join(root, 'scripts/build-client.mjs')));
@@ -92,31 +92,31 @@ try {
   // 自己找一遍是有必要的：用户常直接跑单个脚本调试，
   // 只靠 verify-all 传环境变量会让人误以为产物验证坏了。
   const cachePath = join(root, '.tmp/linuxnode/node-v24.13.0-linux-x64/bin/node');
-  const linuxNode = process.env.AI_RSS_TEST_LINUX_NODE
+  const linuxNode = process.env.CHENG_RSS_TEST_LINUX_NODE
     || (existsSync(cachePath) ? cachePath : null);
   if (linuxNode && existsSync(linuxNode)) {
     const out = execFileSync(nodeBin, [join(root, 'scripts/build-sea.mjs'), '--target', 'linux-x64'], {
       cwd: root,
       encoding: 'utf8',
-      env: { ...process.env, AI_RSS_SEA_BASE: linuxNode },
+      env: { ...process.env, CHENG_RSS_SEA_BASE: linuxNode },
       timeout: 300000,
     });
-    const elf = join(root, 'dist/ai-rss-linux-x64');
+    const elf = join(root, 'dist/cheng-rss-linux-x64');
     check('能产出 linux-x64 ELF（Docker 构建的核心步骤）', () => {
-      if (!existsSync(elf)) return ok(false, '未生成 dist/ai-rss-linux-x64');
+      if (!existsSync(elf)) return ok(false, '未生成 dist/cheng-rss-linux-x64');
       const buf = readFileSync(elf).subarray(0, 4);
       // ELF magic: 0x7F 'E' 'L' 'F'
       const isElf = buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46;
       return ok(isElf, `文件头不是 ELF: ${[...buf].map((b) => b.toString(16)).join(' ')}`);
     });
     check('ELF 内嵌了迁移 SQL', () => {
-      const elf = join(root, 'dist/ai-rss-linux-x64');
+      const elf = join(root, 'dist/cheng-rss-linux-x64');
       if (!existsSync(elf)) return ok(false, '二进制不存在');
       const content = readFileSync(elf);
       return ok(content.includes(Buffer.from('CREATE TABLE entries')), '二进制里找不到迁移 SQL');
     });
     check('ELF 体积合理（node + ~1MB）', () => {
-      const elf = join(root, 'dist/ai-rss-linux-x64');
+      const elf = join(root, 'dist/cheng-rss-linux-x64');
       const base = statSync(linuxNode).size;
       const size = statSync(elf).size;
       const delta = size - base;
@@ -129,9 +129,9 @@ try {
     // 只打一行 SKIP 却让汇总显示 "11/11 PASS" 是误导 ——
     // 读者会以为 Docker 路径已被完整验证。
     process.stdout.write(
-      '  \u001b[33mSKIP\u001b[0m  ELF 产出验证（未提供 AI_RSS_TEST_LINUX_NODE）\n' +
+      '  \u001b[33mSKIP\u001b[0m  ELF 产出验证（未提供 CHENG_RSS_TEST_LINUX_NODE）\n' +
       '        → 产物验证未执行，以下断言未计入\n' +
-      '          启用方式: AI_RSS_TEST_LINUX_NODE=/path/to/linux-node node scripts/verify/docker-path.mjs\n' +
+      '          启用方式: CHENG_RSS_TEST_LINUX_NODE=/path/to/linux-node node scripts/verify/docker-path.mjs\n' +
       '          （scripts/verify-all.mjs 会自动在 .tmp/linuxnode 下查找）\n',
     );
     check('ELF 产物验证已执行（不允许静默跳过）', () => {

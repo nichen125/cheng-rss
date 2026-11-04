@@ -28,8 +28,8 @@ import { removeDir } from '../lib/tmp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 group('1.8 订阅一键批量管理');
@@ -40,7 +40,7 @@ if (!existsSync(binPath)) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-bulk-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-bulk-'));
 const dataDir = join(tmp, 'data');
 const port = 42000 + Math.floor(Math.random() * 900);
 const origin = `http://127.0.0.1:${port}`;
@@ -321,8 +321,8 @@ check('删除不存在的 id 返回 200 + missing（不是 404）', () => {
 //
 // 后端全绿不代表界面是对的：计数显示 0 但删除按钮可点、或者
 // 全选后计数显示 0，都会让用户误操作。这四条只能读 DOM。
-if (process.env.AI_RSS_SKIP_UI === '1') {
-  console.log('  \u001b[33mSKIP\u001b[0m  界面断言（AI_RSS_SKIP_UI=1）');
+if (process.env.CHENG_RSS_SKIP_UI === '1') {
+  console.log('  \u001b[33mSKIP\u001b[0m  界面断言（CHENG_RSS_SKIP_UI=1）');
 } else {
   await uiChecks();
 }
@@ -346,7 +346,7 @@ async function uiChecks() {
 
   // 界面断言要在桌面视口跑：手机断点会藏掉行内按钮，
   // 那是别一节的判据（m1-05/m1-06），这里只验计数的联动。
-  const prof = mkdtempSync(join(tmpdir(), 'ai-rss-bulkui-'));
+  const prof = mkdtempSync(join(tmpdir(), 'cheng-rss-bulkui-'));
   const cdp = 43000 + Math.floor(Math.random() * 900);
   const br = spawn(browser, [
     '--headless=new', `--remote-debugging-port=${cdp}`, `--user-data-dir=${prof}`,

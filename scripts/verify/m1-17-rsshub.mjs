@@ -34,8 +34,8 @@ import {
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -239,7 +239,7 @@ await new Promise((r) => mock.listen(0, '127.0.0.1', r));
 mockPort = mock.address().port;
 const MOCK = `http://127.0.0.1:${mockPort}`;
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m117-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m117-'));
 const dataDir = join(tmp, 'data');
 const port = 43100 + Math.floor(Math.random() * 700);
 const base = `http://127.0.0.1:${port}`;
@@ -484,7 +484,7 @@ const browserPath = CANDIDATES_BROWSER.find((p) => existsSync(p));
 if (!browserPath) {
   console.log('  \u001b[33mSKIP\u001b[0m  未找到 Chromium 系浏览器，UI 断言跳过');
 } else {
-  const profile = mkdtempSync(join(tmpdir(), 'ai-rss-rhprof-'));
+  const profile = mkdtempSync(join(tmpdir(), 'cheng-rss-rhprof-'));
   const cdpPort = 9600 + Math.floor(Math.random() * 90);
   const proc = spawn(browserPath, [
     '--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`,
@@ -549,7 +549,7 @@ if (!browserPath) {
       width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false,
     });
     await send('Network.setCookie', {
-      name: 'ai_rss_sid', value: cookie.split('=')[1] ?? '',
+      name: 'cheng_rss_sid', value: cookie.split('=')[1] ?? '',
       domain: '127.0.0.1', path: '/',
     });
     await send('Page.navigate', { url: base });

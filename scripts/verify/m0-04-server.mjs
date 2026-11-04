@@ -24,7 +24,7 @@ if (!existsSync(nodeBin)) {
   process.exit(1);
 }
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m004-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m004-'));
 const dataDir = join(tmp, 'data');
 
 function cli(args, expectFail = false) {
@@ -46,7 +46,7 @@ group('0.4 HTTP 骨架与子命令');
 // ── ① 子命令 ───────────────────────────────────────────────
 const ver = cli(['version']);
 check('version 输出版本号与 schema 版本', () => {
-  return ok(/ai-rss \d+\.\d+\.\d+/.test(ver.out) && /schema \d+/.test(ver.out),
+  return ok(/cheng-rss \d+\.\d+\.\d+/.test(ver.out) && /schema \d+/.test(ver.out),
     `输出: ${ver.out.slice(0, 120)}`);
 });
 
@@ -80,7 +80,7 @@ async function startServer() {
     '--data', dataDir, '--port', String(port), '--host', '127.0.0.1',
   ], {
     cwd: root,
-    env: { ...process.env, AI_RSS_PRINT_READY: '1', LOG_LEVEL: 'error' },
+    env: { ...process.env, CHENG_RSS_PRINT_READY: '1', LOG_LEVEL: 'error' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -166,7 +166,7 @@ if (srv.ready) {
   db.close();
 
   const cr = await fetch(`${base}/api/v1/me`, {
-    headers: { cookie: 'ai_rss_sid=tok-abc' },
+    headers: { cookie: 'cheng_rss_sid=tok-abc' },
   });
   const cb = await cr.json();
   check('cookie session 可访问 /api/v1/me', () => eq(cr.status, 200));
@@ -181,7 +181,7 @@ if (srv.ready) {
 
   // 已登录后访问未知 API 才是真正的 404
   const nrAuth = await fetch(`${base}/api/v1/nosuch`, {
-    headers: { cookie: 'ai_rss_sid=tok-abc' },
+    headers: { cookie: 'cheng_rss_sid=tok-abc' },
   });
   const nbAuth = await nrAuth.json();
   check('已登录访问未知 API 返回 404 且错误体同形状', () => {
@@ -194,7 +194,7 @@ if (srv.ready) {
   db2.prepare('INSERT INTO sessions (id, user_id, token, expires_at, created_at) VALUES (?,?,?,?,?)')
     .run('s2', 'u-test', 'tok-expired', Date.now() - 1000, Date.now());
   db2.close();
-  const er = await fetch(`${base}/api/v1/me`, { headers: { cookie: 'ai_rss_sid=tok-expired' } });
+  const er = await fetch(`${base}/api/v1/me`, { headers: { cookie: 'cheng_rss_sid=tok-expired' } });
   check('过期会话被拒（401）', () => eq(er.status, 401));
 
   // 有用户之后同一字段必须翻转，否则"有账号还显示初始化页"
@@ -215,7 +215,7 @@ if (srv.ready) {
   db3.close();
 
   const dr = await fetch(`${base}/api/v1/entries/e-detail`, {
-    headers: { cookie: 'ai_rss_sid=tok-abc' },
+    headers: { cookie: 'cheng_rss_sid=tok-abc' },
   });
   const db_ = await dr.json();
   check('详情接口返回 200 且正文可读', () => {

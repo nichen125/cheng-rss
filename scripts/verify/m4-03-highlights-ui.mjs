@@ -32,8 +32,8 @@ const BROWSERS = process.platform === 'win32'
   : ['/usr/bin/google-chrome', '/usr/bin/chromium'];
 const browser = BROWSERS.find((p) => existsSync(p));
 const BIN = join(root, 'dist', process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`);
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`);
 
 if (!browser) {
   console.log('  \u001b[33mSKIP\u001b[0m  未找到 Chromium 系浏览器，跳过 UI 断言');
@@ -46,7 +46,7 @@ if (!existsSync(BIN)) {
   process.exit(0);
 }
 
-const dir = mkdtempSync(join(tmpdir(), 'ai-rss-m403-'));
+const dir = mkdtempSync(join(tmpdir(), 'cheng-rss-m403-'));
 const port = 46800 + Math.floor(Math.random() * 300);
 const base = `http://127.0.0.1:${port}`;
 const proc = spawn(BIN, ['serve', '--data', join(dir, 'data'), '--port', String(port)], {

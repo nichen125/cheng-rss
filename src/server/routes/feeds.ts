@@ -514,7 +514,7 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     })));
     return c.body(xml, 200, {
       'content-type': 'text/x-opml; charset=utf-8',
-      'content-disposition': `attachment; filename="ai-rss-feeds-${new Date().toISOString().slice(0, 10)}.opml"`,
+      'content-disposition': `attachment; filename="cheng-rss-feeds-${new Date().toISOString().slice(0, 10)}.opml"`,
     });
   });
 

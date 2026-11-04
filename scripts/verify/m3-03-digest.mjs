@@ -231,7 +231,7 @@ check('空簇列表 → 明确失败而不是产出空简报', () =>
 // ── ⑥ 落库 ──────────────────────────────────────────────────
 group('3.3 简报 · 落库');
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m303-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m303-'));
 const h = openDb({ dataDir: tmp });
 migrate(h.db);
 const DB = h.db;

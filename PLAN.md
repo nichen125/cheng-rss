@@ -229,8 +229,8 @@ Node SEA 的官方测试覆盖范围有限，两条硬限制：
 
 | 目标 | 产物 | 适用 |
 |---|---|---|
-| Linux x64 (glibc) | `ai-rss-linux-x64` | 云服务器、x86 NAS、Docker |
-| Windows x64 | `ai-rss-windows-x64.exe` | 桌面本机 |
+| Linux x64 (glibc) | `cheng-rss-linux-x64` | 云服务器、x86 NAS、Docker |
+| Windows x64 | `cheng-rss-windows-x64.exe` | 桌面本机 |
 
 > 限制只存在于「是否提供预编译二进制」这一层，不影响「能否运行」。其他平台（M 系 Mac、ARM 设备、Alpine）用源码模式（`./scripts/dev.sh`）完全正常。
 
@@ -318,7 +318,7 @@ execFileSync(nodeBin, ['--liftoff-only', postjectCli, outPath, 'NODE_SEA_BLOB', 
 ### 4.1 二进制部署（NAS / 服务器首选）
 
 ```bash
-./ai-rss-linux-x64 serve --data ./data --port 3000
+./cheng-rss-linux-x64 serve --data ./data --port 3000
 ```
 
 **五个必须做到的工程点**（缺一条「二进制部署」就是名义上的）：
@@ -327,7 +327,7 @@ execFileSync(nodeBin, ['--liftoff-only', postjectCli, outPath, 'NODE_SEA_BLOB', 
 2. **迁移 SQL 内嵌**。esbuild `--loader:.sql=text` 把迁移文件打成字符串，运行时按 `schema_migrations` 表逐条执行。
 3. **提示词模板内嵌**（`packages/prompts/*.md`，同样用 text loader）。
 4. **数据目录显式外置**：`--data`，默认 `./data`。二进制本身无状态。
-5. **子命令自检**：`ai-rss version` / `doctor` / `migrate` / `serve` / `worker` / `mcp` / `export` / `import`。
+5. **子命令自检**：`cheng-rss version` / `doctor` / `migrate` / `serve` / `worker` / `mcp` / `export` / `import`。
 
 ### 4.2 源码部署（开发 / 定制）
 
@@ -335,14 +335,14 @@ execFileSync(nodeBin, ['--liftoff-only', postjectCli, outPath, 'NODE_SEA_BLOB', 
 
 ```bash
 # Linux / macOS
-git clone … && cd ai-rss
+git clone … && cd cheng-rss
 ./scripts/bootstrap.sh          # 下载项目内 Node 24 + 初始化本地缓存（只需一次）
 ./scripts/dev.sh                # = ./.toolchain/node/bin/node …（热重载）
 ./scripts/build.sh              # 生产构建
 ./scripts/build.sh --sea        # 产出本机平台二进制
 
 # Windows（PowerShell，无需 git-bash / WSL）
-git clone …; cd ai-rss
+git clone …; cd cheng-rss
 .\scripts\bootstrap.ps1
 .\scripts\dev.ps1
 .\scripts\build.ps1 -Sea
@@ -365,7 +365,7 @@ git clone …; cd ai-rss
 **约束**：除了「下载一次 Node 压缩包」这一步，任何环节都不写 `$HOME`、不写系统目录、不动全局 `npm`。
 
 ```
-ai-rss/
+cheng-rss/
 ├─ .toolchain/                  # 项目内 Node 运行时（~104MB，git ignored）
 │  └─ node/                     #   node/npm/npx 全在这里，含完整 npm
 ├─ .cache/npm/                  # npm 缓存（~200MB，git ignored）
@@ -410,7 +410,7 @@ engine-strict=true
 
 ```ts
 // 1. 按 nodejs.org/dist/index.json 校验版本存在，避免硬编码失效
-const VER = process.env.AI_RSS_NODE_VERSION ?? "v24.13.0";
+const VER = process.env.CHENG_RSS_NODE_VERSION ?? "v24.13.0";
 const plat = `${process.platform === "win32" ? "win" : "linux"}-x64`;
 const url = `https://nodejs.org/dist/${VER}/node-${VER}-${plat}.${process.platform === "win32" ? "zip" : "tar.xz"}`;
 
@@ -419,9 +419,9 @@ const url = `https://nodejs.org/dist/${VER}/node-${VER}-${plat}.${process.platfo
 // 4. 之后所有脚本都用这个 node 启动，不再读 PATH
 ```
 
-**版本固定但可覆盖**：默认锁定 `v24.13.0`（与 CI 一致），需要试新 patch 时设 `AI_RSS_NODE_VERSION`。`engines` 只写 `>=24 <25`，次要版本升级不必改代码。
+**版本固定但可覆盖**：默认锁定 `v24.13.0`（与 CI 一致），需要试新 patch 时设 `CHENG_RSS_NODE_VERSION`。`engines` 只写 `>=24 <25`，次要版本升级不必改代码。
 
-**为什么不干脆用二进制部署**：源码部署的价值是「能改代码」。但它不该附带「必须先装好系统 Node」。把运行时也纳入项目目录后，两者可以并存 —— 同一份 `data/`，`./scripts/dev.sh` 与 `./ai-rss-linux-x64 serve` 随时互换。
+**为什么不干脆用二进制部署**：源码部署的价值是「能改代码」。但它不该附带「必须先装好系统 Node」。把运行时也纳入项目目录后，两者可以并存 —— 同一份 `data/`，`./scripts/dev.sh` 与 `./cheng-rss-linux-x64 serve` 随时互换。
 
 **代价**：项目目录多约 300MB（Node 104MB + npm 缓存 200MB）。这些都在 `.gitignore` 里，删项目即清空，不残留。
 
@@ -429,8 +429,8 @@ const url = `https://nodejs.org/dist/${VER}/node-${VER}-${plat}.${process.platfo
 
 ```yaml
 services:
-  ai-rss:
-    image: ghcr.io/you/ai-rss:latest
+  cheng-rss:
+    image: ghcr.io/you/cheng-rss:latest
     ports: ["3000:3000"]
     environment:
       TZ: Asia/Shanghai
@@ -439,7 +439,7 @@ services:
     volumes: ["./data:/app/data"]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/app/ai-rss", "doctor", "--quiet"]
+      test: ["CMD", "/app/cheng-rss", "doctor", "--quiet"]
       interval: 60s
 ```
 
@@ -453,7 +453,7 @@ services:
 docker buildx build \
   --cache-from type=local,src=.cache/docker \
   --cache-to   type=local,dest=.cache/docker,mode=max \
-  --platform linux/amd64 -t ai-rss:local .
+  --platform linux/amd64 -t cheng-rss:local .
 ```
 
 `.cache/docker` 在 `.gitignore` 内。这样反复构建不重跑 `npm ci`，且缓存不落在 `~/.docker` 的共享区之外（基础镜像层仍由 Docker daemon 管理，这部分无法项目内化，属 Docker 本身机制）。
@@ -479,10 +479,10 @@ after=$(find "$HOME" -newer /tmp/marker 2>/dev/null | wc -l)
 [ "$before" = "$after" ] || echo "有文件写到 HOME 之外"
 
 # 2. 所有路径都在项目根内
-./ai-rss doctor --json | jq -r '.paths[]' | grep -v "^$PWD" && echo "存在项目外路径"
+./cheng-rss doctor --json | jq -r '.paths[]' | grep -v "^$PWD" && echo "存在项目外路径"
 
 # 3. 删除项目目录后无残留
-rm -rf /tmp/ai-rss-copy && cp -r . /tmp/ai-rss-copy && rm -rf /tmp/ai-rss-copy && echo OK
+rm -rf /tmp/cheng-rss-copy && cp -r . /tmp/cheng-rss-copy && rm -rf /tmp/cheng-rss-copy && echo OK
 ```
 
 ---
@@ -1009,7 +1009,7 @@ function claimBatch(n: number) {
 }
 ```
 
-单进程内 `setInterval(50ms)` 轮询，按 kind 分并发：fetch 5 / extract 4 / analyze 2 / embed 4 / cluster·digest 1。`WORKER_INLINE=false` 时以 `ai-rss worker` 独立进程启动。
+单进程内 `setInterval(50ms)` 轮询，按 kind 分并发：fetch 5 / extract 4 / analyze 2 / embed 4 / cluster·digest 1。`WORKER_INLINE=false` 时以 `cheng-rss worker` 独立进程启动。
 
 ### 7.3 检索
 
@@ -2097,7 +2097,7 @@ flex 项且带 `content-box` 宽度约束（`width: 80ch` + `max-width: calc(100
 ```ts
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-const server = new McpServer({ name: "ai-rss", version: "1.0.0" });
+const server = new McpServer({ name: "cheng-rss", version: "1.0.0" });
 
 server.tool("search_entries", { query: z.string(), since: z.string().optional(), limit: z.number().default(10) },
   async ({ query, since, limit }) => ({ content: [{ type: "text", text: await searchEntries(query, since, limit) }] }));
@@ -2107,7 +2107,7 @@ server.tool("search_entries", { query: z.string(), since: z.string().optional(),
 
 | 传输 | 用途 | 配置 |
 |---|---|---|
-| **stdio** | Claude Desktop / Cursor 本地接入 | `command: "./ai-rss", args: ["mcp"]` |
+| **stdio** | Claude Desktop / Cursor 本地接入 | `command: "./cheng-rss", args: ["mcp"]` |
 | **HTTP (Streamable)** | 远程接入、多客户端 | 挂在主服务 `/mcp`，Bearer token |
 
 ### 12.3 工具设计原则
@@ -2213,11 +2213,11 @@ db.exec(`VACUUM INTO '${backupPath}'`);
 
 ```bash
 # 旧机器导出
-./ai-rss export --out ./export-20261023.tar.zst
+./cheng-rss export --out ./export-20261023.tar.zst
 #  含 app.db（已 VACUUM）+ files/ + manifest.json（版本、schema 版本、条目数）
 
 # 新机器导入（任意部署方式）
-./ai-rss import ./export-20261023.tar.zst
+./cheng-rss import ./export-20261023.tar.zst
 #  校验 schema 版本 → 必要时迁移 → 恢复 files → 重建索引
 ```
 
@@ -2226,9 +2226,9 @@ db.exec(`VACUUM INTO '${backupPath}'`);
 ### 13.5 内容导出
 
 ```bash
-./ai-rss export --format markdown   # 每人一个 .md + 图片目录 + index.json
-./ai-rss export --format jsonl
-./ai-rss export --format opml       # 仅订阅源
+./cheng-rss export --format markdown   # 每人一个 .md + 图片目录 + index.json
+./cheng-rss export --format jsonl
+./cheng-rss export --format opml       # 仅订阅源
 ```
 
 ### 13.6 doctor 检查项
@@ -3978,7 +3978,7 @@ permissions:
 
 env:
   # 与 bootstrap 的默认值保持同一处来源，改版本只改这里和 scripts/lib
-  AI_RSS_NODE_VERSION: v24.13.0
+  CHENG_RSS_NODE_VERSION: v24.13.0
 
 jobs:
   build:
@@ -4028,7 +4028,7 @@ jobs:
         shell: bash
         run: |
           # 版本号来自 job 级 env，不依赖 runner 上装了什么
-          VER="${{ env.AI_RSS_NODE_VERSION }}"
+          VER="${{ env.CHENG_RSS_NODE_VERSION }}"
           case "${{ matrix.node_os }}" in
             win)  PKG="node-$VER-win-x64.zip";          BIN="node.exe" ;;
             *)    PKG="node-$VER-linux-x64.tar.xz";     BIN="node" ;;
@@ -4048,20 +4048,20 @@ jobs:
           .toolchain/node/bin/node scripts/build-sea.mjs \
             --main dist/server.js \
             --executable "${{ steps.nodebin.outputs.bin }}" \
-            --out dist/ai-rss-${{ matrix.target }}
+            --out dist/cheng-rss-${{ matrix.target }}
       - name: 冒烟测试（linux）
         if: matrix.target == 'linux-x64'
         run: |
-          chmod +x dist/ai-rss-linux-x64
-          ./dist/ai-rss-linux-x64 version
-          ./dist/ai-rss-linux-x64 migrate --data .tmp/t
-          ./dist/ai-rss-linux-x64 serve --data .tmp/t --port 3111 &
+          chmod +x dist/cheng-rss-linux-x64
+          ./dist/cheng-rss-linux-x64 version
+          ./dist/cheng-rss-linux-x64 migrate --data .tmp/t
+          ./dist/cheng-rss-linux-x64 serve --data .tmp/t --port 3111 &
           sleep 3
           curl -fsS localhost:3111/api/health
           curl -fsS localhost:3111/ | grep -q 'id="root"'   # 静态资源内嵌校验
-          ./dist/ai-rss-linux-x64 doctor --data .tmp/t
+          ./dist/cheng-rss-linux-x64 doctor --data .tmp/t
       - uses: actions/upload-artifact@v4
-        with: { name: bin-${{ matrix.target }}, path: "dist/ai-rss-${{ matrix.target }}*" }
+        with: { name: bin-${{ matrix.target }}, path: "dist/cheng-rss-${{ matrix.target }}*" }
 
   docker:
     needs: [build, binaries]
@@ -4115,13 +4115,13 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=build /app/dist/ai-rss-linux-x64 /app/ai-rss
+COPY --from=build /app/dist/cheng-rss-linux-x64 /app/cheng-rss
 ENV DATA_DIR=/app/data PORT=3000
 VOLUME ["/app/data"]
 EXPOSE 3000
 HEALTHCHECK --interval=60s --timeout=5s --start-period=20s \
-  CMD ["/app/ai-rss", "doctor", "--quiet"]
-ENTRYPOINT ["/app/ai-rss"]
+  CMD ["/app/cheng-rss", "doctor", "--quiet"]
+ENTRYPOINT ["/app/cheng-rss"]
 CMD ["serve"]
 ```
 
@@ -4306,7 +4306,7 @@ POST   /export  POST /import
 
 ### 19.1 验证机制的基准
 
-每一步配一个 `verify` 脚本（`scripts/verify/<step>.mjs`），也可用 `ai-rss verify <step>` 调起。它**只做断言、不做修复**，输出：
+每一步配一个 `verify` 脚本（`scripts/verify/<step>.mjs`），也可用 `cheng-rss verify <step>` 调起。它**只做断言、不做修复**，输出：
 
 ```
 PASS  m0-01-toolchain   4 项断言
@@ -4911,7 +4911,7 @@ Docker 镜像 ~80MB、`data/` 预留 20GB、源码目录 ~400MB —— 三者互
 [✓] Dockerfile 多阶段（debian:bookworm-slim runtime，非 root）
 [✓] scripts/verify/m0-08-deploy.mjs
 [✓] scripts/verify/docker-path.mjs     # Dockerfile 逐条本地验证
-[✓] ai-rss doctor 输出完整自检
+[✓] cheng-rss doctor 输出完整自检
 [ ] /api/page/save + /api/page/pageOperateResult（兼容层 A 起点，留给 M7）
 ```
 
@@ -4923,7 +4923,7 @@ Docker 镜像 ~80MB、`data/` 预留 20GB、源码目录 ~400MB —— 三者互
    需要 banner 注入 shim 或改用 `__dirname`。
 2. **跨平台产出必须有目标平台的 node 作为注入底本**。
    `build-sea.mjs` 默认用 `process.execPath`，从 Windows 造 linux 产物
-   时会产出一个跑不起来的文件。已加 `--target` + `AI_RSS_SEA_BASE`：
+   时会产出一个跑不起来的文件。已加 `--target` + `CHENG_RSS_SEA_BASE`：
    缺底本时**明确拒绝**而不是静默产出错误产物。
 
 Docker 的验证边界：Dockerfile 结构、四条构建命令、linux ELF 产出
@@ -5099,6 +5099,7 @@ v2.0  需求范围变化（增删 §1.1 任一行）
 | v1.19 | 2026-10-29 | **规格层修订，非需求变更**：§8.6 新增（为何不引 openai SDK、结构化输出的四级降级链、三类重试各自的边界、失败分类表、计费口径与「未知模型按 default 计」的理由）；§19.4 的 2.1/2.2 判据按落地结果扩写 | ✅ M2 按 §19.4 顺序执行 |
 | v2.1 | 2026-11-03 | **需求层新增（走 A.1.1）+ 界面重设计**：§1.1 加第 28 行「分组与源的顺序可调」；新增 §15.28（两个入口、500ms/8px 的长按判定与它的来历、四个阶段的悬浮反馈、落点线与整行高亮为何不能合并、toast 只在跨组时出现、每次落位即提交、两个接口的整表提交语义与"未列出的顺延在后"、迁移 0007 的 `feeds.sort`、五个必须同步 `sort` 的写路径、四个排序键必须前后端一致、21 条边界条件、实现时踩的两个坑、三个自主决定）；**§15.26 的排序行由"固定排在所有分组之后"改为"排在最前"**（需求方本轮明确要求，属于推翻旧结论）；§19.2 加第 28 行、§19.3 加 1.27（55 条断言）、§19.7 加一行、文件头与 §19.10 的脚本数与断言数从 52/2088 更新为 53/2152。**并修 `m1-15-dedupe` 的日期腐化**：夹具写死 `pubDate` 为 Oct 2026 + 20~28 日，向量判重只看近 14 天，日期走到 11 月 3 日时原件正好掉出候选窗 51 分钟，三条断言开始红 —— 该失败在任何历史提交上都可复现，不是任何一次改动的责任，改为相对当前时间生成 | ✅ 需求方原话「我希望可以在分组栏长按，去调整分组顺序等」，追加四条「未分组源行也要参与排序和进入、拖出分组」「进入和脱出分组需要有提示」「长按可以拖动之后需要有特效提示，例如悬浮或高亮等，按照常规做法来」「配置功能中添加手动调整的方式，如上下箭头等，不用长按功能」；并就两处实现选择明确答复「保持两层：分组内排源、分组间排序」与「分组和组内源都能用箭头调」，随后改口「未分组放在最前面」 |
 | v2.2 | 2026-11-04 | **缺陷修复 + 规格层新增（非需求变更，§1.1 不动）**：**① 简报主链四个缺陷**（PLAN §9.6）：`loadMembers` 查不存在的 `e.content_text`/`e.feed_content_text`（正文其实在 `entry_contents.html` 的 gzip BLOB 里）→ 有内容时必然抛异常；`saveDigest` 的 INSERT 漏写 `day_key` → 恒 NULL，调度器每分钟重跑全套模型调用、UI 永远 `pending`、`uq_digest_day` 对 NULL 失效导致同一天多份；`runDigest` 的「不抛异常」契约没兑现（异常发生在 `recordAttempt` 之前 → 退避机制完全不存在，线上 17 行 attempt 全是「没配 key」，跑主链的那些次一行都没落）；新增迁移 0008 把历史 NULL 按本地日回填。**新增 `m3-06-digest-chain`（25 条）** —— 既有 3.1~3.5 的断言全是纯函数或"在调模型之前就返回"的路径，主链上一次都没被跑过，这是验收的覆盖面缺口而不是断言写少了。**② AI 配置页分层折叠**（§15.29，需求方原话「AI配置界面太繁琐」）：四张卡全展开约 1400px、6 输入框 8 按钮，在 900px 弹窗里滚三屏；按访问频率分四层（概览常显 / Key+预算常显 / 模型名与地址收起 / 提示词收起），用原生 `<details>`。**新增 `m2-08-ai-settings`（19 条）**。**③ 数据清洗与省 token 方案**（§9.7，需求方要求"列入之后的修改计划"，**本节是计划未实现**）：实测单篇分析平均输入 1195 / 输出 976 tokens、379 次调用全部失败白烧 701,448 tokens；列 P1~P6 六项措施与各自的验收判据。**④ 文档数字漂移**：1.27 的断言数 55 → 57（v2.1 当时写的是修前的数），脚本数与断言总数 53/2152 → 55/2030（实测），README 验收表补 `m0-02` 13→15、`m1-13` 50→52、`m0-10` 31→39 三处旧值并新增 m2-08 / m3-06 两行 | ✅ 需求方原话「简报功能异常、AI配置界面太繁琐；AI简报的token消耗太多，将数据清洗和节省token的方案列入之后的修改计划」，并明确「接下来的计划先不推进，完善当前的任务。修改文档、完善代码」 |
+| v2.3 | 2026-11-04 | **项目改名为 cheng-rss**（仓库、包名、二进制、docker 服务、cookie、localStorage、环境变量前缀、User-Agent、OPML 导出文件名），**不做向后兼容**：`ai-rss` → `cheng-rss`（247 处 / 71 文件）、`AI_RSS_*` → `CHENG_RSS_*`（70 处）、`ai_rss_sid` → `cheng_rss_sid`（22 文件）、`ai-rss.reader-prefs.v1` →`cheng-rss.reader-prefs.v1`、二进制 `ai-rss-<platform>` → `cheng-rss-<platform>`。**数据库文件名与 `secrets.json` 刻意不改**（仍是 `data/app.db`），所以升级不需要迁移数据、不用重填 AI key —— 改名的影响被限制在"标识"层面，不碰"状态"。代价写进 README 的「从 ai-rss 升级」一节：已登录会话掉线、阅读偏好回默认、环境变量失效、启动脚本路径失效、docker compose 会当成新服务。**为什么不做兼容读取**：需求方明确要求彻底改名。兼容层要在 cookie 上读两个名字、localStorage 上查两个 key、数据库上探两个文件名、环境变量上读两个前缀 —— 四处兼容代码会长期存在，而换来的是"旧实例升级时少点两下"。在只有单一部署者的当前阶段，一次性断掉更干净。**可推翻条件**：一旦有外部用户报升级问题，就按 README 那五条做一次性迁移脚本。 | ✅ 需求方原话「各类文件名和项目名，都改成cheng-rss」；并就兼容性明确答复「彻底改名，不做兼容」 |
 | v1.20 | 2026-10-29 | **规格层修订，非需求变更**：§8.7 新增（日门降级/月门停止两道门、本地日历边界、`0`=不限额、闸门问在第一个请求之前、embedding 不降级、AI 配置三层合并与「空值不打回默认」的坑、闸门做成注入回调 CallGuard、`ai_usage` 记的是调用不是条目）；§19.7 反查表第 3 行补 2.4/2.5；§19.4 补状态与断言数、明确黄金测试集需真人做 | ✅ 2.3~2.5 落地时确定 |
 | v1.21 | 2026-10-29 | **规格层修订，非需求变更**：§9.4 新增（聚类与去重是两个问题阈值必然不同、hash 与语义向量两套阈值、为什么不用单链接与 k-means、向量来源整体切换、heat 是乘不是加、单来源 conflicts 强制清空、conflicts 来源必须真实且至少两方、引用安全为何强于事后校验、抹裸 URL、简报重跑 id 不变、聚类整窗重算）；§19.5 补状态与 3.1~3.3 断言数、明确误聚率需真人判 | ✅ 3.1~3.3 落地时确定 |
 | v1.24 | 2026-10-30 | **规格层修订 + 补一步**：① **补 3.5 简报页**（§19.5b 之后新增）—— 3.1~3.4 的产物完整，但**前端没有简报页**，侧栏还标着「待接入」，等于"生成了没人看得见"。这一步不新增需求，只是把 §15.4 已批准的设计落地。修掉的既有断点：`renderCitations` 在落库前已把 `{{cite:cl_x}}` 换成 `[1]`，而 `GET /digests/:id` 一直用正则反查 —— 永匹配不到，clusters 恒空、脚注点了没反应。新增 0005 迁移存 `cites`/`worth_reading` 快照列。② §15.7 移动端 tab **5 → 6**（简报成为一等入口），并说明 390px 下 6 格每格约 65px 仍过 44px 下限，真正的约束是高度不是宽度 | ✅ 3.5 落地时确定 |

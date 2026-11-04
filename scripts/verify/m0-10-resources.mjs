@@ -26,8 +26,8 @@ import { killTree, onExit } from '../lib/proc.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`);
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`);
 
 group('0.10 资源与性能预算');
 
@@ -67,7 +67,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 }
 
 // ── 起一个空库的服务（没有源、没有条目 = 真正的空闲）────────
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m010-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m010-'));
 const dataDir = join(tmp, 'data');
 const port = 48600 + Math.floor(Math.random() * 300);
 const origin = `http://127.0.0.1:${port}`;
@@ -410,7 +410,7 @@ check(`④ 第二个 60s 的日志量不比第一个多（${window2Lines.length}
   check('⑥ 指向的目录真的被建出来了', () => ok(exists2(dir), dir));
 
   // 用真实调用验证：改完之后 mkdtempSync 落在哪儿
-  const probe = mkdtemp2(join(tmpdir2(), 'ai-rss-m010tmp-'));
+  const probe = mkdtemp2(join(tmpdir2(), 'cheng-rss-m010tmp-'));
   check('⑥ 改完之后 mkdtempSync 建在项目内', () => {
     const p = probe.replace(/\\/g, '/');
     return ok(p.startsWith(dir.replace(/\\/g, '/') + '/'), p);

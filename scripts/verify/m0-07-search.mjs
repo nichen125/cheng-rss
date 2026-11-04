@@ -23,7 +23,7 @@ if (!existsSync(nodeBin)) {
   process.exit(1);
 }
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m007-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m007-'));
 const dataDir = join(tmp, 'data');
 
 const probe = String.raw`
@@ -33,8 +33,8 @@ import { migrate } from './src/server/db/migrate.ts';
 import { bigrams, toIndexText, toMatchQuery } from './src/server/search/bigram.ts';
 import { indexEntry, searchKeyword, rebuildIndex, removeIndex } from './src/server/search/index.ts';
 
-const dataDir = process.env.AI_RSS_DATA_DIR;
-const mode = process.env.AI_RSS_MODE;
+const dataDir = process.env.CHENG_RSS_DATA_DIR;
+const mode = process.env.CHENG_RSS_MODE;
 mkdirSync(dataDir, { recursive: true });
 const h = openDb({ dataDir });
 migrate(h.db);
@@ -93,7 +93,7 @@ if (mode === 'perf') {
   let seed = 12345;
   const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed; };
 
-  const N = Number(process.env.AI_RSS_N || 100000);
+  const N = Number(process.env.CHENG_RSS_N || 100000);
   const ins = h.db.prepare(
     'INSERT INTO entries (id,user_id,guid,url,url_norm,title,excerpt,published_at,fetched_at,is_read,last_read_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
   );
@@ -175,7 +175,7 @@ const child = spawn(nodeBin, [
   '--experimental-strip-types', '--no-warnings', '--input-type=module', '-e', probe,
 ], {
   cwd: root,
-  env: { ...process.env, AI_RSS_DATA_DIR: dataDir, AI_RSS_MODE: 'units' },
+  env: { ...process.env, CHENG_RSS_DATA_DIR: dataDir, CHENG_RSS_MODE: 'units' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
@@ -210,13 +210,13 @@ if (units) {
 }
 
 // ── 性能红线 ────────────────────────────────────────────────
-const perfTmp = mkdtempSync(join(tmpdir(), 'ai-rss-m007perf-'));
+const perfTmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m007perf-'));
 const perfDir = join(perfTmp, 'data');
 const perfChild = spawn(nodeBin, [
   '--experimental-strip-types', '--no-warnings', '--input-type=module', '-e', probe,
 ], {
   cwd: root,
-  env: { ...process.env, AI_RSS_DATA_DIR: perfDir, AI_RSS_MODE: 'perf', AI_RSS_N: '100000' },
+  env: { ...process.env, CHENG_RSS_DATA_DIR: perfDir, CHENG_RSS_MODE: 'perf', CHENG_RSS_N: '100000' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 

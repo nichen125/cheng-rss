@@ -33,7 +33,7 @@ const DEFAULTS = {
 };
 
 export function resolveDataDir(explicit?: string): string {
-  const raw = explicit ?? process.env.AI_RSS_DATA ?? process.env.DATA_DIR ?? DEFAULTS.dataDir;
+  const raw = explicit ?? process.env.CHENG_RSS_DATA ?? process.env.DATA_DIR ?? DEFAULTS.dataDir;
   return resolve(raw);
 }
 

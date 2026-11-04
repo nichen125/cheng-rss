@@ -52,7 +52,7 @@ export function openDb(opts: OpenOptions): DbHandle {
   if (!existsSync(opts.dataDir)) {
     throw new Error(
       `数据目录不存在: ${opts.dataDir}\n` +
-      `可先运行: ai-rss migrate --data ${opts.dataDir}`,
+      `可先运行: cheng-rss migrate --data ${opts.dataDir}`,
     );
   }
 

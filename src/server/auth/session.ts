@@ -9,7 +9,7 @@ import type { DatabaseSync } from 'node:sqlite';
 //   2. /api/auth/loginUserInfo 未登录时返回 200 + null 语义，不能返回 401。
 //      插件对 401 的处理是直接报错，不会引导登录。
 
-export const SESSION_COOKIE = 'ai_rss_sid';
+export const SESSION_COOKIE = 'cheng_rss_sid';
 
 export interface SessionRecord {
   id: string;

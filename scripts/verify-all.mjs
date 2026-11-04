@@ -56,12 +56,12 @@ if (skipDocker) files = files.filter((f) => !f.startsWith('docker-'));
 // 离线环境更会卡死。自动下载会让"跑一次验收"变得不可用。
 //
 // 策略：
-//   · 已有 .tmp/linuxnode 或 AI_RSS_TEST_LINUX_NODE → 跑产物验证
+//   · 已有 .tmp/linuxnode 或 CHENG_RSS_TEST_LINUX_NODE → 跑产物验证
 //   · 没有 → docker-path 报 FAIL（"未执行"不等于"通过"），
 //     除非加 --allow-skip-docker-artifact 明确接受
 //   · 想完整验证：node scripts/fetch-linux-node.mjs 一次，之后走缓存
 const LINUX_NODE = join(root, '.tmp/linuxnode/node-v24.13.0-linux-x64/bin/node');
-const linuxNode = process.env.AI_RSS_TEST_LINUX_NODE
+const linuxNode = process.env.CHENG_RSS_TEST_LINUX_NODE
   || (existsSync(LINUX_NODE) ? LINUX_NODE : null);
 
 const allowSkipArtifact = args.includes('--allow-skip-docker-artifact');
@@ -115,7 +115,7 @@ for (const f of files) {
         stdio: attempts === 1 ? 'inherit' : 'pipe',
         timeout: SCRIPT_TIMEOUT_MS,
         killSignal: 'SIGKILL',
-        env: { ...process.env, ...(linuxNode ? { AI_RSS_TEST_LINUX_NODE: linuxNode } : {}) },
+        env: { ...process.env, ...(linuxNode ? { CHENG_RSS_TEST_LINUX_NODE: linuxNode } : {}) },
       });
       ok = true;
     } catch (e) {

@@ -18,7 +18,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const VER = process.env.AI_RSS_NODE_VERSION ?? 'v24.13.0';
+const VER = process.env.CHENG_RSS_NODE_VERSION ?? 'v24.13.0';
 const dir = join(root, '.tmp/linuxnode');
 const tarball = join(dir, `node-${VER}-linux-x64.tar.xz`);
 const target = join(dir, `node-${VER}-linux-x64/bin/node`);

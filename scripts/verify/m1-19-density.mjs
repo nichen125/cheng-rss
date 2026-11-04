@@ -36,8 +36,8 @@ import { removeDir } from '../lib/tmp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 group('1.19 三栏宽度与密度');
@@ -57,7 +57,7 @@ const MIN_ROWS_1440 = 9;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-dens-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-dens-'));
 const dataDir = join(tmp, 'data');
 const port = 48000 + Math.floor(Math.random() * 900);
 const origin = `http://127.0.0.1:${port}`;
@@ -183,7 +183,7 @@ if (!browserPath) {
   process.exit(0);
 }
 
-const profile = mkdtempSync(join(tmpdir(), 'ai-rss-dens-prof-'));
+const profile = mkdtempSync(join(tmpdir(), 'cheng-rss-dens-prof-'));
 const cdpPort = 9900 + Math.floor(Math.random() * 80);
 const proc = spawn(browserPath, [
   '--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`,
@@ -247,7 +247,7 @@ await send('Page.enable');
 await send('Runtime.enable');
 await send('Network.enable');
 await send('Network.setCookie', {
-  name: 'ai_rss_sid', value: cookie.split('=')[1] ?? '',
+  name: 'cheng_rss_sid', value: cookie.split('=')[1] ?? '',
   domain: '127.0.0.1', path: '/',
 });
 

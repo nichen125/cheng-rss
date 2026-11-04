@@ -69,7 +69,7 @@ const OPTS = {
   schema: TOY, system: 's', user: 'u', model: 'strong-model', purpose: 'analyze', userId: 'u_b',
 };
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m205-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m205-'));
 const h = openDb({ dataDir: tmp });
 migrate(h.db);
 const DB = h.db;
@@ -341,10 +341,10 @@ if (!browser) {
 
   const ROOT = rs(dn(fu(import.meta.url)), '../..');
   const BIN = jn(ROOT, 'dist', process.platform === 'win32'
-    ? `ai-rss-${process.platform}-${process.arch}.exe`
-    : `ai-rss-${process.platform}-${process.arch}`);
+    ? `cheng-rss-${process.platform}-${process.arch}.exe`
+    : `cheng-rss-${process.platform}-${process.arch}`);
 
-  const dir = mkd(jn(td(), 'ai-rss-m205ui-'));
+  const dir = mkd(jn(td(), 'cheng-rss-m205ui-'));
   const dataDir = jn(dir, 'data');
   const port = 42800 + Math.floor(Math.random() * 500);
   const uiBase = `http://127.0.0.1:${port}`;

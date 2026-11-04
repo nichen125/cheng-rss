@@ -174,7 +174,7 @@ check('exact 就是原文切片（不是重新拼的）', () => {
 // ── ④ 落库 + 重新锚定 + orphaned 可见 ───────────────────────
 group('4.1 锚定 · 落库与重锚');
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m401-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m401-'));
 const h = openDb({ dataDir: tmp });
 migrate(h.db);
 const DB = h.db;

@@ -5,7 +5,7 @@
 # 设计约束（见 PLAN.md §4.3）：
 #   1. 所有路径相对项目根，脚本从任何目录调用都能工作
 #   2. 项目内 node 优先；系统 node 仅在 bootstrap 提示时提及
-#   3. 版本必须与 AI_RSS_NODE_VERSION 一致，否则报错退出
+#   3. 版本必须与 CHENG_RSS_NODE_VERSION 一致，否则报错退出
 
 set -eu
 
@@ -23,7 +23,7 @@ export PROJECT_ROOT TOOLCHAIN_LIB_DIR
 
 # ── 版本与路径约定 ──────────────────────────────────────────────
 DEFAULT_NODE_VERSION="v24.13.0"
-NODE_VERSION="${AI_RSS_NODE_VERSION:-$DEFAULT_NODE_VERSION}"
+NODE_VERSION="${CHENG_RSS_NODE_VERSION:-$DEFAULT_NODE_VERSION}"
 
 TOOLCHAIN_DIR="$PROJECT_ROOT/.toolchain"
 NODE_DIR="$TOOLCHAIN_DIR/node"

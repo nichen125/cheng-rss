@@ -43,7 +43,7 @@ export const THEMES: { key: ReaderTheme; label: string }[] = [
 
 export const DEFAULT_PREFS: ReaderPrefs = { fontSize: 16.5, width: 80, theme: 'system' };
 
-const KEY = 'ai-rss.reader-prefs.v1';
+const KEY = 'cheng-rss.reader-prefs.v1';
 
 /**
  * 读偏好。任何一项非法都回退到默认值 —— 而不是整份丢弃。

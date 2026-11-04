@@ -30,8 +30,8 @@ import { launchBrowser, connectCdp, findBrowser } from '../lib/cdp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`);
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -54,7 +54,7 @@ if (!findBrowser()) {
   process.exit(0);
 }
 
-const dir = mkdtempSync(join(tmpdir(), 'ai-rss-m208-'));
+const dir = mkdtempSync(join(tmpdir(), 'cheng-rss-m208-'));
 const dataDir = join(dir, 'data');
 const port = 43300 + Math.floor(Math.random() * 500);
 const uiBase = `http://127.0.0.1:${port}`;

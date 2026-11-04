@@ -31,8 +31,8 @@ import { removeDir } from '../lib/tmp.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 group('0.9 界面');
@@ -62,7 +62,7 @@ if (!existsSync(binPath)) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── 起服务：全新数据目录，灌入已知的 12 条 ────────────────────
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m009-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m009-'));
 const dataDir = join(tmp, 'data');
 const port = 36000 + Math.floor(Math.random() * 900);
 const base = `http://127.0.0.1:${port}`;
@@ -117,7 +117,7 @@ try {
 }
 
 // ── 起浏览器 ──────────────────────────────────────────────────
-const profile = mkdtempSync(join(tmpdir(), 'ai-rss-m009-prof-'));
+const profile = mkdtempSync(join(tmpdir(), 'cheng-rss-m009-prof-'));
 const cdpPort = 9300 + Math.floor(Math.random() * 500);
 const proc = spawn(browser, [
   '--headless=new',
@@ -196,7 +196,7 @@ await send('Emulation.setDeviceMetricsOverride', {
 
 // 注入 cookie（走真实登录 API 更贴近实际，但这里只验 UI，省一次跳转）
 await send('Network.setCookie', {
-  name: 'ai_rss_sid', value: cookie.split('=')[1] ?? '',
+  name: 'cheng_rss_sid', value: cookie.split('=')[1] ?? '',
   domain: '127.0.0.1', path: '/',
 });
 

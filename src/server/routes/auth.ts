@@ -23,7 +23,7 @@ export function authRoutes(ctx: AppContext): {
   const secureCookie = (): boolean => {
     // 只有明确走 https 时才加 Secure。自托管常见 http://nas:3000，
     // 加了会导致 cookie 不被保存，表现为"登录成功但立刻又未登录"。
-    return process.env.AI_RSS_HTTPS === '1';
+    return process.env.CHENG_RSS_HTTPS === '1';
   };
 
   // ══ 自有 API ═══════════════════════════════════════════════

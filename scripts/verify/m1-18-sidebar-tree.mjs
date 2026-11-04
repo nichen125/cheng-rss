@@ -37,8 +37,8 @@ import { removeDir } from '../lib/tmp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 group('1.18 侧栏分组树');
@@ -50,7 +50,7 @@ if (!existsSync(binPath)) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-tree-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-tree-'));
 const dataDir = join(tmp, 'data');
 const port = 47000 + Math.floor(Math.random() * 900);
 const origin = `http://127.0.0.1:${port}`;
@@ -202,7 +202,7 @@ if (!browser) {
   process.exit(0);
 }
 
-const profile = mkdtempSync(join(tmpdir(), 'ai-rss-tree-prof-'));
+const profile = mkdtempSync(join(tmpdir(), 'cheng-rss-tree-prof-'));
 const cdpPort = 9720 + Math.floor(Math.random() * 180);
 const proc = spawn(browser, [
   '--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`,
@@ -270,7 +270,7 @@ await send('Emulation.setEmulatedMedia', {
   features: [{ name: 'prefers-color-scheme', value: 'light' }],
 });
 await send('Network.setCookie', {
-  name: 'ai_rss_sid', value: cookie.split('=')[1] ?? '',
+  name: 'cheng_rss_sid', value: cookie.split('=')[1] ?? '',
   domain: '127.0.0.1', path: '/',
 });
 await send('Emulation.setDeviceMetricsOverride', {

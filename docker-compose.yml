@@ -1,8 +1,8 @@
 services:
-  ai-rss:
+  cheng-rss:
     build: .
-    image: ai-rss:local
-    container_name: ai-rss
+    image: cheng-rss:local
+    container_name: cheng-rss
     ports:
       - "3000:3000"
     environment:
@@ -19,7 +19,7 @@ services:
       - ./data:/app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/app/ai-rss", "doctor", "--quiet"]
+      test: ["CMD", "/app/cheng-rss", "doctor", "--quiet"]
       interval: 60s
       timeout: 10s
       start_period: 20s

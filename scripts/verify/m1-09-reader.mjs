@@ -22,8 +22,8 @@ import { removeDir } from '../lib/tmp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 group('1.9 阅读页交互');
@@ -34,7 +34,7 @@ if (!existsSync(binPath)) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-reader-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-reader-'));
 const dataDir = join(tmp, 'data');
 const port = 44000 + Math.floor(Math.random() * 900);
 const origin = `http://127.0.0.1:${port}`;
@@ -280,7 +280,7 @@ const browser = browserCandidates.find((p) => existsSync(p));
 if (!browser) {
   check('找到可用浏览器', () => ok(false, 'Edge / Chrome 都不在默认路径，跳过 UI 断言'));
 } else {
-  const profile = mkdtempSync(join(tmpdir(), 'ai-rss-rdprof-'));
+  const profile = mkdtempSync(join(tmpdir(), 'cheng-rss-rdprof-'));
   const cdpPort = 9800 + Math.floor(Math.random() * 200);
   const proc = spawn(browser, [
     '--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`,
@@ -551,7 +551,7 @@ if (!browser) {
 
       const reader = document.querySelector('.reader');
       const fs = reader ? getComputedStyle(reader).fontSize : null;
-      const stored = localStorage.getItem('ai-rss.reader-prefs.v1');
+      const stored = localStorage.getItem('cheng-rss.reader-prefs.v1');
       return { ok: true, fontSize: fs, stored };
     })()`);
     check('阅读设置面板能打开', () => ok(prefsFlow?.ok === true, JSON.stringify(prefsFlow)));
@@ -571,7 +571,7 @@ if (!browser) {
       const reader = document.querySelector('.reader');
       return {
         fontSize: reader ? getComputedStyle(reader).fontSize : null,
-        stored: localStorage.getItem('ai-rss.reader-prefs.v1'),
+        stored: localStorage.getItem('cheng-rss.reader-prefs.v1'),
       };
     })()`);
     check('刷新页面后字号保持 18px（偏好持久化生效）', () => ok(

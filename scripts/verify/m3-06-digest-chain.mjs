@@ -96,7 +96,7 @@ await new Promise((r) => srv.listen(0, '127.0.0.1', r));
 const AI_PORT = srv.address().port;
 
 // ── 库：两簇四篇 ───────────────────────────────────────────
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m3fix-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m3fix-'));
 const h = openDb({ dataDir: tmp });
 migrate(h.db);
 const db = h.db;
@@ -219,7 +219,7 @@ group('简报主链 · 有内容时');
 // ── ⑥ 无内容时的两条否决仍要有持久痕迹（回归 m3-04）───────
 group('简报主链 · 无内容时不变');
 {
-  const tmp2 = mkdtempSync(join(tmpdir(), 'ai-rss-m3fix2-'));
+  const tmp2 = mkdtempSync(join(tmpdir(), 'cheng-rss-m3fix2-'));
   const h2 = openDb({ dataDir: tmp2 });
   migrate(h2.db);
   h2.db.prepare('INSERT INTO users (id,email,name,role,created_at) VALUES (?,?,?,?,?)')
@@ -246,7 +246,7 @@ group('简报主链 · 无内容时不变');
 // 它接受 periodStart 与「哪天」两件事，必须都落库。
 group('saveDigest 契约');
 {
-  const tmp3 = mkdtempSync(join(tmpdir(), 'ai-rss-m3fix3-'));
+  const tmp3 = mkdtempSync(join(tmpdir(), 'cheng-rss-m3fix3-'));
   const h3 = openDb({ dataDir: tmp3 });
   migrate(h3.db);
   const d3 = h3.db;
@@ -306,7 +306,7 @@ group('saveDigest 契约');
 // `no such table`（比伪造列名更接近"库里数据坏了"这类真实故障）。
 group('runDigest 的异常契约');
 {
-  const tmp4 = mkdtempSync(join(tmpdir(), 'ai-rss-m3fix4-'));
+  const tmp4 = mkdtempSync(join(tmpdir(), 'cheng-rss-m3fix4-'));
   const h4 = openDb({ dataDir: tmp4 });
   migrate(h4.db);
   const d4 = h4.db;
@@ -365,7 +365,7 @@ group('runDigest 的异常契约');
 // → 再迁一次，等价于"用新二进制打开旧库"。
 group('0008 迁移 · 历史 day_key 回填');
 {
-  const tmp5 = mkdtempSync(join(tmpdir(), 'ai-rss-m3fix5-'));
+  const tmp5 = mkdtempSync(join(tmpdir(), 'cheng-rss-m3fix5-'));
   const h5 = openDb({ dataDir: tmp5 });
   migrate(h5.db);
   const d5 = h5.db;

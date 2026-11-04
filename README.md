@@ -75,7 +75,7 @@ AI_API_KEY=sk-xxx docker compose up -d
 ```bash
 # 从 Releases 下载对应平台，或自行构建：
 ./scripts/build.sh --sea
-./dist/ai-rss-linux-x64 serve --data ./data --port 3000
+./dist/cheng-rss-linux-x64 serve --data ./data --port 3000
 ```
 
 前端资源内嵌在二进制里，**不需要旁边的 `dist/` 目录**。复制一个文件即可运行。
@@ -251,6 +251,22 @@ npm run typecheck:all       # 类型检查
 
 v2.2 修掉的一个值得记住的缺陷：**简报功能在 55 个脚本全绿时其实从未成功生成过一次**
 —— 四个缺陷叠在一起，而每个单看都对。根因与修复见 [PLAN.md §9.6](PLAN.md)。
+
+## 从 ai-rss 升级
+
+项目原名 `ai-rss`，v2.3 起全部改名为 `cheng-rss`。**改名不做向后兼容** ——
+如果你已经在用旧版本，升级时这四处会失效，需要手动处理：
+
+| 变化 | 影响 | 怎么修 |
+|---|---|---|
+| 环境变量 `AI_RSS_*` → `CHENG_RSS_*` | 部署脚本里的变量全部失效 | 逐项改名。最常设的是 `AI_RSS_DATA` → `CHENG_RSS_DATA` |
+| Cookie 名 `ai_rss_sid` → `cheng_rss_sid` | **所有已登录会话掉线** | 重新登录一次。这是改 cookie 名必然的代价 |
+| `localStorage` key `ai-rss.reader-prefs.v1` → `cheng-rss.reader-prefs.v1` | 阅读偏好（字号/宽度/主题）回到默认 | 在阅读页重设一次，或手动改浏览器 localStorage 的 key |
+| 二进制名 `ai-rss-<platform>` → `cheng-rss-<platform>` | 启动脚本路径失效 | 改启动脚本里的路径 |
+| Docker 服务名 / 容器名 / 镜像标签 | `docker compose` 会当成新服务 | 先 `docker compose down`，再改 `docker-compose.yml` 里的服务名，`up -d` |
+
+**数据库文件名没变**（仍是 `data/app.db`），所以数据、订阅、历史、高亮都还在，
+不需要迁移。`data/secrets.json` 也没变，AI key 不用重填。
 
 ## 许可
 

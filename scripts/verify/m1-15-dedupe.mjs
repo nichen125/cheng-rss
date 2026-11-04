@@ -29,8 +29,8 @@ import { isSameEvent } from '../../src/server/dedupe/index.ts';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -366,7 +366,7 @@ feeds.set('two', makeRss('源二', [
   { guid: 'c-1', title: 'SQLite WAL 模式并发', path: '/article/c1', html: longBody(TOPIC_C) },
 ]));
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m115-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m115-'));
 const dataDir = join(tmp, 'data');
 const port = 41000 + Math.floor(Math.random() * 900);
 const base = `http://127.0.0.1:${port}`;

@@ -28,9 +28,9 @@ coverage/
 
 # 产物二进制
 *.sbit
-ai-rss-linux-x64
-ai-rss-windows-x64.exe
-ai-rss-darwin-*
+cheng-rss-linux-x64
+cheng-rss-windows-x64.exe
+cheng-rss-darwin-*
 
 # 编辑器与系统
 .vscode/

@@ -29,8 +29,8 @@ import { launchBrowser } from '../lib/cdp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 group('1.23 分组 / 单源未读清零');
@@ -41,7 +41,7 @@ if (!existsSync(binPath)) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-markall-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-markall-'));
 const dataDir = join(tmp, 'data');
 const port = 51000 + Math.floor(Math.random() * 900);
 const origin = `http://127.0.0.1:${port}`;
@@ -268,7 +268,7 @@ if (!browserPath) {
 // Chrome 会**静默退出**，脚本报「CDP 没起来」，而重跑一次又好了。
 // 全量跑 47 个脚本时这种"1% 概率"变成"几乎每次总有一个红" ——
 // 本机实测在 m1-23 上出现过，重试机制掩盖了它一次。
-const profile = mkdtempSync(join(tmpdir(), 'ai-rss-markall-prof-'));
+const profile = mkdtempSync(join(tmpdir(), 'cheng-rss-markall-prof-'));
 const launched = await launchBrowser({ profile, width: 1440, height: 950 });
 const proc = launched.proc;
 
@@ -319,7 +319,7 @@ const ev = async (expr) => {
 await send('Page.enable');
 await send('Runtime.enable');
 await send('Network.setCookie', {
-  name: 'ai_rss_sid', value: cookie.split('=')[1] ?? '',
+  name: 'cheng_rss_sid', value: cookie.split('=')[1] ?? '',
   domain: '127.0.0.1', path: '/',
 });
 await send('Emulation.setDeviceMetricsOverride', {

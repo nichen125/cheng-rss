@@ -28,8 +28,8 @@ import { killTree } from '../lib/proc.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 if (!existsSync(binPath)) {
@@ -156,7 +156,7 @@ await new Promise((r) => feedSrv.listen(0, '127.0.0.1', r));
 feedPort = feedSrv.address().port;
 
 // ── 起服务 ─────────────────────────────────────────────────
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m202-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m202-'));
 const dataDir = join(tmp, 'data');
 const port = 40000 + Math.floor(Math.random() * 800);
 const base = `http://127.0.0.1:${port}`;

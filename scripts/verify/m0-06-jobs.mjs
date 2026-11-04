@@ -23,7 +23,7 @@ if (!existsSync(nodeBin)) {
   process.exit(1);
 }
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m006-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m006-'));
 const dataDir = join(tmp, 'data');
 
 // 在项目内跑一段探测代码，复用真实模块
@@ -36,8 +36,8 @@ import { enqueue, claimBatch, completeJob, failJob, recoverStaleJobs, queueStats
 import { JobRunner } from './src/server/jobs/runner.ts';
 import { buildHandlers } from './src/server/jobs/handlers.ts';
 
-const dataDir = process.env.AI_RSS_DATA_DIR;
-const mode = process.env.AI_RSS_MODE;
+const dataDir = process.env.CHENG_RSS_DATA_DIR;
+const mode = process.env.CHENG_RSS_MODE;
 mkdirSync(dataDir, { recursive: true });
 const h = openDb({ dataDir });
 migrate(h.db);
@@ -108,7 +108,7 @@ if (mode === 'basics') {
   process.exit(0);
 } else if (mode === 'claim-only') {
   const { claimBatch } = await import('./src/server/jobs/queue.ts');
-  const ids = claimBatch(h.db, process.env.AI_RSS_TAG ?? 'sub', 20).map((j) => j.id);
+  const ids = claimBatch(h.db, process.env.CHENG_RSS_TAG ?? 'sub', 20).map((j) => j.id);
   h.close();
   console.log(JSON.stringify({ ids }));
 } else if (mode === 'stale') {
@@ -152,7 +152,7 @@ function runProbe(mode, extraEnv = {}) {
       '--experimental-strip-types', '--no-warnings', '--input-type=module', '-e', probe,
     ], {
       cwd: root,
-      env: { ...process.env, AI_RSS_DATA_DIR: dataDir, AI_RSS_MODE: mode, ...extraEnv },
+      env: { ...process.env, CHENG_RSS_DATA_DIR: dataDir, CHENG_RSS_MODE: mode, ...extraEnv },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '', err = '';
@@ -211,8 +211,8 @@ if (basics) {
 // 注意：两个子进程不一定都能抢到 —— 先启动的可能一次拿完。
 // 因此断言的核心是"交集为 0"，而不是"两边都有"。
 const claimResults = await Promise.all([
-  runProbe('claim-only', { AI_RSS_TAG: 'w-A' }),
-  runProbe('claim-only', { AI_RSS_TAG: 'w-B' }),
+  runProbe('claim-only', { CHENG_RSS_TAG: 'w-A' }),
+  runProbe('claim-only', { CHENG_RSS_TAG: 'w-B' }),
 ]);
 const aIds = claimResults[0]?.ids ?? [];
 const bIds = claimResults[1]?.ids ?? [];

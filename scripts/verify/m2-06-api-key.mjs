@@ -29,8 +29,8 @@ import { killTree, onExit } from '../lib/proc.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`);
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`);
 
 group('2.6 API key 可在界面填写');
 
@@ -101,7 +101,7 @@ const aiCtl = (b = {}) => fetch(`http://127.0.0.1:${AI_PORT}/_ctl`, { method: 'P
 const aiState = async () => (await fetch(`http://127.0.0.1:${AI_PORT}/_state`)).json();
 
 // ── 起服务（**先不设环境变量 key**，验证"完全没有 key"那条路径）──
-const dir = mkdtempSync(join(tmpdir(), 'ai-rss-m206-'));
+const dir = mkdtempSync(join(tmpdir(), 'cheng-rss-m206-'));
 const dataDir = join(dir, 'data');
 const port = 47400 + Math.floor(Math.random() * 400);
 const base = `http://127.0.0.1:${port}`;

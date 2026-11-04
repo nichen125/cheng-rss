@@ -138,7 +138,7 @@ const { packText } = await import('../../src/server/db/text-blob.ts');
 const { runAnalyze } = await import('../../src/server/ai/analyze.ts');
 const { ensureDefaultCategories, listCategories } = await import('../../src/server/ai/taxonomy.ts');
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m203-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m203-'));
 const h = openDb({ dataDir: tmp });
 migrate(h.db);
 const DB = h.db;

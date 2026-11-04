@@ -26,8 +26,8 @@ import { findBrowser, launchBrowser, connectCdp } from '../lib/cdp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`);
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`);
 
 group('1.26 未分组源平铺');
 
@@ -37,7 +37,7 @@ if (!existsSync(BIN)) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-loose-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-loose-'));
 const dataDir = join(tmp, 'data');
 const port = 48200 + Math.floor(Math.random() * 300);
 const origin = `http://127.0.0.1:${port}`;
@@ -146,7 +146,7 @@ if (!browser) {
   process.exit(0);
 }
 
-const b1 = await launchBrowser({ profilePrefix: 'ai-rss-loose-prof-', width: 1440, height: 960 });
+const b1 = await launchBrowser({ profilePrefix: 'cheng-rss-loose-prof-', width: 1440, height: 960 });
 onExit(b1.close);
 if (!b1.wsUrl) {
   check('浏览器调试端口可用', () => ok(false, 'CDP 没起来'));
@@ -165,7 +165,7 @@ await send('Emulation.setEmulatedMedia', {
   features: [{ name: 'prefers-color-scheme', value: 'light' }],
 });
 await send('Network.setCookie', {
-  name: 'ai_rss_sid', value: cookie.split('=')[1] ?? '',
+  name: 'cheng_rss_sid', value: cookie.split('=')[1] ?? '',
   domain: '127.0.0.1', path: '/',
 });
 await send('Emulation.setDeviceMetricsOverride', {

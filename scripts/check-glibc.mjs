@@ -13,7 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const target = process.argv[2] ?? join(root, 'dist/ai-rss-linux-x64');
+const target = process.argv[2] ?? join(root, 'dist/cheng-rss-linux-x64');
 
 if (!existsSync(target)) {
   console.error(`找不到 ${target}`);

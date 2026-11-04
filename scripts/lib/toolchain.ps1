@@ -10,7 +10,7 @@ $env:PROJECT_ROOT = $ProjectRoot
 
 # ── 版本与路径约定 ──────────────────────────────────────────────
 $DefaultNodeVersion = 'v24.13.0'
-$NodeVersion = if ($env:AI_RSS_NODE_VERSION) { $env:AI_RSS_NODE_VERSION } else { $DefaultNodeVersion }
+$NodeVersion = if ($env:CHENG_RSS_NODE_VERSION) { $env:CHENG_RSS_NODE_VERSION } else { $DefaultNodeVersion }
 
 $ToolchainDir = Join-Path $ProjectRoot '.toolchain'
 $NodeDir = Join-Path $ToolchainDir 'node'

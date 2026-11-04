@@ -169,7 +169,7 @@ v2.2 之前文档里写的 55/2152 与实际 57/1986 对不上，就是这么来
 
 ```bash
 # 环境自检
-./ai-rss doctor --json
+./cheng-rss doctor --json
 
 # 看一个用户的任务队列
 sqlite3 data/app.db "SELECT kind, status, COUNT(*) FROM jobs GROUP BY kind, status"

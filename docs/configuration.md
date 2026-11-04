@@ -161,10 +161,10 @@ AI_BASE_URL=https://your-provider.com/v1
 
 ```bash
 # 看配置是否被正确读到（只读，不改动磁盘）
-./ai-rss doctor
+./cheng-rss doctor
 
 # 输出 JSON（给监控/脚本用）
-./ai-rss doctor --json
+./cheng-rss doctor --json
 
 # 看今天的 AI 调用与花费
 sqlite3 data/app.db "SELECT purpose, COUNT(*), SUM(cost_usd)

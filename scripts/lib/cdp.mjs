@@ -44,7 +44,7 @@ export async function launchBrowser(opts = {}) {
   const browserPath = opts.browserPath ?? findBrowser();
   if (!browserPath) return { proc: null, wsUrl: null, close: () => {}, profile: null };
 
-  const profile = opts.profile ?? mkdtempSync(join(tmpdir(), opts.profilePrefix ?? 'ai-rss-prof-'));
+  const profile = opts.profile ?? mkdtempSync(join(tmpdir(), opts.profilePrefix ?? 'cheng-rss-prof-'));
   const args = [
     '--headless=new',
     // 0 = 让浏览器自己挑空闲端口。固定区间会撞上系统保留段（见文件头注释）

@@ -22,7 +22,7 @@ if (!existsSync(nodeBin)) {
   process.exit(1);
 }
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m003-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m003-'));
 const dataDir = tmp;
 const dbPath = join(dataDir, 'app.db');
 
@@ -34,8 +34,8 @@ import { migrate } from './src/server/db/migrate.ts';
 import { openDb, readPragmas } from './src/server/db/client.ts';
 import { packText, unpackText } from './src/server/db/text-blob.ts';
 
-const dataDir = process.env.AI_RSS_DATA_DIR;
-const mode = process.env.AI_RSS_MODE;
+const dataDir = process.env.CHENG_RSS_DATA_DIR;
+const mode = process.env.CHENG_RSS_MODE;
 
 const h = openDb({ dataDir });
 
@@ -97,7 +97,7 @@ if (mode === 'single') {
   const ins = h.db.prepare(
     'INSERT INTO entries (id,user_id,guid,url,url_norm,title,published_at,fetched_at) VALUES (?,?,?,?,?,?,?,?)'
   );
-  const tag = process.env.AI_RSS_TAG;
+  const tag = process.env.CHENG_RSS_TAG;
   let errors = 0;
   const now = Date.now();
   for (let i = 0; i < 200; i++) {
@@ -126,7 +126,7 @@ function runProbe(mode, tag = '') {
     cwd: root,
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, AI_RSS_DATA_DIR: dataDir, AI_RSS_MODE: mode, AI_RSS_TAG: tag },
+    env: { ...process.env, CHENG_RSS_DATA_DIR: dataDir, CHENG_RSS_MODE: mode, CHENG_RSS_TAG: tag },
   });
   return JSON.parse(out.trim().split('\n').pop());
 }
@@ -178,7 +178,7 @@ try {
       '--experimental-strip-types', '--no-warnings', '--input-type=module', '-e', probe,
     ], {
       cwd: root,
-      env: { ...process.env, AI_RSS_DATA_DIR: dataDir, AI_RSS_MODE: 'concurrent', AI_RSS_TAG: tag },
+      env: { ...process.env, CHENG_RSS_DATA_DIR: dataDir, CHENG_RSS_MODE: 'concurrent', CHENG_RSS_TAG: tag },
     });
     let sout = '', serr = '';
     p.stdout.on('data', (d) => { sout += d; });

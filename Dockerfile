@@ -41,13 +41,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # 非 root 运行
-RUN useradd -r -u 10001 -m -d /app -s /usr/sbin/nologin ai-rss
+RUN useradd -r -u 10001 -m -d /app -s /usr/sbin/nologin cheng-rss
 
 WORKDIR /app
-COPY --from=build /app/dist/ai-rss-linux-x64 /app/ai-rss
-RUN chmod +x /app/ai-rss && chown -R ai-rss:ai-rss /app
+COPY --from=build /app/dist/cheng-rss-linux-x64 /app/cheng-rss
+RUN chmod +x /app/cheng-rss && chown -R cheng-rss:cheng-rss /app
 
-USER ai-rss
+USER cheng-rss
 
 ENV DATA_DIR=/app/data \
     PORT=3000 \
@@ -59,7 +59,7 @@ EXPOSE 3000
 
 # doctor 作为健康检查：它会读库、验 schema、查完整性
 HEALTHCHECK --interval=60s --timeout=10s --start-period=20s --retries=3 \
-  CMD ["/app/ai-rss", "doctor", "--quiet"]
+  CMD ["/app/cheng-rss", "doctor", "--quiet"]
 
-ENTRYPOINT ["/app/ai-rss"]
+ENTRYPOINT ["/app/cheng-rss"]
 CMD ["serve"]

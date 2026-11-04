@@ -34,8 +34,8 @@ const BROWSERS = process.platform === 'win32'
   : ['/usr/bin/google-chrome', '/usr/bin/chromium'];
 const browser = BROWSERS.find((p) => existsSync(p));
 const BIN = join(root, 'dist', process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`);
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`);
 
 if (!existsSync(BIN)) {
   console.log('  \u001b[33mSKIP\u001b[0m  没有构建产物');
@@ -55,7 +55,7 @@ const { openDb } = await import('../../src/server/db/client.ts');
 const { migrate } = await import('../../src/server/db/migrate.ts');
 const { saveDigest } = await import('../../src/server/digest/index.ts');
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m305-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m305-'));
 const h = openDb({ dataDir: tmp });
 migrate(h.db);
 const DB = h.db;

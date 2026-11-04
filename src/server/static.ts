@@ -46,8 +46,8 @@ export function mimeFor(path: string): string {
 }
 
 // esbuild 在打包时把这里 define 成 true（见 scripts/build-server.mjs）
-declare const __AI_RSS_SEA__: boolean | undefined;
-const IS_SEA = typeof __AI_RSS_SEA__ === 'boolean' ? __AI_RSS_SEA__ : false;
+declare const __CHENG_RSS_SEA__: boolean | undefined;
+const IS_SEA = typeof __CHENG_RSS_SEA__ === 'boolean' ? __CHENG_RSS_SEA__ : false;
 
 /** 从项目根定位 dist/client */
 function findClientDir(): string | null {

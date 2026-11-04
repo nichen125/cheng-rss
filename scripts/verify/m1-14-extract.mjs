@@ -28,8 +28,8 @@ import {
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 const fxDir = join(root, 'tests/fixtures/extract');
 
@@ -309,7 +309,7 @@ await new Promise((r) => mock.listen(0, '127.0.0.1', r));
 mockPort = mock.address().port;
 const MOCK = `http://127.0.0.1:${mockPort}`;
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m114-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m114-'));
 const dataDir = join(tmp, 'data');
 const port = 39000 + Math.floor(Math.random() * 900);
 const base = `http://127.0.0.1:${port}`;

@@ -31,7 +31,7 @@ const {
 const { openDb } = await import('../../src/server/db/client.ts');
 const { migrate } = await import('../../src/server/db/migrate.ts');
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m304-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m304-'));
 const h = openDb({ dataDir: tmp });
 migrate(h.db);
 const DB = h.db;
@@ -461,13 +461,13 @@ group('3.4 调度 · 路由顺序');
 
   const ROOT = rs(dn(fu(import.meta.url)), '../..');
   const BIN = jn(ROOT, 'dist', process.platform === 'win32'
-    ? `ai-rss-${process.platform}-${process.arch}.exe`
-    : `ai-rss-${process.platform}-${process.arch}`);
+    ? `cheng-rss-${process.platform}-${process.arch}.exe`
+    : `cheng-rss-${process.platform}-${process.arch}`);
 
   if (!ex(BIN)) {
     console.log('  \u001b[33mSKIP\u001b[0m  没有构建产物，跳过路由断言');
   } else {
-    const dir = mkd(jn(td(), 'ai-rss-m304r-'));
+    const dir = mkd(jn(td(), 'cheng-rss-m304r-'));
     const port = 45100 + Math.floor(Math.random() * 400);
     const base = `http://127.0.0.1:${port}`;
     const proc = spawn(BIN, ['serve', '--data', jn(dir, 'data'), '--port', String(port)], {

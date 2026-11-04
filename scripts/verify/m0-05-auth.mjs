@@ -26,7 +26,7 @@ if (!existsSync(nodeBin)) {
   process.exit(1);
 }
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m005-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m005-'));
 const dataDir = join(tmp, 'data');
 const port = 33000 + Math.floor(Math.random() * 2000);
 const base = `http://127.0.0.1:${port}`;
@@ -37,7 +37,7 @@ const proc = spawn(nodeBin, [
   '--data', dataDir, '--port', String(port), '--host', '127.0.0.1',
 ], {
   cwd: root,
-  env: { ...process.env, AI_RSS_PRINT_READY: '1', LOG_LEVEL: 'error' },
+  env: { ...process.env, CHENG_RSS_PRINT_READY: '1', LOG_LEVEL: 'error' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
@@ -93,7 +93,7 @@ const setCookie = loginRes.headers.get('set-cookie') ?? '';
 const loginBody = await loginRes.json();
 
 check('登录返回 200', () => eq(loginRes.status, 200));
-check('登录返回 Set-Cookie', () => ok(setCookie.includes('ai_rss_sid='), `set-cookie: ${setCookie}`));
+check('登录返回 Set-Cookie', () => ok(setCookie.includes('cheng_rss_sid='), `set-cookie: ${setCookie}`));
 check('cookie 含 Path=/', () => ok(/Path=\//i.test(setCookie), setCookie));
 check('cookie 含 SameSite=Lax（Strict 会让插件永远未登录）', () => {
   return ok(/SameSite=Lax/i.test(setCookie), setCookie);
@@ -103,7 +103,7 @@ check('http 环境不加 Secure（否则本地登录无效）', () => {
   return ok(!/;\s*Secure/i.test(setCookie), `意外带了 Secure: ${setCookie}`);
 });
 
-const cookieToken = /ai_rss_sid=([^;]+)/.exec(setCookie)?.[1] ?? '';
+const cookieToken = /cheng_rss_sid=([^;]+)/.exec(setCookie)?.[1] ?? '';
 
 // 错误的 Content-Type 也应能处理（插件有时用表单）
 const failLogin = await fetch(`${base}/api/v1/auth/login`, {
@@ -129,7 +129,7 @@ check('不存在的用户与密码错误返回同一提示', () => {
 
 // ── ② cookie 访问 ──────────────────────────────────────────
 const meByCookie = await fetch(`${base}/api/v1/auth/me`, {
-  headers: { cookie: `ai_rss_sid=${cookieToken}` },
+  headers: { cookie: `cheng_rss_sid=${cookieToken}` },
 });
 const meCookieBody = await meByCookie.json();
 check('带 cookie 访问 /auth/me 返回 200', () => eq(meByCookie.status, 200));
@@ -153,7 +153,7 @@ check('loginUserInfo 未登录时 body 为 null', () => {
 });
 
 const infoAuth = await fetch(`${base}/api/auth/loginUserInfo`, {
-  headers: { cookie: `ai_rss_sid=${cookieToken}` },
+  headers: { cookie: `cheng_rss_sid=${cookieToken}` },
 });
 const infoAuthBody = await infoAuth.json();
 check('loginUserInfo 已登录返回裸用户对象（无 wrapper）', () => {
@@ -180,21 +180,21 @@ check('插件登录返回裸用户对象（无 {user:...} 包装）', () => {
     `实际: ${JSON.stringify(compatBody)}`,
   );
 });
-check('插件登录设置 cookie', () => ok(compatSetCookie.includes('ai_rss_sid='), compatSetCookie));
+check('插件登录设置 cookie', () => ok(compatSetCookie.includes('cheng_rss_sid='), compatSetCookie));
 
 // ── ⑦ 改密后旧会话失效 ─────────────────────────────────────
 const changeRes = await fetch(`${base}/api/v1/auth/password`, {
   method: 'POST',
   headers: {
     'content-type': 'application/json',
-    cookie: `ai_rss_sid=${cookieToken}`,
+    cookie: `cheng_rss_sid=${cookieToken}`,
   },
   body: JSON.stringify({ current: CREDS.password, next: 'new-password-456' }),
 });
 check('改密成功', () => eq(changeRes.status, 200));
 
 const meAfterChange = await fetch(`${base}/api/v1/auth/me`, {
-  headers: { cookie: `ai_rss_sid=${cookieToken}` },
+  headers: { cookie: `cheng_rss_sid=${cookieToken}` },
 });
 check('改密后旧 cookie 立即失效（401）', () => eq(meAfterChange.status, 401));
 

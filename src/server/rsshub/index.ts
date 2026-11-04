@@ -511,6 +511,6 @@ export function cacheInfo(db: DatabaseSync, userId: string): {
 /** 给验收脚本用：真有一个文件系统上的缓存目录时不返回 null（保留接口） */
 export function cacheDirHint(): string | null {
   const home = homedir();
-  const p = join(home, '.cache', 'ai-rss', 'rsshub');
+  const p = join(home, '.cache', 'cheng-rss', 'rsshub');
   return existsSync(p) ? p : null;
 }

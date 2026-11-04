@@ -9,7 +9,7 @@ on:
 
 env:
   # 与 scripts/lib/toolchain.sh 的默认值保持同步
-  AI_RSS_NODE_VERSION: v24.13.0
+  CHENG_RSS_NODE_VERSION: v24.13.0
 
 jobs:
   verify:
@@ -66,7 +66,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          BIN=$(ls dist/ai-rss-* | grep -v client.zip | head -1)
+          BIN=$(ls dist/cheng-rss-* | grep -v client.zip | head -1)
           echo "测试 $BIN"
           mkdir -p /tmp/clean && cp "$BIN" /tmp/clean/
           cd /tmp/clean
@@ -81,8 +81,8 @@ jobs:
         with:
           name: binary-${{ matrix.os }}
           path: |
-            dist/ai-rss-linux-x64
-            dist/ai-rss-win32-x64.exe
+            dist/cheng-rss-linux-x64
+            dist/cheng-rss-win32-x64.exe
           if-no-files-found: ignore
 
   docker:
@@ -99,17 +99,17 @@ jobs:
           context: .
           platforms: linux/amd64
           load: true
-          tags: ai-rss:ci
+          tags: cheng-rss:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: 镜像体积
-        run: docker image inspect ai-rss:ci --format='{{.Size}}' | awk '{printf "%.0f MB\n", $1/1024/1024}'
+        run: docker image inspect cheng-rss:ci --format='{{.Size}}' | awk '{printf "%.0f MB\n", $1/1024/1024}'
 
       - name: 容器冒烟（首页 + 健康检查）
         run: |
           set -e
-          docker run -d --name ar -p 3311:3000 ai-rss:ci
+          docker run -d --name ar -p 3311:3000 cheng-rss:ci
           # 等服务起来
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:3311/api/health >/dev/null 2>&1; then break; fi
@@ -122,7 +122,7 @@ jobs:
           curl -fsS http://127.0.0.1:3311/ | grep -q 'id="root"'
           echo "OK"
           echo "--- doctor ---"
-          docker exec ar /app/ai-rss doctor --quiet || true
+          docker exec ar /app/cheng-rss doctor --quiet || true
 
       - name: 容器日志
         if: failure()

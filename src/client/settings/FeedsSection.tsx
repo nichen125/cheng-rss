@@ -196,7 +196,7 @@ export function FeedsSection(props: { onClose: () => void }) {
       const blob = new Blob([xml], { type: 'text/x-opml' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `ai-rss-feeds-${new Date().toISOString().slice(0, 10)}.opml`;
+      a.download = `cheng-rss-feeds-${new Date().toISOString().slice(0, 10)}.opml`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) {

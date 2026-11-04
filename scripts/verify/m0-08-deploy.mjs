@@ -21,8 +21,8 @@ import { group, check, eq, ok, summary } from './harness.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 group('0.8 三路构建');
@@ -59,12 +59,12 @@ if (!existsSync(binPath)) {
   process.exit(1);
 }
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m008-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m008-'));
 
 function startServer(cmd, args, dataDir, port, cwd) {
   const p = spawn(cmd, args, {
     cwd,
-    env: { ...process.env, AI_RSS_PRINT_READY: '1', LOG_LEVEL: 'error' },
+    env: { ...process.env, CHENG_RSS_PRINT_READY: '1', LOG_LEVEL: 'error' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '', err = '';
@@ -192,7 +192,7 @@ if (binReady) {
     body: JSON.stringify({ username: 'bin@test.local', password: 'bin-password-1' }),
   });
   const clCookie = cl.headers.get('set-cookie') ?? '';
-  check('插件登录端点设置 cookie', () => ok(clCookie.includes('ai_rss_sid='), clCookie.slice(0, 120)));
+  check('插件登录端点设置 cookie', () => ok(clCookie.includes('cheng_rss_sid='), clCookie.slice(0, 120)));
   check('插件登录 cookie 带 SameSite=Lax', () => ok(/SameSite=Lax/i.test(clCookie), clCookie.slice(0, 160)));
 }
 

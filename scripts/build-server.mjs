@@ -10,7 +10,7 @@
 // 关键点（PLAN §4.1）：
 //   · 迁移 SQL 内嵌：define 注入字符串常量
 //   · node:* 全部 external —— 运行时自带
-//   · __AI_RSS_SEA__ 告诉 static.ts 自己是否在二进制里
+//   · __CHENG_RSS_SEA__ 告诉 static.ts 自己是否在二进制里
 import { build } from 'esbuild';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -30,11 +30,11 @@ if (existsSync(migrationsDir)) {
     defines[key] = JSON.stringify(readFileSync(join(migrationsDir, f), 'utf8'));
   }
 }
-defines['__AI_RSS_SEA__'] = isSea ? 'true' : 'false';
+defines['__CHENG_RSS_SEA__'] = isSea ? 'true' : 'false';
 
 // 版本号也内嵌，二进制运行时读不到 package.json
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-defines['__AI_RSS_VERSION__'] = JSON.stringify(String(pkg.version ?? '0.0.0'));
+defines['__CHENG_RSS_VERSION__'] = JSON.stringify(String(pkg.version ?? '0.0.0'));
 
 await build({
   entryPoints: [join(root, 'src/index.ts')],
@@ -51,7 +51,7 @@ await build({
     // CJS 下 import.meta 不存在。注入一个 shim，让源码里
     // import.meta.url 的引用在打包后仍能工作。
     js: [
-      '// ai-rss bundled server',
+      '// cheng-rss bundled server',
       'const __metaUrl = require("node:url").pathToFileURL(__filename).href;',
     ].join('\n'),
   },

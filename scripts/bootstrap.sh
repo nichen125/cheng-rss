@@ -6,7 +6,7 @@
 #
 # 用法：
 #   ./scripts/bootstrap.sh              # 装默认版本 v24.13.0
-#   AI_RSS_NODE_VERSION=v24.14.0 ./scripts/bootstrap.sh
+#   CHENG_RSS_NODE_VERSION=v24.14.0 ./scripts/bootstrap.sh
 #   ./scripts/bootstrap.sh --force      # 强制重装（校验失败时用）
 
 set -euo pipefail

@@ -17,7 +17,7 @@ const TIMEOUT_MS = 30_000;
  * 很多站点按 UA 返不同内容，甚至直接 403 无 UA 请求。
  * 带上产品名与版本，便于对方站长在日志里认出流量来源。
  */
-const UA = 'ai-rss/0.1 (+https://github.com/ai-rss; self-hosted RSS reader)';
+const UA = 'cheng-rss/0.1 (+https://github.com/nichen125/cheng-rss; self-hosted RSS reader)';
 
 export interface FetchResult {
   status: number;
@@ -142,7 +142,7 @@ const PAGE_TIMEOUT_MS = 20_000;
  *
  * 与 feed 抓取不同，这里**必须**像一个浏览器：大量站点的反爬规则是
  * "非浏览器 UA → 403 或降级为摘要页"。实测 danluu.com / arstechnica
- * 对 ai-rss/0.1 直接返回验证页。代价是站长在日志里看到的不是我们的
+ * 对 cheng-rss/0.1 直接返回验证页。代价是站长在日志里看到的不是我们的
  * 产品名 —— 取舍见 §21 风险表的「源反爬」一行。
  */
 const PAGE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '

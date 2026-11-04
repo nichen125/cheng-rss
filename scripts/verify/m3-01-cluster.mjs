@@ -333,7 +333,7 @@ check('反过来：实体+数字重叠的真实转载越过阈值', () => {
 // ── ⑥ 向量来源选择 ─────────────────────────────────────────
 group('3.1 聚类 · 向量来源');
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m301-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m301-'));
 const h = openDb({ dataDir: tmp });
 migrate(h.db);
 const DB = h.db;

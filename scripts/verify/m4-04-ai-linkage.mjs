@@ -26,8 +26,8 @@ import { killTree } from '../lib/proc.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`);
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`);
 
 if (!existsSync(BIN)) {
   console.log('  \u001b[33mSKIP\u001b[0m  没有构建产物');
@@ -99,7 +99,7 @@ const aiCtl = (b = {}) => fetch(`http://127.0.0.1:${AI_PORT}/_ctl`, { method: 'P
 const aiState = async () => (await fetch(`http://127.0.0.1:${AI_PORT}/_state`)).json();
 
 // ── 起服务 ─────────────────────────────────────────────────
-const dir = mkdtempSync(join(tmpdir(), 'ai-rss-m404-'));
+const dir = mkdtempSync(join(tmpdir(), 'cheng-rss-m404-'));
 const port = 46400 + Math.floor(Math.random() * 400);
 const base = `http://127.0.0.1:${port}`;
 const proc = spawn(BIN, ['serve', '--data', join(dir, 'data'), '--port', String(port)], {

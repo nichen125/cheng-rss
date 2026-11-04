@@ -22,12 +22,12 @@ import { enqueue } from './server/jobs/queue.ts';
 import { listUsersForDigest } from './server/digest/users.ts';
 
 // esbuild 打包时注入（scripts/build-server.mjs）；源码模式走 package.json
-declare const __AI_RSS_VERSION__: string | undefined;
+declare const __CHENG_RSS_VERSION__: string | undefined;
 
 const VERSION = readVersion();
 
 function readVersion(): string {
-  if (typeof __AI_RSS_VERSION__ === 'string') return __AI_RSS_VERSION__;
+  if (typeof __CHENG_RSS_VERSION__ === 'string') return __CHENG_RSS_VERSION__;
   try {
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
     return String(pkg.version ?? '0.0.0');
@@ -38,7 +38,7 @@ function readVersion(): string {
 
 const USAGE = `澄 (cheng) —— 自托管的私人知识库：订阅进来，AI 沉淀，剩下的留给你
 
-用法: ai-rss <命令> [选项]
+用法: cheng-rss <命令> [选项]
 
 命令:
   serve     启动 HTTP 服务（含内联 job runner）
@@ -118,7 +118,7 @@ function cmdVersion(args: Args): void {
     process.stdout.write(`${VERSION}\n`);
     return;
   }
-  process.stdout.write(`ai-rss ${VERSION}\n`);
+  process.stdout.write(`cheng-rss ${VERSION}\n`);
   process.stdout.write(`node ${process.version}  ${process.platform}-${process.arch}\n`);
   process.stdout.write(`schema ${CURRENT_SCHEMA_VERSION}\n`);
 }
@@ -319,7 +319,7 @@ async function cmdServe(args: Args): Promise<void> {
   if (purged > 0) log.debug(`清理了 ${purged} 个过期会话`);
 
   // job runner：默认与服务同进程（单进程部署最简单）。
-  // WORKER_INLINE=false 时改由独立的 `ai-rss worker` 进程跑。
+  // WORKER_INLINE=false 时改由独立的 `cheng-rss worker` 进程跑。
   const inlineWorker = process.env.WORKER_INLINE !== 'false';
 
   // 先建 app 再建 runner：fetch_feed handler 需要 AppContext（要读 feeds 表、
@@ -498,13 +498,13 @@ async function cmdServe(args: Args): Promise<void> {
     port: cfg.port,
     hostname: cfg.host,
   }, (info) => {
-    log.info(`ai-rss ${VERSION} 已启动`, {
+    log.info(`cheng-rss ${VERSION} 已启动`, {
       url: `http://${cfg.host}:${info.port}`,
       data: cfg.dataDir,
       worker: inlineWorker ? 'inline' : 'external',
     });
     // 给 verify 脚本一个可机读的就绪信号
-    if (process.env.AI_RSS_PRINT_READY) {
+    if (process.env.CHENG_RSS_PRINT_READY) {
       process.stdout.write(`READY ${info.port}\n`);
     }
   });

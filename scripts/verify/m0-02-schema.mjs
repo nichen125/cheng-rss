@@ -30,8 +30,8 @@ const probe = String.raw`
 import { DatabaseSync } from 'node:sqlite';
 import { migrate, CURRENT_SCHEMA_VERSION, MIGRATIONS } from './src/server/db/migrate.ts';
 
-const path = process.env.AI_RSS_PROBE_DB;
-if (!path) throw new Error('缺少 AI_RSS_PROBE_DB');
+const path = process.env.CHENG_RSS_PROBE_DB;
+if (!path) throw new Error('缺少 CHENG_RSS_PROBE_DB');
 const db = new DatabaseSync(path);
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
@@ -93,7 +93,7 @@ console.log(JSON.stringify({
 }));
 `;
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-verify-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-verify-'));
 const dbPath = join(tmp, 'app.db');
 
 let out;
@@ -107,7 +107,7 @@ try {
     cwd: root,
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, AI_RSS_PROBE_DB: dbPath },
+    env: { ...process.env, CHENG_RSS_PROBE_DB: dbPath },
   });
 } catch (e) {
   console.error('探测脚本失败:\n' + (e.stderr || e.message));

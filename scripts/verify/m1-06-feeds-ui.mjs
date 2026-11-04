@@ -29,8 +29,8 @@ import { removeDir } from '../lib/tmp.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 group('1.6 订阅页界面');
@@ -58,7 +58,7 @@ if (!existsSync(binPath)) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── 起服务 ─────────────────────────────────────────────────
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-fui-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-fui-'));
 const dataDir = join(tmp, 'data');
 const port = 39000 + Math.floor(Math.random() * 900);
 const base = `http://127.0.0.1:${port}`;
@@ -146,7 +146,7 @@ db.exec('COMMIT');
 db.close();
 
 // ── 浏览器 ─────────────────────────────────────────────────
-const profile = mkdtempSync(join(tmpdir(), 'ai-rss-fuiprof-'));
+const profile = mkdtempSync(join(tmpdir(), 'cheng-rss-fuiprof-'));
 const cdpPort = 9800 + Math.floor(Math.random() * 200);
 const proc = spawn(browser, [
   '--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`,
@@ -210,7 +210,7 @@ await send('Emulation.setEmulatedMedia', {
   features: [{ name: 'prefers-color-scheme', value: 'light' }],
 });
 await send('Network.setCookie', {
-  name: 'ai_rss_sid', value: cookie.split('=')[1] ?? '',
+  name: 'cheng_rss_sid', value: cookie.split('=')[1] ?? '',
   domain: '127.0.0.1', path: '/',
 });
 

@@ -237,7 +237,7 @@ group('3.2 簇归纳 · 失败兜底');
 // ── ⑧ 落库与整窗重算 ────────────────────────────────────────
 group('3.2 簇归纳 · 落库');
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-m302-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-m302-'));
 const h = openDb({ dataDir: tmp });
 migrate(h.db);
 const DB = h.db;

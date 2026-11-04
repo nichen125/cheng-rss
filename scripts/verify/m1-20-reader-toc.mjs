@@ -40,8 +40,8 @@ import { removeDir } from '../lib/tmp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
-  ? `ai-rss-${process.platform}-${process.arch}.exe`
-  : `ai-rss-${process.platform}-${process.arch}`;
+  ? `cheng-rss-${process.platform}-${process.arch}.exe`
+  : `cheng-rss-${process.platform}-${process.arch}`;
 const binPath = join(root, 'dist', binName);
 
 group('1.20 阅读区边缘与侧边目录');
@@ -53,7 +53,7 @@ if (!existsSync(binPath)) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const tmp = mkdtempSync(join(tmpdir(), 'ai-rss-toc-'));
+const tmp = mkdtempSync(join(tmpdir(), 'cheng-rss-toc-'));
 const dataDir = join(tmp, 'data');
 const port = 49000 + Math.floor(Math.random() * 900);
 const origin = `http://127.0.0.1:${port}`;
@@ -197,7 +197,7 @@ if (!browserPath) {
   process.exit(0);
 }
 
-const profile = mkdtempSync(join(tmpdir(), 'ai-rss-toc-prof-'));
+const profile = mkdtempSync(join(tmpdir(), 'cheng-rss-toc-prof-'));
 const cdpPort = 9920 + Math.floor(Math.random() * 60);
 const proc = spawn(browserPath, [
   '--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`,
@@ -261,7 +261,7 @@ await send('Page.enable');
 await send('Runtime.enable');
 await send('Network.enable');
 await send('Network.setCookie', {
-  name: 'ai_rss_sid', value: cookie.split('=')[1] ?? '',
+  name: 'cheng_rss_sid', value: cookie.split('=')[1] ?? '',
   domain: '127.0.0.1', path: '/',
 });
 
@@ -462,7 +462,7 @@ const BODY_1440 = at1440.bodyW;
 // 这条防的是"把纸写成固定 712px"的实现：那样用户把宽度调到 64ch 后
 // 文字变窄、纸不变，正文又悬在一片多余的空白里。
 await ev(`(() => {
-  localStorage.setItem('ai-rss.reader-prefs.v1',
+  localStorage.setItem('cheng-rss.reader-prefs.v1',
     JSON.stringify({ fontSize: 16.5, width: 64, theme: 'system' }));
   return true;
 })()`);
@@ -481,7 +481,7 @@ check('① 调窄后正文列宽也确实变窄（纸没骗人）', () => {
 });
 
 // 还原偏好，免得影响后面的用例
-await ev(`(() => { localStorage.removeItem('ai-rss.reader-prefs.v1'); return true; })()`);
+await ev(`(() => { localStorage.removeItem('cheng-rss.reader-prefs.v1'); return true; })()`);
 
 // ═══ ③ 1600 视口：目录出现，且正文不变窄 ═══════════════════
 await setSize(1600, 950);
@@ -680,7 +680,7 @@ for (let ti = 0; ti < THEMES.length; ti++) {
   await send('Page.navigate', { url: origin });
   await sleep(2400);
   await ev(`(() => {
-    localStorage.setItem('ai-rss.reader-prefs.v1',
+    localStorage.setItem('cheng-rss.reader-prefs.v1',
       JSON.stringify({ fontSize: 16.5, width: 80, theme: ${JSON.stringify(theme)} }));
     return true;
   })()`);
@@ -722,7 +722,7 @@ for (let ti = 0; ti < THEMES.length; ti++) {
   });
 }
 // 还原成系统主题，后面的手机用例不该带着 sepia
-await ev(`(() => { localStorage.removeItem('ai-rss.reader-prefs.v1'); return true; })()`);
+await ev(`(() => { localStorage.removeItem('cheng-rss.reader-prefs.v1'); return true; })()`);
 
 // ═══ ⑧ 手机上取消「纸」═══════════════════════════════════
 //

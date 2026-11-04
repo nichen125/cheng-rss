@@ -6,7 +6,7 @@
 # 用法:
 #   .\scripts\bootstrap.ps1
 #   .\scripts\bootstrap.ps1 -Force
-#   $env:AI_RSS_NODE_VERSION='v24.14.0'; .\scripts\bootstrap.ps1
+#   $env:CHENG_RSS_NODE_VERSION='v24.14.0'; .\scripts\bootstrap.ps1
 
 param(
   [switch]$Force

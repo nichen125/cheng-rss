@@ -37,13 +37,13 @@ scripts/        构建、验收、工具
 scripts/verify/ 验收脚本（57 个）
 tests/fixtures/ 测试夹具（HTML 快照、AI 响应样本）
 docs/           主题文档（配置/架构/设计/开发）
-docs/方案/      顶层设计方案（跨模块的方向与约束）
+docs/specs/     顶层设计方案（跨模块的方向与约束）
 .toolchain/     项目内的 Node（git 忽略）
 .tmp/           临时文件（git 忽略，见下）
 dist/           构建产物：交付物 + client/（运行时）；中间产物在 dist/.cache/
 ```
 
-方案文档的门槛见 PLAN §17.1：**只有跨模块的顶层方案进 `docs/方案/`**，单个功能的
+方案文档的门槛见 PLAN §17.1：**只有跨模块的顶层方案进 `docs/specs/`**，单个功能的
 实施细节直接落进 PLAN 的对应章节。未定稿的草稿放 `.tmp/`，**不要放 `docs/`** ——
 那里默认被引用、被信任、被 `check-tables.mjs` 扫描，混进一份"待批准"的文档，
 读者无法从路径判断它算不算数。

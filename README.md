@@ -280,14 +280,14 @@ CI 在 Ubuntu 与 Windows 上各跑一遍这 57 个脚本，任一红即阻塞�
 | [docs/architecture.md](docs/architecture.md)   | 模块划分、数据流、选型与放弃的方案             |
 | [docs/design.md](docs/design.md)               | 界面规格、正文提取、去重、聚类、引用安全       |
 | [docs/development.md](docs/development.md)     | 本地开发、验收机制、写断言的规矩               |
-| [docs/方案/](docs/方案/)                       | 顶层设计方案（界面视觉规格、配色与控件尺度）   |
+| [docs/specs/](docs/specs/)                     | 顶层设计方案（界面视觉规格、配色与控件尺度）   |
 | [PLAN.md](PLAN.md)                             | 完整的规格与决策记录，含每一步的取舍与踩过的坑 |
 
 `PLAN.md` 是这个项目最特别的文件：按「需求 → 规格 → 实现」三层记录每一步，写清了每个
 决定的**替代方案与被否掉的原因**。想知道「为什么正文用 gzip 而不用 zstd」、「为什么 FTS5
 要配程序侧 bigram」，答案都在里面。
 
-`docs/方案/` 只放**跨模块的顶层方案**。单个功能的实施细节不单独成文，直接落进 PLAN 的
+`docs/specs/` 只放**跨模块的顶层方案**。单个功能的实施细节不单独成文，直接落进 PLAN 的
 对应章节 —— 那种文档写完就被代码取代，留下来只会与代码不符却仍被当成规格。
 
 ## 社区

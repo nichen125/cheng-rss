@@ -7,6 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 同一分支上新的 push 取消旧的运行，节省额度也避免"旧提交红了"的混乱
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   # 与 scripts/lib/toolchain.sh 的默认值保持同步
   CHENG_RSS_NODE_VERSION: v24.13.0
@@ -15,79 +20,120 @@ jobs:
   verify:
     name: 验收（${{ matrix.os }}）
     runs-on: ${{ matrix.os }}
+    # 全量验收本机 750s，CI 上首次含下载约 15~20 分钟。
+    # 给足上限是为了防"挂死但没有输出"，而不是为了容纳正常时长。
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        # 两个平台都跑，因为 .sh / .ps1 是两套实现，
-        # 只在一个平台验证会漏掉另一个平台的路径处理 bug
+        # 两个平台都跑：.sh / .ps1 是两套实现，只验一个平台会漏掉
+        # 另一个平台的路径处理 bug（历史上就漏过一次，见 PLAN §16.1）
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+
+      # 缓存项目内 Node 运行时：bootstrap 每次要下 35MB，两平台两次
+      - name: 缓存项目内 Node
+        uses: actions/cache@v4
+        with:
+          path: .toolchain/node
+          key: toolchain-${{ runner.os }}-${{ env.CHENG_RSS_NODE_VERSION }}
 
       - name: 引导项目内 Node
         shell: bash
         run: bash scripts/bootstrap.sh
 
+      # 依赖缓存：key 含 lockfile 哈希，锁文件变了才重装
+      - name: 缓存 npm 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/npm
+            node_modules
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-
+
+      # 关键：不调用 .toolchain/node/bin/npm。
+      #
+      # 它的 shebang 是 `#!/usr/bin/env node`，依赖 PATH 里有 node，而 CI 的
+      # step 里没有 —— 直接以 127（command not found）失败。Windows 上反而
+      # 不报错，因为 npm.cmd 用 %~dp0 自己找同目录的 node.exe，
+      # 于是同一个 bug 在第二个平台上被掩盖了。
+      #
+      # 让 node 执行 npm 自己的入口，两平台同一条命令，零 PATH 依赖。
       - name: 安装依赖
         shell: bash
-        run: ./.toolchain/node/bin/npm ci || ./.toolchain/node/npm.cmd ci
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          NPM=./.toolchain/node/node_modules/npm/bin/npm-cli.js
+          "$NODE" "$NPM" ci --no-audit --no-fund
 
-      - name: 类型检查
+      # 服务端 + 客户端两套 tsconfig 都要查。
+      # 此前只跑 `tsc --noEmit`（服务端），tsconfig.client.json 从未在 CI 里检查过。
+      - name: 类型检查（服务端 + 客户端）
         shell: bash
-        run: ./.toolchain/node/bin/npx tsc --noEmit || ./.toolchain/node/npx.cmd tsc --noEmit
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js run typecheck:all
 
       - name: 构建前端
         shell: bash
-        run: ./.toolchain/node/bin/node scripts/build-client.mjs || ./.toolchain/node/node.exe scripts/build-client.mjs
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" scripts/build-client.mjs
 
       - name: 打包前端 zip
         shell: bash
-        run: ./.toolchain/node/bin/node scripts/pack-client-zip.mjs || ./.toolchain/node/node.exe scripts/pack-client-zip.mjs
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" scripts/pack-client-zip.mjs
 
-      - name: 跑全部验收脚本
+      # docker-path 要验 Dockerfile 里 `build-sea --target linux-x64` 那一步，
+      # 需要一个 linux 的 node 当 SEA 注入底本。CI 有网络，取一次即可。
+      - name: 取 linux node（供 docker-path 验证 linux 产物）
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -e
           NODE=./.toolchain/node/bin/node
           [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          for f in scripts/verify/m0-*.mjs; do
-            echo "=== $f ==="
-            $NODE "$f"
-          done
+          "$NODE" scripts/fetch-linux-node.mjs
 
-      - name: 构建二进制
-        shell: bash
-        run: |
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          $NODE scripts/build-sea.mjs
-
-      - name: 二进制冒烟（洁净目录）
+      # 用 verify-all 而不是自己写循环。
+      #
+      # 曾经的写法是 `for f in scripts/verify/m0-*.mjs`，只跑 10 个（共 56 个），
+      # m1~m4 全都不在门禁里；而且缺 verify-all 已有的三样东西：
+      # 单脚本 10 分钟硬超时、环境抖动重试一次、结尾 .tmp 清理。
+      - name: 跑全部验收（56 个脚本）
         shell: bash
         run: |
           set -e
-          BIN=$(ls dist/cheng-rss-* | grep -v client.zip | head -1)
-          echo "测试 $BIN"
-          mkdir -p /tmp/clean && cp "$BIN" /tmp/clean/
-          cd /tmp/clean
-          NAME=$(basename "$BIN")
-          chmod +x "$NAME" 2>/dev/null || true
-          ./"$NAME" version
-          ./"$NAME" migrate --data ./d
-          ./"$NAME" doctor --data ./d --quiet || true
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" scripts/verify-all.mjs
 
-      - name: 上传二进制
-        uses: actions/upload-artifact@v4
-        with:
-          name: binary-${{ matrix.os }}
-          path: |
-            dist/cheng-rss-linux-x64
-            dist/cheng-rss-win32-x64.exe
-          if-no-files-found: ignore
+      # 失败时把原因推到 Actions 页面。
+      # 默认只有 "exit code 1"，而下载完整日志需要仓库 admin 权限；
+      # 注解是匿名可读的，下次红了能当场看到原因。
+      - name: 失败原因（注解）
+        if: failure()
+        shell: bash
+        run: |
+          echo "::error::验收失败。重新跑单个脚本：node scripts/verify-all.mjs 'm2-0'"
+          echo "::error::本机复现：node scripts/verify-all.mjs --keep-tmp 后看 .tmp/verify"
 
   docker:
     name: Docker 镜像
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -106,12 +152,16 @@ jobs:
       - name: 镜像体积
         run: docker image inspect cheng-rss:ci --format='{{.Size}}' | awk '{printf "%.0f MB\n", $1/1024/1024}'
 
-      - name: 容器冒烟（首页 + 健康检查）
+      # 容器冒烟：首页 + 健康 + doctor 三条都要过。
+      #
+      # 曾经这里 curl 连不上（exit 7）。根因是 Dockerfile 里 chown 在 VOLUME
+      # 之前，/app/data 被建成了 root 所有，而进程是 uid 10001 —— 写不进库，
+      # serve 退出。现在 Dockerfile 已改为先 mkdir 再 chown。
+      - name: 容器冒烟（首页 + 健康检查 + doctor）
         run: |
           set -e
-          docker run -d --name ar -p 3311:3000 cheng-rss:ci
-          # 等服务起来
-          for i in $(seq 1 30); do
+          docker run -d --name cheng-rss-ci -p 3311:3000 cheng-rss:ci
+          for i in $(seq 1 40); do
             if curl -fsS http://127.0.0.1:3311/api/health >/dev/null 2>&1; then break; fi
             sleep 1
           done
@@ -121,13 +171,23 @@ jobs:
           echo "--- 首页必须含 React 挂载点（静态资源内嵌校验）---"
           curl -fsS http://127.0.0.1:3311/ | grep -q 'id="root"'
           echo "OK"
-          echo "--- doctor ---"
-          docker exec ar /app/cheng-rss doctor --quiet || true
+          echo "--- doctor（容器内，带 --url 探测）---"
+          docker exec cheng-rss-ci /app/cheng-rss doctor \
+            --url http://127.0.0.1:3000 --quiet
+          echo "doctor OK"
+
+      # 容器能起来不等于数据目录可写。单独验一次：
+      # 以容器内用户写一个文件，证明 /app/data 属主正确。
+      - name: 数据目录对非 root 用户可写
+        run: |
+          set -e
+          docker exec cheng-rss-ci sh -c 'touch /app/data/.write-probe && rm /app/data/.write-probe'
+          echo "OK: uid 10001 可写 /app/data"
 
       - name: 容器日志
         if: failure()
-        run: docker logs ar
+        run: docker logs cheng-rss-ci
 
       - name: 清理
         if: always()
-        run: docker rm -f ar || true
+        run: docker rm -f cheng-rss-ci || true

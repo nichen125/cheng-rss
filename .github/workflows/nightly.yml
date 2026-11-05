@@ -1,0 +1,92 @@
+name: Nightly
+
+# 每日重跑同一套验收。
+#
+# 用途只有一个：发现 runner 镜像漂移。字体、Chromium 路径、Node 补丁版本
+# 这些变化会让 UI 断言悄悄偏移，而它们跟代码无关。
+#
+# **不做真实外网回归**（原 PLAN 的规划是拉真实 RSSHub 路由库）。
+# 理由：整套验收的价值在于自封闭 —— 57 个脚本没有一个向外发请求，
+# AI 那 5 个都是起本地 mock 上游。引入真实外网会让它变 flaky，
+# 而 flaky 的门禁等于没有门禁：红了没人信，绿了也不代表什么。
+#
+# 红了通常意味着"环境变了"，不是"代码坏了"，所以不阻塞主分支。
+on:
+  schedule:
+    # 每天 19:00 UTC = 次日 03:00 Asia/Shanghai（低峰）
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+env:
+  CHENG_RSS_NODE_VERSION: v24.13.0
+
+jobs:
+  drift:
+    name: 环境漂移检测（${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 环境快照（漂移时用来对照）
+        shell: bash
+        run: |
+          echo "=== OS ==="
+          uname -a || true
+          echo "=== Node（项目内）==="
+          bash scripts/bootstrap.sh
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" -v
+          echo "=== 浏览器 ==="
+          ls -la /usr/bin/google-chrome /usr/bin/chromium 2>/dev/null || true
+          ls -la "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 2>/dev/null || true
+          echo "=== 中文字体（UI 断言依赖它）==="
+          fc-list 2>/dev/null | grep -iE "noto.*cjk|wqy|source han" | head -10 || echo "（fc-list 不可用）"
+
+      - name: 安装依赖
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js ci --no-audit --no-fund
+
+      - name: 构建前端
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" scripts/build-client.mjs
+          "$NODE" scripts/pack-client-zip.mjs
+
+      - name: 取 linux node（供 docker-path）
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" scripts/fetch-linux-node.mjs
+
+      - name: 全部验收
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" scripts/verify-all.mjs
+
+      # 漂移时的提示：告诉看日志的人"这多半是环境问题"
+      - name: 失败提示
+        if: failure()
+        shell: bash
+        run: |
+          echo "::warning::nightly 失败通常意味着 runner 镜像漂移（字体/浏览器/Node），不是代码坏了"
+          echo "::warning::先看上面的「环境快照」，与上次成功运行的快照对比"
+          echo "::warning::若确认是环境变化导致的断言偏移，按 PLAN 附录 A.5 单独提交调整阈值并写明理由"

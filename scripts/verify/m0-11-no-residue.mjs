@@ -1,0 +1,140 @@
+#!/usr/bin/env node
+// 0.11 项目外零写入 —— 验收（发布门禁第 5 条）
+//
+// 判据（PLAN §4.3 / §16.4 门禁 5）：
+//   ① 已安装的工具链，运行时不往 $HOME 写
+//   ② npm 的 cache / prefix 都指向项目内（不是 $HOME）
+//   ③ 构建产物全部落在项目目录内
+//   ④ `check-no-residue.mjs` 自己可用（它是人工排查时的入口）
+//
+// 为什么不直接在全量验收里跑 `check-no-residue --run "bootstrap.sh"`：
+// bootstrap 会重新下载 35MB 的 Node，一次几分钟，且需要网络。
+// 那属于"部署验证"，不是"每次提交都要跑"的东西；CI 的 release job
+// 里跑更合适。这里验的是**已经装好的工具链在正常使用时**不越界 ——
+// 那才是用户日常会遇到的场景。
+//
+// 与 m0-08 的 ④ 不重复：m0-08 验的是**二进制进程**不写 $HOME，
+// 这里验的是**构建工具链**（bootstrap / npm / 构建脚本）不写 $HOME。
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { group, check, ok, eq, summary } from './harness.mjs';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
+const npmCli = join(root, '.toolchain/node/node_modules/npm/bin/npm-cli.js');
+
+group('0.11 项目外零写入');
+
+const hasToolchain = existsSync(nodeBin);
+
+// ── ① npm 的 cache 与 prefix 都在项目内 ──────────────────────
+// 若 cache 落在 $HOME/.npm，用户卸载项目后那里会留下几百 MB。
+check('npm cache 指向项目内（不是 $HOME）', () => {
+  if (!hasToolchain) return ok(false, '工具链未安装，先跑 bootstrap');
+  const cache = execFileSync(nodeBin, [npmCli, 'config', 'get', 'cache'], {
+    encoding: 'utf8', timeout: 60000,
+  }).trim();
+  const inProject = resolve(cache).startsWith(resolve(root) + sep);
+  return {
+    ok: inProject,
+    detail: `cache=${cache}，不在 ${root} 内（卸载项目后会留在用户机器上）`,
+  };
+});
+
+check('npm prefix 指向项目内（不是 $HOME）', () => {
+  if (!hasToolchain) return ok(false, '工具链未安装');
+  const prefix = execFileSync(nodeBin, [npmCli, 'config', 'get', 'prefix'], {
+    encoding: 'utf8', timeout: 60000,
+  }).trim();
+  const inProject = resolve(prefix).startsWith(resolve(root) + sep);
+  return {
+    ok: inProject,
+    detail: `prefix=${prefix}，不在项目内`,
+  };
+});
+
+// ── ② 工具链装在项目内 ──────────────────────────────────────
+check('Node 运行时在项目内', () => {
+  if (!hasToolchain) return ok(false, '工具链未安装');
+  return ok(nodeBin.startsWith(root + sep), nodeBin);
+});
+
+check('依赖装在项目内（node_modules 有实际内容）', () => {
+  const nm = join(root, 'node_modules');
+  if (!existsSync(nm)) return ok(false, 'node_modules 不存在');
+  const n = readdirSync(nm).length;
+  return ok(n > 10, `node_modules 只有 ${n} 项，可能是空的`);
+});
+
+// ── ③ 构建缓存也在项目内 ────────────────────────────────────
+// .cache/npm 是 .npmrc 里 cache=./.cache/npm 的结果。
+// 这条与 ① 互相印证：① 看 npm 自己怎么说，③ 看目录是否真的存在。
+check('.cache/npm 存在且位于项目内', () => {
+  const p = join(root, '.cache/npm');
+  if (!existsSync(p)) {
+    return ok(false, `${p} 不存在 —— npm 缓存可能写到了 $HOME/.npm`);
+  }
+  return ok(p.startsWith(root + sep), p);
+});
+
+// ── ④ $HOME 里没有本项目的残留目录 ──────────────────────────
+// 反面证据：即使配置正确，历史上某次运行也可能留下过东西。
+// 只查明确属于本项目的名字，不去扫全 $HOME（那太慢且会误报）。
+const PROJECT_HOME_RESIDUE = [
+  '.cheng-rss', '.cheng-rss-cache', '.cheng-rss-node',
+  'cheng-rss', 'cheng-rss-cache',
+  '.ai-rss', '.ai-rss-cache', // 改名前的旧名字，若存在说明清理没做干净
+];
+check('$HOME 下没有本项目的残留目录', () => {
+  const home = homedir();
+  const found = PROJECT_HOME_RESIDUE.filter((n) => {
+    try {
+      statSync(join(home, n));
+      return true;
+    } catch { return false; }
+  });
+  return ok(found.length === 0,
+    `$HOME (${home}) 下发现: ${found.join(', ')}`);
+});
+
+// ── ⑤ 人工排查入口可用 ──────────────────────────────────────
+// check-no-residue.mjs 是出问题时第一个该跑的东西。
+// 它自己坏掉的话，"零写入"这件事就没有可复现的验证手段了。
+check('check-no-residue.mjs 可运行且报告 PASS', () => {
+  const script = join(root, 'scripts/check-no-residue.mjs');
+  if (!existsSync(script)) return ok(false, '脚本不存在');
+  try {
+    const out = execFileSync(nodeBin, [script], {
+      cwd: root, encoding: 'utf8', timeout: 120000,
+    });
+    const pass = out.includes('PASS  项目目录之外零写入');
+    return {
+      ok: pass,
+      detail: pass ? '' : `输出里没有 PASS：${out.slice(-400)}`,
+    };
+  } catch (e) {
+    return { ok: false, detail: String(e.message).slice(0, 400) };
+  }
+});
+
+// ── ⑥ 数据目录的默认值不在 $HOME ────────────────────────────
+// `--data` 缺省是 ./data（相对 cwd），不是 ~/.cheng-rss。
+// 这条防的是"默认值悄悄改成用户目录"。
+check('doctor 默认数据目录是相对路径（不落在 $HOME）', () => {
+  if (!hasToolchain) return ok(false, '工具链未安装');
+  // 不真的跑 doctor（会建库），只查源码里的默认值
+  const cfg = join(root, 'src/server/config.ts');
+  if (!existsSync(cfg)) return ok(false, 'config.ts 不存在');
+  const src = execFileSync(nodeBin, ['-e',
+    'const f=require("node:fs");process.stdout.write(f.readFileSync(process.argv[1],"utf8"))',
+    cfg], { encoding: 'utf8', timeout: 30000 });
+  // 默认值应形如 './data' 或 'data'，且不含 homedir()/~
+  const hasHomeDefault = /dataDir\s*[:=][^\n]*homedir\(/.test(src);
+  return ok(!hasHomeDefault,
+    'config.ts 里 dataDir 的默认值用到了 homedir()，会写进用户目录');
+});
+
+summary('m0-11-no-residue');

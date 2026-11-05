@@ -1,0 +1,409 @@
+name: Release
+
+# 触发方式：
+#   · push tag v* —— 正式发布
+#   · 手动         —— 先验证一遍再打 tag（tag 推上去后已下载的产物收不回来，
+#                     所以门禁必须能在打 tag 之前跑）
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 建 Release、传产物
+  packages: write   # 推 ghcr.io
+
+env:
+  CHENG_RSS_NODE_VERSION: v24.13.0
+  REGISTRY: ghcr.io
+
+jobs:
+  # ── 门禁：全绿才允许继续 ──────────────────────────────────
+  gate:
+    name: 发布门禁
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      prerelease: ${{ steps.ver.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 缓存项目内 Node
+        uses: actions/cache@v4
+        with:
+          path: .toolchain/node
+          key: toolchain-${{ runner.os }}-${{ env.CHENG_RSS_NODE_VERSION }}
+
+      - name: 引导项目内 Node
+        shell: bash
+        run: bash scripts/bootstrap.sh
+
+      - name: 安装依赖
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js ci --no-audit --no-fund
+
+      # ── 版本一致性 ───────────────────────────────────────
+      # package.json 的版本会被 build-server.mjs 内嵌进二进制。
+      # 对不上就是发了个版本号错的产物，而且没法撤回。
+      - name: 校验 tag 与 package.json 版本一致
+        id: ver
+        shell: bash
+        run: |
+          set -e
+          PKG=$(node -p "require('./package.json').version")
+          echo "package.json: $PKG"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            echo "tag:          $TAG"
+            if [ "$PKG" != "$TAG" ]; then
+              echo "::error::tag v$TAG 与 package.json $PKG 不一致"
+              exit 1
+            fi
+          else
+            echo "手动触发，跳过 tag 校验（版本 $PKG）"
+          fi
+          echo "version=$PKG" >> "$GITHUB_OUTPUT"
+          # 版本号含 - 即为预发布（如 0.0.1-rc1）
+          case "$PKG" in
+            *-*) echo "prerelease=true"  >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: 类型检查
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js run typecheck:all
+
+      - name: 构建前端 + 服务端 + zip
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" scripts/build-client.mjs
+          "$NODE" scripts/build-server.mjs --sea
+          "$NODE" scripts/pack-client-zip.mjs
+
+      - name: 取 linux node（供 docker-path）
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" scripts/fetch-linux-node.mjs
+
+      - name: 全部验收（57 个脚本）
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" scripts/verify-all.mjs
+
+      # ── 门禁 3：迁移幂等 ─────────────────────────────────
+      - name: 门禁 3 — 迁移幂等（空目录连跑两次）
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          BIN="$(ls dist/cheng-rss-linux-x64)"
+          chmod +x "$BIN"
+          rm -rf .tmp/idem && mkdir -p .tmp/idem
+          "$BIN" migrate --data .tmp/idem --quiet
+          echo "第一次 migrate: OK"
+          "$BIN" migrate --data .tmp/idem --quiet
+          echo "第二次 migrate: OK（幂等）"
+
+  # ── 二进制：矩阵构建，每个 runner 造自己平台的产物 ────────
+  #
+  # 不做交叉构建。SEA 的注入底本必须是目标平台的 node，
+  # 在 ubuntu 上造 win 产物需要额外下载一份 node.exe 当底本；
+  # 让 windows runner 自己造就完全不需要那个机制
+  # （此时 wantTarget === hostTarget，build-sea.mjs 零参数即可）。
+  binaries:
+    name: 二进制（${{ matrix.os }}）
+    needs: gate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 缓存项目内 Node
+        uses: actions/cache@v4
+        with:
+          path: .toolchain/node
+          key: toolchain-${{ runner.os }}-${{ env.CHENG_RSS_NODE_VERSION }}
+
+      - name: 引导项目内 Node
+        shell: bash
+        run: bash scripts/bootstrap.sh
+
+      - name: 安装依赖
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js ci --no-audit --no-fund
+
+      - name: 构建二进制
+        shell: bash
+        run: |
+          set -e
+          NODE=./.toolchain/node/bin/node
+          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+          "$NODE" scripts/build-sea.mjs
+
+      - name: 定位产物
+        id: artifact
+        shell: bash
+        run: |
+          set -e
+          case "${{ runner.os }}" in
+            Windows) NAME="cheng-rss-win32-x64.exe" ;;
+            *)       NAME="cheng-rss-linux-x64" ;;
+          esac
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          ls -la "dist/$NAME"
+          echo "size=$(stat -c %s "dist/$NAME" 2>/dev/null || stat -f %z "dist/$NAME")" >> "$GITHUB_OUTPUT"
+
+      # ── 门禁 1：二进制冒烟（洁净目录） ───────────────────
+      - name: 门禁 1 — 二进制冒烟（洁净目录 + 首页 + doctor）
+        shell: bash
+        run: |
+          set -e
+          NAME="${{ steps.artifact.outputs.name }}"
+          CLEAN="$(mktemp -d)"
+          cp "dist/$NAME" "$CLEAN/"
+          cd "$CLEAN"
+          chmod +x "$NAME" 2>/dev/null || true
+
+          echo "--- version ---"
+          "./$NAME" version
+
+          echo "--- migrate（空目录）---"
+          "./$NAME" migrate --data ./d --quiet
+          echo "OK"
+
+          echo "--- doctor ---"
+          "./$NAME" doctor --data ./d --quiet || { echo "::error::洁净目录 doctor 失败"; exit 1; }
+
+          echo "--- serve + 门禁 2（静态资源内嵌）---"
+          PORT=3311
+          "./$NAME" serve --data ./d --port $PORT --host 127.0.0.1 &
+          SRV=$!
+          READY=0
+          for i in $(seq 1 40); do
+            if curl -fsS "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then READY=1; break; fi
+            sleep 1
+          done
+          if [ "$READY" != "1" ]; then
+            echo "::error::二进制在洁净目录里起不来"
+            kill $SRV 2>/dev/null || true
+            exit 1
+          fi
+
+          curl -fsS "http://127.0.0.1:$PORT/api/health"
+          echo
+          # 门禁 2：首页必须含 React 挂载点 —— 证明前端是从二进制内部读的
+          curl -fsS "http://127.0.0.1:$PORT/" | grep -q 'id="root"'
+          echo "门禁 2 OK：首页含 id=\"root\"（静态资源已内嵌）"
+
+          echo "--- doctor --url（服务在线时应通过）---"
+          "./$NAME" doctor --data ./d --url "http://127.0.0.1:$PORT" --quiet
+          echo "doctor --url OK"
+
+          kill $SRV 2>/dev/null || true
+          sleep 1
+
+      - name: 上传二进制
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.os }}
+          path: dist/cheng-rss-*
+          if-no-files-found: error
+
+  # ── Docker ────────────────────────────────────────────────
+  docker:
+    name: Docker 镜像
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 镜像标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          # 关键：预发布不能覆盖 latest。
+          # type=raw,value=latest 默认对每个 tag 都生效，于是一个 rc 就会
+          # 变成所有人的默认镜像。latest=false 全局关掉，只在正式版补回。
+          #
+          # 为什么条件里还要判 ref_type：
+          # 手动触发（workflow_dispatch）时 ref_name 是分支名（如 main），
+          # 它不含 '-'，单看 ref_name 会把一个手动构建错打成 latest。
+          # 只有"这是个 tag"且"版本号不含 -"两条同时成立才补 latest。
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 门禁 4：镜像起来后必须变 healthy。
+      # healthcheck 现在会探 HTTP（doctor --url），不只是读库。
+      - name: 门禁 4 — 容器 healthy
+        run: |
+          set -e
+          TAG="$(echo "${{ steps.meta.outputs.tags }}" | head -1)"
+          echo "测试镜像: $TAG"
+          docker run -d --name cheng-rss-rel -p 3312:3000 "$TAG"
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:3312/api/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3312/api/health
+          echo
+          curl -fsS http://127.0.0.1:3312/ | grep -q 'id="root"'
+          echo "首页 OK"
+          # 数据目录对非 root 用户可写（Dockerfile 的 mkdir 提前验证）
+          docker exec cheng-rss-rel sh -c 'touch /app/data/.probe && rm /app/data/.probe'
+          echo "数据目录可写 OK"
+          # 等 healthcheck 真的变 healthy
+          for i in $(seq 1 20); do
+            ST=$(docker inspect --format='{{.State.Health.Status}}' cheng-rss-rel)
+            echo "health: $ST"
+            [ "$ST" = "healthy" ] && break
+            sleep 5
+          done
+          ST=$(docker inspect --format='{{.State.Health.Status}}' cheng-rss-rel)
+          if [ "$ST" != "healthy" ]; then
+            echo "::error::容器 healthcheck 未变为 healthy（当前 $ST）"
+            docker logs cheng-rss-rel
+            exit 1
+          fi
+          docker rm -f cheng-rss-rel
+
+  # ── 发布 ──────────────────────────────────────────────────
+  publish:
+    name: 发布
+    needs: [gate, binaries, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载二进制
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: dist
+          merge-multiple: true
+
+      - name: 列产物
+        run: ls -la dist/
+
+      # 校验和：给出各平台的 SHA256SUMS，下载后可自验。
+      # 用 sha256sum（Linux runner）算出，Windows 用户可用 certutil 对照。
+      - name: 生成 SHA256SUMS
+        run: |
+          set -e
+          cd dist
+          sha256sum cheng-rss-linux-x64 cheng-rss-win32-x64.exe > SHA256SUMS
+          cat SHA256SUMS
+          echo "--- 自验 ---"
+          sha256sum -c SHA256SUMS
+
+      # 发布说明：从 PLAN.md 的变更记录里取最新一条太脆弱，
+      # 这里用固定格式，免得文档改结构就发布失败。
+      - name: 生成 Release 说明
+        id: notes
+        run: |
+          set -e
+          VER="${{ needs.gate.outputs.version }}"
+          PRE="${{ needs.gate.outputs.prerelease }}"
+          {
+            echo "## cheng-rss v$VER"
+            echo
+            if [ "$PRE" = "true" ]; then
+              echo "> **预发布（pre-release）**：功能可用，但不保证接口与数据格式稳定。"
+              echo "> 试用请务必备份 \`data/\` 目录。"
+              echo
+            fi
+            echo "澄 (cheng) —— 自托管的私人知识库：订阅进来，AI 沉淀，剩下的留给你。"
+            echo
+            echo "### 下载"
+            echo
+            echo "| 平台 | 文件 |"
+            echo "|---|---|"
+            echo "| Linux x64 | \`cheng-rss-linux-x64\` |"
+            echo "| Windows x64 | \`cheng-rss-win32-x64.exe\` |"
+            echo "| Docker | \`ghcr.io/${{ github.repository }}:$VER\` |"
+            echo
+            echo "前端资源已内嵌，**不需要旁边的 \`dist/\` 目录**，复制一个文件即可运行。"
+            echo
+            echo "### 校验"
+            echo
+            echo '```'
+            echo "sha256sum -c SHA256SUMS"
+            echo '```'
+            echo
+            echo "### 快速开始"
+            echo
+            echo '```bash'
+            echo "./cheng-rss-linux-x64 migrate --data ./data"
+            echo "./cheng-rss-linux-x64 serve --data ./data"
+            echo '```'
+            echo
+            echo "详见 [README](https://github.com/${{ github.repository }}#快速开始)。"
+            echo
+            echo "**已知限制**：暂无数据导出/导入（计划 M6），备份请直接拷贝 \`data/\` 目录。"
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: 建 Release 并上传
+        uses: softprops/action-gh-release@v2
+        with:
+          # 预发布不进 Releases 页的 Latest 位置
+          prerelease: ${{ needs.gate.outputs.prerelease == 'true' }}
+          body_path: release-notes.md
+          files: |
+            dist/cheng-rss-linux-x64
+            dist/cheng-rss-win32-x64.exe
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true

@@ -93,17 +93,21 @@ check('npm 缓存路径在项目内', () => {
   };
 });
 
-check('未使用系统全局 npm 前缀', () => {
-  if (!hasToolchain) return ok(false, '工具链未安装，跳过');
-  if (!npmCli) return ok(false, '找不到 npm-cli.js');
-  // 项目内 node 的 npm 应该指向项目内的 lib，不能是 AppData/Roaming 那套
-  const prefix = npmGet(['config', 'get', 'prefix']);
-  const inProject = resolve(prefix).startsWith(resolve(root));
-  return {
-    ok: inProject,
-    detail: `npm prefix 指向项目外: ${prefix}`,
-  };
-});
+// npm prefix 这条曾经断言「必须在项目内」，那是个**错误的要求**。
+//
+// `.npmrc` 里写不了 prefix —— npm 会直接报
+//   "config prefix cannot be changed from project config"
+// 项目能控制的只有 cache（cache=./.cache/npm），prefix 由用户环境或
+// npm_config_prefix 决定。本机恰好因为项目内 node 的默认布局而落在
+// .toolchain/node 下，于是这条断言在本地一直绿；CI 的干净 runner 上没有
+// 那个环境，prefix 落回系统默认（%APPDATA%\npm），断言就红了。
+//
+// 这属于「断言在验一件项目没有承诺的事」。它红在两个平台上、而本地永远
+// 绿 —— 又是一种只在 CI 才暴露的假阳性。删掉它，而不是放宽阈值：
+// 放宽到一个刚好能过的范围，等于把断言改成"永远通过"（PLAN 附录 A.5）。
+//
+// cache 那条保留：cache 是 .npmrc 真正承诺的东西，落到项目外就是真问题
+// （用户卸载项目后那里会留几百 MB）。
 
 // ── ③ 忽略规则必须真的生效（不能只检查字符串出现）───────────
 // 曾经踩过：.gitignore 不支持行尾注释，写了

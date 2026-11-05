@@ -20,7 +20,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { group, check, ok, eq, summary } from './harness.mjs';
+import { group, check, ok, summary } from './harness.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -55,17 +55,18 @@ check('npm cache 指向项目内（不是 $HOME）', () => {
   };
 });
 
-check('npm prefix 指向项目内（不是 $HOME）', () => {
-  if (!hasToolchain) return ok(false, '工具链未安装');
-  const prefix = execFileSync(nodeBin, [npmCli, 'config', 'get', 'prefix'], {
-    encoding: 'utf8', timeout: 60000,
-  }).trim();
-  const inProject = resolve(prefix).startsWith(resolve(root) + sep);
-  return {
-    ok: inProject,
-    detail: `prefix=${prefix}，不在项目内`,
-  };
-});
+// npm prefix 不在这里断言。
+//
+// 项目能控制的只有 cache（`.npmrc` 里 cache=./.cache/npm）。prefix
+// 写不进 `.npmrc` —— npm 会报 "config prefix cannot be changed from
+// project config"，它由用户环境或 npm_config_prefix 决定。
+//
+// 本机因为项目内 node 的默认布局，prefix 恰好落在 .toolchain/node 下；
+// CI 的干净 runner 上它落回系统默认。于是这条断言本地永远绿、CI 永远红。
+// 那是断言在验一件项目没有承诺的事，删掉比放宽诚实 —— 放宽到一个
+// 刚好能过的范围，等于把它改成"永远通过"（PLAN 附录 A.5）。
+//
+// 真正与"零写入"相关的是 cache 那条，已在上方保留。
 
 // ── ② 工具链装在项目内 ──────────────────────────────────────
 check('Node 运行时在项目内', () => {

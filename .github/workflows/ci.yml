@@ -89,9 +89,13 @@ jobs:
         run: '"$NODE_BIN" scripts/pack-client-zip.mjs'
 
       # docker-path 要验 Dockerfile 里 `build-sea --target linux-x64` 那一步，
-      # 需要一个 linux 的 node 当 SEA 注入底本。CI 有网络，取一次即可。
+      # 需要一个 linux 的 node 当 SEA 注入底本。
+      #
+      # **两个平台都要取**，不只是 Linux：docker-path 的设计是"跳过即失败"
+      # （它把 SKIP 也算一条 FAIL，理由是核心验证没执行不能显示成 PASS）。
+      # 之前只在 Linux 上下载，于是 Windows 上恒 FAIL —— 那不是实现坏了，
+      # 是缺底本。SEA 在哪个宿主上产 linux ELF 不重要，注入底本对就行。
       - name: 取 linux node（供 docker-path 验证 linux 产物）
-        if: runner.os == 'Linux'
         shell: bash
         run: '"$NODE_BIN" scripts/fetch-linux-node.mjs'
 

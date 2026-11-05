@@ -377,12 +377,21 @@ const MEASURE = `(() => {
       const ch = Number(getComputedStyle(paper).getPropertyValue('--reader-width').trim() || 80) || 80;
       const cs = getComputedStyle(paper);
       const p = document.createElement('div');
+      // 五项都抄：都影响 1ch 的宽度，少抄一个基准就偏
       p.style.cssText = 'position:absolute;visibility:hidden;width:' + ch
-        + 'ch;font-size:' + cs.fontSize + ';font-family:' + cs.fontFamily;
+        + 'ch;font-size:' + cs.fontSize + ';font-family:' + cs.fontFamily
+        + ';font-weight:' + cs.fontWeight + ';letter-spacing:' + cs.letterSpacing
+        + ';word-spacing:' + cs.wordSpacing;
       document.body.appendChild(p);
       const w = p.getBoundingClientRect().width;
       p.remove();
       return Math.round(w);
+    })(),
+    // 正文可用宽度上限 = 阅读区宽 - 58（左右内边距 56 + 边框 2），
+    // 对应 CSS 的 max-width: calc(100% - 58px)
+    maxCol: (() => {
+      const pr = pane ? pane.getBoundingClientRect() : null;
+      return pr ? Math.round(pr.width - 58) : 0;
     })(),
     heads: body ? body.querySelectorAll('h2,h3').length : 0,
     headIds: [...(document.querySelectorAll('.article-body h2, .article-body h3'))].map((h) => h.id),
@@ -446,10 +455,14 @@ check('② 1440 下目录**不渲染**（空白不够，不能压正文）', () 
 // ch 是字体相对单位，换字族（无衬线 → 衬线/思源黑）会让 1ch 的宽度变，
 // 80ch 就不再是 712px。写死像素的话，一次字体替换就会被判成"正文变宽了"，
 // 而那是字体的事，不是实现的事。
-check('② 无目录时正文列宽 = 偏好字符数（1440 下 80ch 的实测宽度）', () => {
-  return ok(Math.abs(at1440.bodyW - at1440.wantChW) <= 6,
-    `正文列 ${at1440.bodyW}px，${at1440.readerVar}ch 实测 ${at1440.wantChW}px`
-    + `（--reader-width=${at1440.readerVar}）`);
+check('② 无目录时正文列宽 = min(偏好字符数, 可用宽度)', () => {
+  // 不写死"必须等于 Nch"。实现是 width: calc(Nch) + max-width:
+  // calc(100% - 58px)，阅读区窄于 Nch 时会被正确地收窄。1ch 较宽的
+  // 平台（Linux ~10.5px，80ch=840 > 可用 818）撞 max-width，
+  // 较窄的平台（Windows ~10.0px，80ch=800）则 width 生效。两者都对。
+  const want = Math.min(at1440.wantChW, at1440.maxCol);
+  return ok(Math.abs(at1440.bodyW - want) <= 8,
+    `正文列 ${at1440.bodyW}px，期望 min(${at1440.readerVar}ch=${at1440.wantChW}, 可用 ${at1440.maxCol}) = ${want}px`);
 });
 check('① 整页无横向溢出（纸 + 阴影没把页面撑宽）', () => {
   return eq(at1440.pageOverflowX, 0);

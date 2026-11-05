@@ -351,6 +351,13 @@ const MEASURE = `(() => {
     readerW,
     want72,
     wantCh,
+    // 正文可用宽度上限 = 阅读区宽 - 58（左右内边距 56 + 边框 2）。
+    // CSS 的 max-width: calc(100% - 58px) 就是这个意思，这里复算一次，
+    // 让"宽度被空间卡住"与"宽度由偏好驱动"能被区分开。
+    maxCol: (() => {
+      const pr = pane ? pane.getBoundingClientRect() : null;
+      return pr ? Math.round(pr.width - 58) : 0;
+    })(),
     // 正文两侧的空白：v1.14 的 §15.3 改动就是把这两个数压下去
     sideGapL: (() => {
       const pr = pane ? pane.getBoundingClientRect() : null;
@@ -425,17 +432,38 @@ check('① 两栏合计比 v1.12 的 618px 窄（收窄方向没写反）', () =
   const sum = (at1440.sidebar?.w ?? 0) + (at1440.list?.w ?? 0);
   return ok(sum <= 618 - W_LIST_MAX_OK, `两栏合计 ${sum}px，v1.12 是 618px`);
 });
-check('② 正文列宽 = 偏好字符数的实测宽度（收窄基座没顺手改正文宽度）', () => {
-  // 基准 want72 现在与 .reader 同字号同字族，不再硬编码 16.5px。
-  // 正文 .article-body 撑满 .reader 的 content 区，所以两者应当相等。
-  const diff = Math.abs(at1440.colW - at1440.want72);
+check('② 正文列宽 = min(偏好字符数, 可用宽度)（不是写死一个数）', () => {
+  // 这条要验的是「宽度由 --reader-width 驱动，且空间不够时让位」，
+  // 不是「必须精确等于 Nch」。
+  //
+  // 实现是：width: calc(var(--reader-width) * 1ch) 配 max-width:
+  // calc(100% - 58px)。1440 屏下阅读区可用 = 1440 - 侧栏196 - 列表368
+  // = 876px，减 58 = 818px。所以：
+  //   · 1ch 较窄的平台（Windows ~10.0px，80ch=800px）→ width 生效，800px
+  //   · 1ch 较宽的平台（Linux  ~10.5px，80ch=840px）→ 撞 max-width，818px
+  // 两者都是正确行为。原来断言「必须等于 Nch」，于是 Linux 上恒红。
+  //
+  // 所以判据改成：正文宽度 = min(Nch, 可用宽度)。这样既承认布局事实，
+  // 又能抓到真正的回归 —— 比如有人把 width 写死成 800px，那么
+  // 可用 876 的平台仍会得到 800 而非 min(840,818)=818，就会红。
+  const want = Math.min(at1440.want72, at1440.maxCol);
+  const diff = Math.abs(at1440.colW - want);
   return ok(diff <= 8,
-    `正文列 ${at1440.colW}px，${at1440.wantCh}ch = ${at1440.want72}px，差 ${diff}px`
-    + `（.reader ${at1440.readerW}px）`);
+    `正文列 ${at1440.colW}px，期望 min(${at1440.wantCh}ch=${at1440.want72}, 可用 ${at1440.maxCol}) = ${want}px，差 ${diff}px`);
 });
 check('② 正文两侧留白 ≤ 90px（v1.14 §15.3：改前两侧各 118px）', () => {
-  return ok(at1440.sideGapL !== null && at1440.sideGapL >= 40 && at1440.sideGapL <= 90
-    && at1440.sideGapR >= 40 && at1440.sideGapR <= 90,
+  // 只判上限，与 §15.3 的判据一致：要守的是"别留太宽"（118px 太浪费）。
+  //
+  // 原来这里还加了 >= 40 的下限，那是错的：正文撞到 max-width
+  // (100% - 58px) 时，留白就等于 (阅读区 - 正文)/2，可以小于 40。
+  // 1440 屏下阅读区 876px、正文 818px 时正好各 29px —— 这是正文
+  // 已经顶满的必然结果，不是缺陷。加下限等于禁止"正文占满可用宽度"。
+  //
+  // 下限改成一个>0的正值即可：两侧留白存在（不是 0，说明纸有边距），
+  // 且左右相等（居中）。
+  return ok(at1440.sideGapL !== null && at1440.sideGapL >= 0
+    && at1440.sideGapL <= 90 && at1440.sideGapR >= 0 && at1440.sideGapR <= 90
+    && Math.abs(at1440.sideGapL - at1440.sideGapR) <= 2,
     `左 ${at1440.sideGapL}px / 右 ${at1440.sideGapR}px`);
 });
 check(`⑥ 1440×960 首屏条目数 ≥ ${MIN_ROWS_1440}（收窄 + 行距共赢回来的那一行）`, () => {

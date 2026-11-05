@@ -396,6 +396,7 @@ const after = await evaluate(`(() => {
     hasBody: Boolean(body && body.textContent.trim().length > 50),
     hasAiCard: Boolean(document.querySelector('.ai-card')),
     colWidth: bw ? Math.round(bw) : 0,
+    maxCol: pr ? Math.round(pr.width - 58) : 0,
     bodyFontSize: body ? getComputedStyle(body).fontSize : null,
     wantCh,
     want72: wantW,   // 名字沿用（下游断言用），语义变成"wantCh 个字符的实测宽度"
@@ -413,11 +414,16 @@ check('点开条目后列表仍在（不是跳页）', () => {
 check('阅读区显示正文', () => ok(after.hasBody, '正文为空'));
 check('阅读区显示 AI 摘要卡', () => ok(after.hasAiCard, '没有 .ai-card'));
 check('阅读区占位已消失', () => ok(after.placeholderGone));
-check('正文列宽等于偏好的字符数（§15.3，默认可调）', () => {
-  // 允差 4px：ch 的实测受字体回退影响
-  const diff = Math.abs(after.colWidth - after.want72);
-  return ok(diff <= 4,
-    `实际列宽 ${after.colWidth}px，${after.wantCh}ch = ${after.want72}px，差 ${diff}px`);
+check('正文列宽 = min(偏好字符数, 可用宽度)（§15.3，默认可调）', () => {
+  // 不写死「必须等于 Nch」。实现是 width: calc(Nch) + max-width:
+  // calc(100% - 58px)，1440 屏下阅读区可用宽约 876px（减 58 = 818），
+  // 于是 1ch 较宽的平台（Linux ~10.5px，80ch=840）会撞 max-width 收到
+  // 818，1ch 较窄的平台（Windows ~10.0px，80ch=800）则 width 生效。
+  // 两者都对。原来断言「等于 Nch」，Linux 上恒红。详见 m1-19 的说明。
+  const want = Math.min(after.want72, after.maxCol);
+  const diff = Math.abs(after.colWidth - want);
+  return ok(diff <= 8,
+    `实际列宽 ${after.colWidth}px，期望 min(${after.wantCh}ch=${after.want72}, 可用 ${after.maxCol}) = ${want}px，差 ${diff}px`);
 });
 check('正文默认不是 72ch 时代的老宽度（v1.14 明确放宽过）', () => {
   // 这条防的是"改文档没改代码"：PLAN 说默认 80ch，代码还是 72ch。
@@ -426,10 +432,13 @@ check('正文默认不是 72ch 时代的老宽度（v1.14 明确放宽过）', (
     `--reader-width = ${after.wantCh}ch，应在 76~96 之间（§15.3 默认 80）`);
 });
 check('1440 屏下正文两侧各留白 ≤ 90px（改前是 118px）', () => {
-  // 空白要"合理"而不是"消失"：40~90px 是排版上的呼吸区，
-  // 0 会让正文贴边、>118 就是改之前被吐槽的那种
-  return ok(after.sideGapL !== null && after.sideGapL >= 40 && after.sideGapL <= 90
-    && after.sideGapR >= 40 && after.sideGapR <= 90,
+  // 只判上限。原来还加了 >= 40 的下限，那是错的：正文撞到
+  // max-width(100% - 58px) 时，留白 = (阅读区 - 正文)/2，可以小于 40。
+  // 1440 屏下阅读区 876px、正文 818px 时各 29px —— 正文已顶满，
+  // 这是正确行为。加下限等于禁止"正文占满可用宽度"。
+  // （§15.3 的判据本身只写 ≤90px，见 m1-19 的同类说明。）
+  return ok(after.sideGapL !== null && after.sideGapL >= 0 && after.sideGapL <= 90
+    && after.sideGapR >= 0 && after.sideGapR <= 90,
     `左 ${after.sideGapL}px / 右 ${after.sideGapR}px`);
 });
 

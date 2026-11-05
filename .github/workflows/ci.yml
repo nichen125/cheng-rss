@@ -112,27 +112,58 @@ jobs:
 
       # 把失败的脚本名推到 Actions 页面。
       # 泛泛说"验收失败"没有用 —— 要能一眼看出是哪个脚本、哪条断言。
+      #
+      # 注意：verify-all 的汇总表每行都是「名字 + 耗时」的格式，
+      # 直接按这个模式 grep 会把**全部 57 个**都当成失败（第一版就错在这，
+      # 两个平台报出完全相同的 10 个"失败"，一眼就该看出那不是真失败）。
+      # 必须只看行首的 FAIL 标记，并且先剥掉 ANSI 色码。
       - name: 失败原因（注解）
         if: failure()
         shell: bash
         run: |
           if [ -f .tmp/verify-out.log ]; then
-            echo "--- 失败的脚本 ---"
-            grep -E 'FAIL.*\.mjs' .tmp/verify-out.log | sed 's/^/  /' || true
-            # 逐个变成注解，Actions 页面上直接可读
-            grep -oE '[a-z0-9-]+\.mjs[[:space:]]+[0-9.]+s' .tmp/verify-out.log \
-              | awk '{print $1}' | sort -u > .tmp/failed.txt || true
-            while read -r f; do
-              [ -n "$f" ] && echo "::error::验收脚本失败: $f"
-            done < .tmp/failed.txt
+            # 剥色码后落一份纯文本，后续判断才可靠
+            sed -E 's/\x1b\[[0-9;]*m//g' .tmp/verify-out.log > .tmp/verify-plain.log
+
+            echo "--- 验收汇总 ---"
+            sed -n '/验收汇总/,/^$/p' .tmp/verify-plain.log || true
+
+            # 汇总表里以 FAIL 开头的行 → 取第一列名字
+            awk '$1 == "FAIL" {print $2}' .tmp/verify-plain.log \
+              | grep -E '\.mjs$' | sort -u > .tmp/failed.txt || true
+
+            if [ -s .tmp/failed.txt ]; then
+              while read -r f; do
+                echo "::error::验收脚本失败: $f"
+              done < .tmp/failed.txt
+            else
+              echo "::error::没有解析出失败脚本名 —— 可能是崩溃/超时，看下面的日志尾"
+            fi
+
             echo "--- 失败断言（最多 40 行）---"
-            grep -E '^\s+- ' .tmp/verify-out.log | head -40 || true
+            grep -E '^  - ' .tmp/verify-plain.log | head -40 || true
+
+            echo "--- 日志尾 60 行 ---"
+            tail -60 .tmp/verify-plain.log
+
             {
               echo "### 验收失败"
               echo
+              echo "**失败的脚本**："
+              echo
+              if [ -s .tmp/failed.txt ]; then
+                sed 's/^/- `/; s/$/`/' .tmp/failed.txt
+              else
+                echo "（未能解析，见日志）"
+              fi
+              echo
+              echo "<details><summary>失败断言</summary>"
+              echo
               echo '```'
-              grep -E '^\s+(PASS|FAIL)' .tmp/verify-out.log | grep FAIL | head -30 || echo '（无明细）'
+              grep -E '^  - ' .tmp/verify-plain.log | head -40 || echo '（无）'
               echo '```'
+              echo
+              echo "</details>"
             } >> "$GITHUB_STEP_SUMMARY" || true
           else
             echo "::error::验收在产出日志之前就退出了（可能是崩溃或超时）"

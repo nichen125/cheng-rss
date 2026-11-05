@@ -100,18 +100,43 @@ jobs:
       # 曾经的写法是 `for f in scripts/verify/m0-*.mjs`，只跑 10 个（共 57 个），
       # m1~m4 全都不在门禁里；而且缺 verify-all 已有的三样东西：
       # 单脚本 10 分钟硬超时、环境抖动重试一次、结尾 .tmp 清理。
+      #
+      # tee 一份到文件：下一步要把"哪个脚本红了"变成注解。
+      # 默认日志只有 exit code 1，而下载完整日志需要仓库 admin 权限
+      # （实测匿名 API 返回 403），注解是匿名可读的唯一通道。
       - name: 跑全部验收（57 个脚本）
         shell: bash
-        run: '"$NODE_BIN" scripts/verify-all.mjs'
+        run: |
+          set -o pipefail
+          "$NODE_BIN" scripts/verify-all.mjs 2>&1 | tee .tmp/verify-out.log
 
-      # 失败时把原因推到 Actions 页面。
-      # 默认只有 "exit code 1"，而下载完整日志需要仓库 admin 权限；
-      # 注解是匿名可读的，下次红了能当场看到原因。
+      # 把失败的脚本名推到 Actions 页面。
+      # 泛泛说"验收失败"没有用 —— 要能一眼看出是哪个脚本、哪条断言。
       - name: 失败原因（注解）
         if: failure()
         shell: bash
         run: |
-          echo "::error::验收失败。重新跑单个脚本：node scripts/verify-all.mjs 'm2-0'"
+          if [ -f .tmp/verify-out.log ]; then
+            echo "--- 失败的脚本 ---"
+            grep -E 'FAIL.*\.mjs' .tmp/verify-out.log | sed 's/^/  /' || true
+            # 逐个变成注解，Actions 页面上直接可读
+            grep -oE '[a-z0-9-]+\.mjs[[:space:]]+[0-9.]+s' .tmp/verify-out.log \
+              | awk '{print $1}' | sort -u > .tmp/failed.txt || true
+            while read -r f; do
+              [ -n "$f" ] && echo "::error::验收脚本失败: $f"
+            done < .tmp/failed.txt
+            echo "--- 失败断言（最多 40 行）---"
+            grep -E '^\s+- ' .tmp/verify-out.log | head -40 || true
+            {
+              echo "### 验收失败"
+              echo
+              echo '```'
+              grep -E '^\s+(PASS|FAIL)' .tmp/verify-out.log | grep FAIL | head -30 || echo '（无明细）'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY" || true
+          else
+            echo "::error::验收在产出日志之前就退出了（可能是崩溃或超时）"
+          fi
           echo "::error::本机复现：node scripts/verify-all.mjs --keep-tmp 后看 .tmp/verify"
 
   docker:

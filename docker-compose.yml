@@ -19,9 +19,11 @@ services:
       - ./data:/app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/app/cheng-rss", "doctor", "--quiet"]
+      # --url 让它真的探一次 HTTP，而不是只读磁盘上的库。
+      # 不加的话，进程活着但服务挂死时仍会被报成 healthy（PLAN §16.3）。
+      test: ["CMD", "/app/cheng-rss", "doctor", "--url", "http://127.0.0.1:3000", "--quiet"]
       interval: 60s
-      timeout: 10s
+      timeout: 15s
       start_period: 20s
       retries: 3
     # 单进程 SQLite，不需要额外权限

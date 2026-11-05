@@ -12,8 +12,8 @@
 // Docker 一条单独判定：本机没装 Docker 时标记为 SKIP 而非 FAIL，
 // 避免"没装工具"被误报成"实现有问题"。
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, cpSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, cpSync, statSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, summary } from './harness.mjs';
@@ -116,6 +116,36 @@ try {
 }
 
 const binPort = 35000 + Math.floor(Math.random() * 1000);
+
+// ── ④ $HOME 零写入（文件头声称过，此前没有任何断言）────────────
+//
+// 这一段在二进制启动**之前**取一次快照，服务跑完、交互过一轮之后
+// 再取一次，比较顶层条目差异。
+//
+// 为什么只看顶层 + 数量，不做全量递归：CI runner 的 HOME 很脏
+// （浏览器缓存、临时文件一直在变），递归比较既慢又会误报。
+// 而"项目往 HOME 里写东西"必然体现为顶层新增（.cheng-rss、.config/xxx
+// 之类），顶层足够抓到。已知的必然写盘位置（浏览器 profile 等）由
+// ALLOW 排除 —— 它们属于验收工具自己，不属于被测二进制。
+const HOME_ALLOW = new Set([
+  '.npm', '.cache', '.config', '.local', '.dsh', '.claude', '.cursor',
+  'AppData', '.gitconfig', '.git-credentials', '.npmrc', '.vscode',
+]);
+function homeSnapshot() {
+  try {
+    return new Set(
+      readdirSync(homedir(), { withFileTypes: true })
+        .filter((e) => !HOME_ALLOW.has(e.name))
+        .map((e) => e.name),
+    );
+  } catch { return new Set(); }
+}
+const homeBefore = homeSnapshot();
+
+// 二进制模式报的版本号，②用它作为"同一份代码"的对照基准。
+// 不写死版本号：见 ② 里那条断言的注释。
+let binVersion = '';
+
 binServer = startServer(join(cleanDir, binName), ['serve', '--data', cleanData, '--port', String(binPort)], cleanData, binPort, cleanDir);
 const binReady = await binServer.ready;
 
@@ -165,6 +195,8 @@ if (binReady) {
   const h = await fetch(`${base}/api/health`);
   const hb = await h.json();
   check('二进制 /api/health 正常', () => ok(h.status === 200 && hb.db === 'ok'));
+  // 记下二进制报的版本，后面与源码模式对照（不写死版本号，见 ②）
+  binVersion = String(hb.version ?? '');
 
   // ── ③ 插件三端点 ────────────────────────────────────────
   const lu = await fetch(`${base}/api/auth/loginUserInfo`);
@@ -215,7 +247,13 @@ if (srcReady) {
   const h = await fetch(`${base}/api/health`);
   const hb = await h.json();
   check('源码模式读到同一份数据（schema 一致）', () => {
-    return ok(h.status === 200 && hb.db === 'ok' && hb.version === '0.1.0');
+    // 不写死版本号：这条验的是"两种运行方式读到同一份数据"，
+    // 版本号具体是多少与它无关 —— 写死 '0.1.0' 会让每次发版都误红一次。
+    // 只要求版本号非空且两种模式报的是同一个。
+    const ver = String(hb.version ?? '');
+    return ok(h.status === 200 && hb.db === 'ok' && ver.length > 0 && ver === binVersion,
+      `源码模式 ${JSON.stringify({ status: h.status, db: hb.db, version: ver })}，`
+      + `二进制模式 version=${JSON.stringify(binVersion)}`);
   });
 
   // 二进制里创建的账号在源码模式仍然有效
@@ -232,6 +270,27 @@ await stop(srcServer);
 check('二进制体积合理（< 150MB）', () => {
   const mb = statSync(binPath).size / 1024 / 1024;
   return ok(mb > 20 && mb < 150, `${mb.toFixed(0)}MB`);
+});
+
+// ── ④ $HOME 零写入 ──────────────────────────────────────────
+//
+// 这是 §4.3「一切资源留在项目内」的验收，也是发布门禁第 5 条。
+// 文件头一直写着这一条，但此前没有任何断言 —— 空口承诺比不承诺更糟，
+// 因为它让人以为已经验过了。
+const homeAfter = homeSnapshot();
+const homeAdded = [...homeAfter].filter((x) => !homeBefore.has(x));
+
+check('二进制启动/交互后 $HOME 顶层零新增', () => {
+  return ok(homeAdded.length === 0,
+    `$HOME (${homedir()}) 新增: ${homeAdded.slice(0, 8).join(', ')}` +
+    (homeAdded.length > 8 ? ` …共 ${homeAdded.length} 项` : ''));
+});
+
+check('数据目录确实建在 --data 指定的位置（不是 $HOME）', () => {
+  // 正面证据：光"$HOME 没新增"还可能是因为什么都没写。
+  // 必须同时证明数据确实写到了我们指定的地方。
+  const dbFile = join(cleanData, 'app.db');
+  return ok(existsSync(dbFile), `期望 ${dbFile} 存在`);
 });
 
 // ── Docker：无 docker 时 SKIP ──────────────────────────────

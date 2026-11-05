@@ -56,6 +56,10 @@ const USAGE = `澄 (cheng) —— 自托管的私人知识库：订阅进来，A
   --host <addr>   监听地址（默认 127.0.0.1）
   --quiet         只输出错误
   -h, --help      显示帮助
+
+doctor 专用:
+  --url <addr>    额外探测一次 HTTP（如 http://127.0.0.1:3000），
+                  供 Docker HEALTHCHECK 判断"现在能不能服务"
 `;
 
 interface Args {
@@ -63,6 +67,8 @@ interface Args {
   data?: string;
   port?: number;
   host?: string;
+  // doctor --url：额外探测一次 HTTP，供 Docker HEALTHCHECK 用（§16.3）
+  url?: string;
   quiet: boolean;
   rest: string[];
 }
@@ -75,12 +81,14 @@ function parseArgs(argv: string[]): Args {
       case '--data': out.data = argv[++i]; break;
       case '--port': out.port = Number(argv[++i]); break;
       case '--host': out.host = argv[++i]; break;
+      case '--url': out.url = argv[++i]; break;
       case '--quiet': out.quiet = true; break;
       case '-h': case '--help': out._.push('--help'); break;
       default:
         if (a.startsWith('--data=')) out.data = a.slice(7);
         else if (a.startsWith('--port=')) out.port = Number(a.slice(7));
         else if (a.startsWith('--host=')) out.host = a.slice(7);
+        else if (a.startsWith('--url=')) out.url = a.slice(6);
         else if (a.startsWith('-')) out.rest.push(a);
         else out._.push(a);
     }
@@ -149,7 +157,11 @@ function cmdMigrate(args: Args): void {
   }
 }
 
-function cmdDoctor(args: Args): void {
+function cmdDoctor(args: Args): Promise<void> {
+  return runDoctor(args);
+}
+
+async function runDoctor(args: Args): Promise<void> {
   const cfg = loadConfig({ dataDir: args.data });
   type Item = { name: string; ok: boolean; detail: string; fatal?: boolean };
   const items: Item[] = [];
@@ -166,13 +178,21 @@ function cmdDoctor(args: Args): void {
   });
 
   // 2. 库存在且可打开
+  //
+  // fatal: 没有库就不能服务。此前这里是 false，于是 `doctor` 对一个空目录
+  // 返回 0，而 Dockerfile 的 HEALTHCHECK 正是以它的退出码判定健康 ——
+  // 一个没有数据库的容器会被报成 healthy。
+  //
+  // 注意区分两种状态：`migrate` 之前本来就没有库（首次部署的正常路径），
+  // 但那时也不该有容器在跑；`serve` 自己会迁移。所以这里判 fatal 是对的：
+  // 健康检查问的是"现在能不能服务"，不是"将来能不能"。
   const dbPath = `${cfg.dataDir}/app.db`;
   const dbExists = existsSync(dbPath);
   items.push({
     name: '数据库存在',
     ok: dbExists,
     detail: dbExists ? dbPath : '尚未创建，运行 migrate',
-    fatal: false,
+    fatal: true,
   });
 
   if (dbExists) {
@@ -268,6 +288,46 @@ function cmdDoctor(args: Args): void {
     detail: hasKey ? '已设置' : '未设置，AI 功能不可用',
   });
 
+  // 7. HTTP 探测（可选，`--url` 给出时）
+  //
+  // 为什么需要它：上面每一项查的都是**磁盘**。进程活着但 HTTP 已经不应答
+  // （事件循环卡死、端口被占、路由装配坏了）时，上面全部通过、退出码 0，
+  // 而 HEALTHCHECK 的语义恰恰是"这个容器现在能不能提供服务"。
+  //
+  // 用内置 fetch 而不是装 curl：这个二进制本身就是 Node SEA，为一个 GET
+  // 多背一个包不值得。超时必须显式给 —— 不加的话探测挂住时 healthcheck
+  // 永远不返回，比不检查更糟（Docker 会一直等，而不是报 unhealthy）。
+  if (args.url) {
+    const url = `${args.url.replace(/\/+$/, '')}/api/health`;
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const body = await r.json().catch(() => null) as
+        { ok?: boolean; db?: string; version?: string } | null;
+      const healthy = r.ok && body?.ok === true && body?.db === 'ok';
+      items.push({
+        name: 'HTTP /api/health',
+        ok: healthy,
+        detail: healthy
+          ? `db=${body!.db} ${body!.version ?? ''}`.trim()
+          : (r.ok ? `应答异常: ${JSON.stringify(body)}` : `HTTP ${r.status}`),
+        fatal: true,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      items.push({
+        name: 'HTTP /api/health',
+        ok: false,
+        detail: `连不上 ${url}（${msg}）`,
+        fatal: true,
+      });
+    }
+  }
+
+  // 致命判定必须在**所有** items 都 push 完之后算。
+  //
+  // 这里踩过一次：fatalFail 原本算在 HTTP 探测之前，于是 `--url` 连不上
+  // 时列表里明明有 `[✗]`，退出码却是 0 —— 而 Docker 只看退出码。
+  // 断言「有 ✗」和断言「exit 1」是两件事，后者才是 HEALTHCHECK 判据。
   const fatalFail = items.some((i) => i.fatal && !i.ok);
   const anyFail = items.some((i) => !i.ok);
 

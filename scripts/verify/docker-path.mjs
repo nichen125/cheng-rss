@@ -62,6 +62,49 @@ check('HEALTHCHECK 指向 doctor（会真读库）', () => {
   return ok(/HEALTHCHECK[\s\S]{0,200}doctor/.test(df), 'HEALTHCHECK 未使用 doctor');
 });
 
+// HEALTHCHECK 必须探 HTTP，不能只读库。
+//
+// 起因是一个真 bug：`doctor` 的各项检查查的都是磁盘，进程活着但 HTTP
+// 已不应答（事件循环卡死、端口被占、路由装配坏了）时它照样返回 0，
+// 容器被报成 healthy —— 健康检查失去意义。
+// 只断言"含 doctor"不够，必须断言含 `--url`。
+check('HEALTHCHECK 探测 HTTP（带 --url），不只读库', () => {
+  const m = /HEALTHCHECK[\s\S]{0,400}/.exec(df);
+  if (!m) return ok(false, '没有 HEALTHCHECK 指令');
+  return ok(m[0].includes('--url'),
+    'HEALTHCHECK 未带 --url：进程活着但 HTTP 挂死时仍会被报成 healthy');
+});
+
+// 数据目录必须先建再 chown，否则 VOLUME 会把它创建成 root 所有，
+// 而进程是 uid 10001，写不进库。
+check('/app/data 在 chown 之前创建（否则属主是 root）', () => {
+  // 按「续行合并」后的逻辑指令判断：chown 常写在 `&&` 之后，
+  // 不合并续行就只看得到行首那条 RUN/CMD。
+  const instr = [];
+  let cur = '';
+  for (const raw of df.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (line.endsWith('\\')) { cur += line.slice(0, -1) + ' '; continue; }
+    instr.push((cur + line).trim());
+    cur = '';
+  }
+  if (cur.trim()) instr.push(cur.trim());
+
+  const mk = instr.findIndex((l) => /^RUN\b/.test(l) && l.includes('mkdir -p /app/data'));
+  const ch = instr.findIndex((l) => /^RUN\b/.test(l)
+    && /chown\b[^\n]*cheng-rss:cheng-rss\s+\/app\b/.test(l));
+  if (mk < 0) {
+    return ok(false, '没有 RUN 创建 /app/data —— VOLUME 会把它建成 root 所有，进程 uid 10001 写不进');
+  }
+  if (ch < 0) return ok(false, '没有 chown ... /app 的 RUN 指令');
+  if (mk > ch) return ok(false, 'mkdir 在另一条更晚的 RUN 里，chown 时目录还不存在');
+  if (instr[mk].indexOf('mkdir -p /app/data') > instr[mk].indexOf('chown')) {
+    return ok(false, '同一 RUN 内 mkdir 写在 chown 之后');
+  }
+  return true;
+});
+
 check('以非 root 运行', () => {
   return ok(/^USER\s+(?!root)/m.test(df), '没有 USER 指令，容器会以 root 运行');
 });

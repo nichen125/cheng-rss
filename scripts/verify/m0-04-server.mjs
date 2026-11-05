@@ -46,7 +46,10 @@ group('0.4 HTTP 骨架与子命令');
 // ── ① 子命令 ───────────────────────────────────────────────
 const ver = cli(['version']);
 check('version 输出版本号与 schema 版本', () => {
-  return ok(/cheng-rss \d+\.\d+\.\d+/.test(ver.out) && /schema \d+/.test(ver.out),
+  // 版本号可能是预发布形式（0.0.1-rc1），正则要容得下后缀 ——
+  // 只匹配 \d+\.\d+\.\d+ 的话，遇到 "0.0.1-rc1" 会在 '-' 处停下，
+  // 断言虽然仍能通过，但它验证的已经不是完整版本号了。
+  return ok(/cheng-rss \d+\.\d+\.\d+(-[\w.]+)?/.test(ver.out) && /schema \d+/.test(ver.out),
     `输出: ${ver.out.slice(0, 120)}`);
 });
 

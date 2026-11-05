@@ -19,7 +19,8 @@ cd "$PROJECT_ROOT"
 
 if [ ! -d "node_modules" ]; then
   warn "node_modules 缺失，先安装依赖"
-  "$NPM_BIN" ci --cache "$PROJECT_ROOT/.cache/npm" || die "依赖安装失败"
+  # 同 build.sh：用 node 直调 npm-cli.js，绕开依赖 PATH 的 bin/npm
+  "$NODE_BIN" "$NPM_CLI" ci --cache "$PROJECT_ROOT/.cache/npm" || die "依赖安装失败"
 fi
 
 info "Node $("$NODE_BIN" -v)  项目 $PROJECT_ROOT"

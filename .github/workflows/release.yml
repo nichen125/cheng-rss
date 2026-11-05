@@ -39,13 +39,13 @@ jobs:
         shell: bash
         run: bash scripts/bootstrap.sh
 
+      - name: 准备 node / npm 路径
+        shell: bash
+        run: bash scripts/ci-env.sh
+
       - name: 安装依赖
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js ci --no-audit --no-fund
+        run: '"$NODE_BIN" "$NPM_CLI" ci --no-audit --no-fund'
 
       # ── 版本一致性 ───────────────────────────────────────
       # package.json 的版本会被 build-server.mjs 内嵌进二进制。
@@ -76,46 +76,29 @@ jobs:
 
       - name: 类型检查
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js run typecheck:all
+        run: '"$NODE_BIN" "$NPM_CLI" run typecheck:all'
 
       - name: 构建前端 + 服务端 + zip
         shell: bash
         run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/build-client.mjs
-          "$NODE" scripts/build-server.mjs --sea
-          "$NODE" scripts/pack-client-zip.mjs
+          "$NODE_BIN" scripts/build-client.mjs
+          "$NODE_BIN" scripts/build-server.mjs --sea
+          "$NODE_BIN" scripts/pack-client-zip.mjs
 
       - name: 取 linux node（供 docker-path）
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/fetch-linux-node.mjs
+        run: '"$NODE_BIN" scripts/fetch-linux-node.mjs'
 
       - name: 全部验收（57 个脚本）
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/verify-all.mjs
+        run: '"$NODE_BIN" scripts/verify-all.mjs'
 
       # ── 门禁 3：迁移幂等 ─────────────────────────────────
       - name: 门禁 3 — 迁移幂等（空目录连跑两次）
         shell: bash
         run: |
           set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          BIN="$(ls dist/cheng-rss-linux-x64)"
+          BIN=dist/cheng-rss-linux-x64
           chmod +x "$BIN"
           rm -rf .tmp/idem && mkdir -p .tmp/idem
           "$BIN" migrate --data .tmp/idem --quiet
@@ -151,21 +134,17 @@ jobs:
         shell: bash
         run: bash scripts/bootstrap.sh
 
+      - name: 准备 node / npm 路径
+        shell: bash
+        run: bash scripts/ci-env.sh
+
       - name: 安装依赖
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js ci --no-audit --no-fund
+        run: '"$NODE_BIN" "$NPM_CLI" ci --no-audit --no-fund'
 
       - name: 构建二进制
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/build-sea.mjs
+        run: '"$NODE_BIN" scripts/build-sea.mjs'
 
       - name: 定位产物
         id: artifact

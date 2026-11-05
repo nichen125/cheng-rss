@@ -256,7 +256,7 @@ Node SEA 的官方测试覆盖范围有限，两条硬限制：
 
 ```js
 // 构建期：sea-config.json 用 assets 字段
-{ "assets": { "client.zip": "dist/client.zip" } }
+{ "assets": { "client.zip": "dist/.cache/client.zip" } }
 
 // 运行期：getAsset() 取出 zip → fflate 在内存里解压一次 → 提供静态服务
 import { getAsset } from "node:sea";
@@ -372,7 +372,7 @@ cheng-rss/
 ├─ .npm-global/                 # 万一需要 npm -g 时落这里（git ignored）
 ├─ node_modules/                # 依赖（git ignored）
 ├─ .tmp/                        # 构建临时目录（git ignored）
-├─ dist/                        # 构建产物（git ignored）
+├─ dist/                        # 构建产物（git ignored，见 §4.5）
 ├─ data/                        # 运行数据（git ignored，唯一需要备份的东西）
 └─ scripts/                     # bootstrap / dev / build（.sh + .ps1 各一份）
 ```
@@ -484,6 +484,23 @@ after=$(find "$HOME" -newer /tmp/marker 2>/dev/null | wc -l)
 # 3. 删除项目目录后无残留
 rm -rf /tmp/cheng-rss-copy && cp -r . /tmp/cheng-rss-copy && rm -rf /tmp/cheng-rss-copy && echo OK
 ```
+
+### 4.6 `dist/` 只放交付物，中间产物进 `dist/.cache/`
+
+`dist/` 根下的每一项都必须能回答「它是不是用户要拿走的」。混在一起时，`ls dist`
+分不清谁该发到 Release、谁只是构建缓存。
+
+| 路径 | 是什么 | 谁消费 | 可删 |
+|---|---|---|---|
+| `cheng-rss-{platform}-{arch}[.exe]` | 交付物 | 用户、Release、门禁 1/3/4 | 否（验收依赖） |
+| `client/` | 前端产物 | **源码模式的运行时**（`static.ts` 按 `cwd/dist/client` 读） | 否（删了源码模式白屏） |
+| `.cache/server.cjs` | esbuild bundle | 仅作 SEA 的 `main` 输入 | 是 |
+| `.cache/client.zip` | 前端 zip | 仅作 SEA 的 asset 嵌入 | 是 |
+| `.cache/sea-{config.json,prep.blob}` | SEA 中间文件 | 无（构建结束即删） | 是 |
+
+`client/` 是唯一待在 `dist/` 根下却不属交付物的目录：它是二进制**和**源码模式共享的输入，
+挪进 `.cache/` 会让「源码模式跑起来」多一层认知负担，而它本身 408KB 且名字自解释。
+**中间产物可以随时整个删掉**（`rm -rf dist/.cache`），下一个 `build-sea` 会重建。
 
 ---
 
@@ -4042,13 +4059,29 @@ CI 的 step 里没有，直接以 **127**（command not found）失败。Windows
 因为 `npm.cmd` 用 `%~dp0` 自己找同目录的 `node.exe` —— 同一个 bug 在第二个
 平台上被掩盖，这正是「一个平台绿、一个平台红」的典型来源。
 
-正确写法是让 node 执行 npm 自己的入口，两平台同一条命令：
+正确做法是让 `scripts/ci-env.sh` 探出路径并写进 `$GITHUB_ENV`，后续 step 只用变量：
 
-```bash
-NODE=./.toolchain/node/bin/node
-[ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-"$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js ci
+```yaml
+- run: bash scripts/ci-env.sh        # 写 NODE_BIN / NPM_CLI 到 $GITHUB_ENV
+- run: '"$NODE_BIN" "$NPM_CLI" ci'
 ```
+
+**这里踩了两次，是同一个坑的两个面：两平台路径形态不同。**
+
+| 坑 | Windows | Linux | 后果 |
+|---|---|---|---|
+| ① npm wrapper 的 shebang | `npm.cmd` 用 `%~dp0` 自找 node.exe，可行 | `bin/npm` 是 `#!/usr/bin/env node`，要 PATH | Linux 127，Windows 正常 → bug 被掩盖 |
+| ② npm 的 JS 入口位置 | `node_modules/npm/bin/npm-cli.js` | `lib/node_modules/npm/bin/npm-cli.js` | 写死 Windows 那个 → Linux MODULE_NOT_FOUND |
+
+第 ② 个是第一版修复引入的新 bug：解决了 127，却在 Linux 上换成了找不到文件。
+两次的教训一致 —— **不要在 workflow 里按平台拼路径，也不要把其中一种形态写死**。
+`toolchain.sh` 的 `npm_cli_path()` 做探测（哪种存在用哪种），`ci-env.sh` 负责
+把它交给 GitHub Actions。验收里固化成了三条断言（`m0-01`）：探测函数两布局都认、
+`ci-env.sh` 不碰 `$GITHUB_PATH`、workflow 里没有手写的 toolchain 相对路径。
+
+**顺带**：`build.sh` / `dev.sh` 原本也用 `"$NPM_BIN" ci`，本地开发时 PATH 里有 node
+所以看不出来，但在 CI 或干净的服务器上同样会 127 —— 一并改成 `"$NODE_BIN" "$NPM_CLI"`。
+`toolchain.sh` 因此不能用 `local`（它是 bash 扩展，而 `build.sh` 是 `#!/bin/sh`）。
 
 比往 `$GITHUB_PATH` 追加目录更可靠：后者要处理 Windows 下 `E:/...` 与 `E:\...`
 的路径形式差异，多一层会随环境变化的假设。
@@ -4217,9 +4250,9 @@ cheng-rss/
 │  ├─ bootstrap.{sh,ps1}          # 下载并解压 .toolchain/node
 │  ├─ dev.{sh,ps1}  build.{sh,ps1}
 │  ├─ build-client.mjs            # Vite 构建前端
-│  ├─ build-server.mjs            # esbuild → dist/server.cjs（内嵌 .sql）
+│  ├─ build-server.mjs            # esbuild → dist/.cache/server.cjs（内嵌 .sql）
 │  ├─ build-sea.mjs               # bundle + postject → 单文件二进制
-│  ├─ pack-client-zip.mjs         # dist/client → dist/client.zip
+│  ├─ pack-client-zip.mjs         # dist/client → dist/.cache/client.zip
 │  ├─ verify-all.mjs              # 验收总入口（57 个脚本）
 │  ├─ clean-tmp.mjs               # 清 .tmp/verify
 │  ├─ check-no-residue.mjs        # 确认没往项目外写（门禁 5）
@@ -4854,7 +4887,7 @@ NAS 上 12GB 是可接受量级；给 `data/` 预留 20GB 即可舒适运行一�
 | `.toolchain/node` | ~104 MB | Node 24 + 完整 npm（解压后，压缩包即删） |
 | `.cache/npm` | ~150~200 MB | 依赖包缓存，重复安装不再下载 |
 | `node_modules` | ~120 MB | 含 esbuild / vite / react / react-dom |
-| `dist/` | ~2 MB | 前端 224KB + 服务端 bundle 945KB + 二进制 |
+| `dist/` | 二进制为主 | 交付物（各 ~90~120 MB）+ `client/`；中间产物在 `dist/.cache/`（<1 MB，可删） |
 | `data/` | 视使用 | 唯一需要备份 |
 | **合计（不含 data）** | **~380~430 MB** | 全部在 `.gitignore` 内 |
 

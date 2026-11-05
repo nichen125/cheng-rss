@@ -53,72 +53,56 @@ jobs:
           key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
           restore-keys: npm-${{ runner.os }}-
 
-      # 关键：不调用 .toolchain/node/bin/npm。
+      # 用探测代替按平台拼路径。
       #
-      # 它的 shebang 是 `#!/usr/bin/env node`，依赖 PATH 里有 node，而 CI 的
-      # step 里没有 —— 直接以 127（command not found）失败。Windows 上反而
-      # 不报错，因为 npm.cmd 用 %~dp0 自己找同目录的 node.exe，
-      # 于是同一个 bug 在第二个平台上被掩盖了。
+      # 这里踩过两次，都是"两平台路径形态不同"：
+      #   1. bin/npm 是 `#!/usr/bin/env node`，依赖 PATH 里有 node，一碰就 127。
+      #      Windows 反而不报错（npm.cmd 用 %~dp0 自己找 node.exe），
+      #      于是同一个 bug 在第二个平台上被掩盖。
+      #   2. 改用 npm-cli.js 之后又踩第二次：npm 的 JS 入口在两个包里位置不同
+      #        Windows 包（扁平）    node_modules/npm/bin/npm-cli.js
+      #        Linux 包（有 lib/）   lib/node_modules/npm/bin/npm-cli.js
+      #      写死 Windows 那个 → Linux 上必然 MODULE_NOT_FOUND。
       #
-      # 让 node 执行 npm 自己的入口，两平台同一条命令，零 PATH 依赖。
+      # 所以把路径决定权收进 scripts/ci-env.sh（它复用 toolchain.sh 的探测），
+      # 后续步骤只用 "$NODE_BIN" 与 "$NPM_CLI"，不再出现任何平台分支。
+      - name: 准备 node / npm 路径
+        shell: bash
+        run: bash scripts/ci-env.sh
+
       - name: 安装依赖
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          NPM=./.toolchain/node/node_modules/npm/bin/npm-cli.js
-          "$NODE" "$NPM" ci --no-audit --no-fund
+        run: '"$NODE_BIN" "$NPM_CLI" ci --no-audit --no-fund'
 
       # 服务端 + 客户端两套 tsconfig 都要查。
       # 此前只跑 `tsc --noEmit`（服务端），tsconfig.client.json 从未在 CI 里检查过。
       - name: 类型检查（服务端 + 客户端）
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js run typecheck:all
+        run: '"$NODE_BIN" "$NPM_CLI" run typecheck:all'
 
       - name: 构建前端
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/build-client.mjs
+        run: '"$NODE_BIN" scripts/build-client.mjs'
 
       - name: 打包前端 zip
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/pack-client-zip.mjs
+        run: '"$NODE_BIN" scripts/pack-client-zip.mjs'
 
       # docker-path 要验 Dockerfile 里 `build-sea --target linux-x64` 那一步，
       # 需要一个 linux 的 node 当 SEA 注入底本。CI 有网络，取一次即可。
       - name: 取 linux node（供 docker-path 验证 linux 产物）
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/fetch-linux-node.mjs
+        run: '"$NODE_BIN" scripts/fetch-linux-node.mjs'
 
       # 用 verify-all 而不是自己写循环。
       #
-      # 曾经的写法是 `for f in scripts/verify/m0-*.mjs`，只跑 10 个（共 56 个），
+      # 曾经的写法是 `for f in scripts/verify/m0-*.mjs`，只跑 10 个（共 57 个），
       # m1~m4 全都不在门禁里；而且缺 verify-all 已有的三样东西：
       # 单脚本 10 分钟硬超时、环境抖动重试一次、结尾 .tmp 清理。
-      - name: 跑全部验收（56 个脚本）
+      - name: 跑全部验收（57 个脚本）
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/verify-all.mjs
+        run: '"$NODE_BIN" scripts/verify-all.mjs'
 
       # 失败时把原因推到 Actions 页面。
       # 默认只有 "exit code 1"，而下载完整日志需要仓库 admin 权限；

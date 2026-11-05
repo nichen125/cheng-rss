@@ -155,9 +155,67 @@ check('.gitattributes 强制 .sh 为 LF', () => {
 
 check('bootstrap 与 dev/build 脚本齐全', () => {
   const files = ['bootstrap.sh', 'bootstrap.ps1', 'dev.sh', 'dev.ps1', 'build.sh', 'build.ps1',
-                 'lib/toolchain.sh', 'lib/toolchain.ps1'];
+                 'lib/toolchain.sh', 'lib/toolchain.ps1', 'ci-env.sh'];
   const missing = files.filter((f) => !existsSync(join(root, 'scripts', f)));
   return ok(missing.length === 0, `缺少: ${missing.join(', ')}`);
+});
+
+// ── CI 用的 npm 入口必须两平台都能找到 ────────────────────────
+//
+// 这条是两次踩坑的固化。npm 的 JS 入口在官方包里位置不同：
+//   Windows 包（zip，扁平）   node_modules/npm/bin/npm-cli.js
+//   Linux  包（tar.xz）       lib/node_modules/npm/bin/npm-cli.js
+//
+// 第一版 CI 写死 Windows 那个路径，Linux 上必然 MODULE_NOT_FOUND；
+// 而本机是 Windows，本地怎么测都是绿的 —— 这正是"一个平台绿、
+// 另一个平台红"的标准形态。
+//
+// 断言的是**探测函数本身**，不是当前平台的结果：直接调用
+// toolchain.sh 里的 npm_cli_path，喂两种布局的假目录，看它认不认。
+check('toolchain.sh 能识别两种 npm 布局（扁平 / lib）', () => {
+  const sh = join(root, 'scripts/lib/toolchain.sh');
+  const src = readFileSync(sh, 'utf8');
+  if (!/npm_cli_path\s*\(\)/.test(src)) {
+    return ok(false, 'toolchain.sh 里没有 npm_cli_path()，CI 无从得知 npm 入口在哪');
+  }
+  // 两条路径都得在函数里出现，缺一个就意味着另一种平台会失败
+  const hasFlat = src.includes('$NODE_DIR/node_modules/npm/bin/npm-cli.js');
+  const hasLib = src.includes('$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js');
+  return ok(hasFlat && hasLib,
+    `缺 ${[!hasLib && 'lib/ 布局', !hasFlat && '扁平布局'].filter(Boolean).join(' 与 ')}`);
+});
+
+check('ci-env.sh 导出 NODE_BIN 与 NPM_CLI，且不依赖 PATH', () => {
+  const p = join(root, 'scripts/ci-env.sh');
+  if (!existsSync(p)) return ok(false, 'scripts/ci-env.sh 不存在');
+  const src = readFileSync(p, 'utf8');
+  const exportsBoth = src.includes('NODE_BIN=') && src.includes('NPM_CLI=');
+  // 只查非注释行：文件头的注释里本来就会提到 $GITHUB_PATH 并解释为什么不用它，
+  // 用全文匹配会把解释当成违规（第一版断言就红在这，红在一个正确行为上）。
+  const code = src.split('\n')
+    .filter((l) => !l.trimStart().startsWith('#'))
+    .join('\n');
+  const touchesPath = /GITHUB_PATH/.test(code);
+  return ok(exportsBoth && !touchesPath,
+    !exportsBoth ? '没导出 NODE_BIN / NPM_CLI'
+      : '写了 $GITHUB_PATH —— 应改为导出具体路径，避免路径形态差异');
+});
+
+check('workflow 里没有手写的 toolchain 相对路径', () => {
+  const dir = join(root, '.github/workflows');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.yml'));
+  const bad = [];
+  for (const f of files) {
+    const src = readFileSync(join(dir, f), 'utf8');
+    // 这两类写法都是"猜路径"，两平台形态不同必然在一边失败
+    if (/NODE=\.\/\.toolchain\/node\/bin\/node/.test(src)) {
+      bad.push(`${f}: 手写 NODE=.../bin/node`);
+    }
+    if (/\.toolchain\/node\/node_modules\/npm\/bin\/npm-cli\.js/.test(src)) {
+      bad.push(`${f}: 写死扁平 node_modules 布局`);
+    }
+  }
+  return ok(bad.length === 0, bad.join('; '));
 });
 
 summary('m0-01-toolchain');

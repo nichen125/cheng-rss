@@ -27,7 +27,11 @@ done
 
 if [ ! -d "node_modules" ]; then
   info "安装依赖"
-  "$NPM_BIN" ci --cache "$PROJECT_ROOT/.cache/npm" || die "依赖安装失败"
+  # 用 node 直调 npm-cli.js，不用 $NPM_BIN。
+  # $NPM_BIN 在 *nix 上是 bin/npm，shebang 为 `#!/usr/bin/env node`，
+  # 依赖 PATH 里有 node —— 在本机开发时通常成立，所以这个 bug 平时
+  # 看不出来，一旦在没配 PATH 的环境（CI、干净的服务器）里跑就 127。
+  "$NODE_BIN" "$NPM_CLI" ci --cache "$PROJECT_ROOT/.cache/npm" || die "依赖安装失败"
 fi
 
 info "构建前端"

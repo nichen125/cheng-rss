@@ -68,6 +68,34 @@ case "$PLATFORM" in
 esac
 export NPM_BIN NPX_BIN
 
+# ── npm-cli.js：给 CI 用的、不依赖 PATH 的入口 ──────────────────
+#
+# NPM_BIN 是个 wrapper：win 的 npm.cmd 用 %~dp0 找 node.exe（可行），
+# 但 *nix 的 bin/npm 是 `#!/usr/bin/env node` —— 它要求 PATH 里有 node。
+# CI 的 step 里没有，直接以 127 失败。
+#
+# 所以这里直接给出 npm 的 JS 入口，调用方写成 `"$NODE_BIN" "$NPM_CLI"`：
+# node 已经在手上，就不再需要 PATH，也不再需要按平台分支。
+#
+# **路径形态两平台不同**，这是踩过的第二个坑：
+#   Windows 包（zip，扁平）      → $NODE_DIR/node_modules/npm/bin/npm-cli.js
+#   Linux  包（tar.xz，有 lib/） → $NODE_DIR/lib/node_modules/npm/bin/npm-cli.js
+# 写死其中一个是错的。探测而不是分支 —— 分支要多维护一处，探测不会漂。
+#
+# 不用 `local`：本文件被 build.sh / dev.sh 以 `#!/bin/sh` source，而 local
+# 是 bash 扩展，dash 下会报错。位置参数本身就是这里的局部变量，够用。
+npm_cli_path() {
+  if [ -f "$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js" ]; then
+    printf '%s' "$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js"
+  elif [ -f "$NODE_DIR/node_modules/npm/bin/npm-cli.js" ]; then
+    printf '%s' "$NODE_DIR/node_modules/npm/bin/npm-cli.js"
+  else
+    printf ''
+  fi
+}
+NPM_CLI="$(npm_cli_path)"
+export NPM_CLI
+
 require_node() {
   node_ready || die "项目内 Node 未就绪（期望 $NODE_VERSION，实际 $(node_version_of)）。先运行: ./scripts/bootstrap.sh"
 }

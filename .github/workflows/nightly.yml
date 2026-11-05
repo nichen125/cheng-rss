@@ -37,50 +37,42 @@ jobs:
         run: |
           echo "=== OS ==="
           uname -a || true
-          echo "=== Node（项目内）==="
-          bash scripts/bootstrap.sh
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" -v
           echo "=== 浏览器 ==="
           ls -la /usr/bin/google-chrome /usr/bin/chromium 2>/dev/null || true
           ls -la "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 2>/dev/null || true
           echo "=== 中文字体（UI 断言依赖它）==="
           fc-list 2>/dev/null | grep -iE "noto.*cjk|wqy|source han" | head -10 || echo "（fc-list 不可用）"
 
+      - name: 引导项目内 Node
+        shell: bash
+        run: bash scripts/bootstrap.sh
+
+      - name: 准备 node / npm 路径
+        shell: bash
+        run: bash scripts/ci-env.sh
+
+      - name: Node 版本（漂移时用来对照）
+        shell: bash
+        run: '"$NODE_BIN" -v'
+
       - name: 安装依赖
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js ci --no-audit --no-fund
+        run: '"$NODE_BIN" "$NPM_CLI" ci --no-audit --no-fund'
 
       - name: 构建前端
         shell: bash
         run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/build-client.mjs
-          "$NODE" scripts/pack-client-zip.mjs
+          "$NODE_BIN" scripts/build-client.mjs
+          "$NODE_BIN" scripts/pack-client-zip.mjs
 
       - name: 取 linux node（供 docker-path）
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/fetch-linux-node.mjs
+        run: '"$NODE_BIN" scripts/fetch-linux-node.mjs'
 
       - name: 全部验收
         shell: bash
-        run: |
-          set -e
-          NODE=./.toolchain/node/bin/node
-          [ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
-          "$NODE" scripts/verify-all.mjs
+        run: '"$NODE_BIN" scripts/verify-all.mjs'
 
       # 漂移时的提示：告诉看日志的人"这多半是环境问题"
       - name: 失败提示

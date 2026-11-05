@@ -6,12 +6,29 @@
 // README「看起来随意」的根源。
 //
 // 用法:
-//   node scripts/align-tables.mjs              # 默认 README.md + docs/*.md
+//   node scripts/align-tables.mjs              # 默认 README.md + docs/**/*.md
 //   node scripts/align-tables.mjs FILE...      # 指定文件
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const DOCS_DIR = 'docs';
+
+/** docs/ 及其子目录（方案/）下的全部 .md，按路径排序。 */
+export function docsMarkdown() {
+  const out = [];
+  const walk = (rel) => {
+    let entries;
+    try { entries = readdirSync(rel, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = join(rel, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.md')) out.push(p);
+    }
+  };
+  walk(DOCS_DIR);
+  return out.sort();
+}
 
 /** 显示宽度：CJK / 全角标点算 2 */
 export function width(s) {
@@ -86,21 +103,16 @@ function alignFile(file) {
   return changed;
 }
 
-const args = process.argv.slice(2);
-let files = args;
-if (files.length === 0) {
-  files = ['README.md'];
-  try {
-    for (const f of readdirSync(DOCS_DIR)) {
-      if (f.endsWith('.md')) files.push(join(DOCS_DIR, f));
-    }
-  } catch { /* 没有 docs 目录就算了 */ }
+// 只在被直接执行时跑主流程。check-tables.mjs 要借这里的 rebuildTable/docsMarkdown，
+// 而 ES 模块的顶层代码 import 时会执行 —— 没有这道守卫，"检查"会顺手改写文件。
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const files = args.length === 0 ? ['README.md', ...docsMarkdown()] : args;
+  let total = 0;
+  for (const f of files) {
+    const n = alignFile(f);
+    total += n;
+    console.log(`${n === 0 ? '  ' : '✓ '}${f}  ${n} 行调整`);
+  }
+  console.log(`\n共 ${files.length} 个文件，${total} 行调整`);
 }
-
-let total = 0;
-for (const f of files) {
-  const n = alignFile(f);
-  total += n;
-  console.log(`${n === 0 ? '  ' : '✓ '}${f}  ${n} 行调整`);
-}
-console.log(`\n共 ${files.length} 个文件，${total} 行调整`);

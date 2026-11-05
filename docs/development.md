@@ -34,12 +34,19 @@ Node 24 的 type stripping 让 `import ... from './x.ts'` 直接可用，**不�
 src/server/     后端（Hono + SQLite）
 src/client/     前端（React 19）
 scripts/        构建、验收、工具
-scripts/verify/ 验收脚本（55 个）
+scripts/verify/ 验收脚本（57 个）
 tests/fixtures/ 测试夹具（HTML 快照、AI 响应样本）
+docs/           主题文档（配置/架构/设计/开发）
+docs/方案/      顶层设计方案（跨模块的方向与约束）
 .toolchain/     项目内的 Node（git 忽略）
 .tmp/           临时文件（git 忽略，见下）
 dist/           构建产物（git 忽略）
 ```
+
+方案文档的门槛见 PLAN §17.1：**只有跨模块的顶层方案进 `docs/方案/`**，单个功能的
+实施细节直接落进 PLAN 的对应章节。未定稿的草稿放 `.tmp/`，**不要放 `docs/`** ——
+那里默认被引用、被信任、被 `check-tables.mjs` 扫描，混进一份"待批准"的文档，
+读者无法从路径判断它算不算数。
 
 ## 临时文件：一律留在项目内
 
@@ -100,7 +107,7 @@ check('生成后 digestDue 说今天已生成', () => ok(!digestDue(db, uid, cfg
 ### 跑验收
 
 ```bash
-./scripts/verify-all.mjs                 # 全部（55 个脚本、2030 条断言，约 13 分钟）
+./scripts/verify-all.mjs                 # 全部（57 个脚本、2171 条断言，约 22 分钟）
 ./scripts/verify-all.mjs m3              # 只跑名字匹配的（支持 glob，如 m0-0[5-8]）
 ./scripts/verify-all.mjs --no-docker-path  # 跳过需要 docker 的那 1 个
 ./scripts/verify-all.mjs --keep-tmp      # 留着 .tmp/verify 便于排查失败

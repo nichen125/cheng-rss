@@ -5,15 +5,12 @@
 // Markdown 渲染只认源文本，差一个空格就是歪的。
 //
 // 用法:
-//   node scripts/check-tables.mjs              # 默认 README.md + docs/*.md
+//   node scripts/check-tables.mjs              # 默认 README.md + docs/**/*.md
 //   node scripts/check-tables.mjs FILE...      # 指定文件
 //
 // 退出码：全部对齐 0，有偏差 1（可挂进 CI 或提交前检查）。
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { rebuildTable, width } from './align-tables.mjs';
-
-const DOCS_DIR = 'docs';
+import { readFileSync } from 'node:fs';
+import { rebuildTable, docsMarkdown, width } from './align-tables.mjs';
 
 function checkFile(file) {
   const lines = readFileSync(file, 'utf8').split('\n');
@@ -40,14 +37,7 @@ function checkFile(file) {
 
 const args = process.argv.slice(2);
 let files = args;
-if (files.length === 0) {
-  files = ['README.md'];
-  try {
-    for (const f of readdirSync(DOCS_DIR)) {
-      if (f.endsWith('.md')) files.push(join(DOCS_DIR, f));
-    }
-  } catch { /* 没有 docs 目录就算了 */ }
-}
+if (files.length === 0) files = ['README.md', ...docsMarkdown()];
 
 let bad = 0;
 for (const f of files) {

@@ -4,7 +4,7 @@
 >
 > 支持二进制 / 源码 / Docker 三种部署，单个数据目录即可备份迁移。
 >
-> 版本 **v2.1**｜状态：M0 全部 10 步完成（含 0.10 资源预算）；M1 全部 27 步完成（含 1.26 未分组平铺、1.27 分组与源的排序）；**M2 全部 7 步完成**（含 2.6 key 界面填写与 2.7 单篇总结）；**M3 全部 4 步完成**（178 条断言）；**M4 全部 4 步完成**（146 条断言）；**3.5 简报页完成**（43 条断言）；共 **56 个验收脚本、2046 条断言全绿**；v1.13 追加 1.18 侧栏分组树与 1.19 三栏密度；v1.14 放宽正文宽度与阅读区留白；v1.15 追加 1.20 阅读区边缘与侧边目录；v1.16 追加 1.21 默认只看未读；v1.17 追加 1.22 未读清零后的落点、1.23 分组/单源未读清零、1.24 标题行对齐、1.25 瞬时失败不判死，并修 §7.5 的 pending 脱钩；v1.18 推翻 1.22 的落点方案（改成列表内分割线补已读）、修「切分组仍停在全部」；v1.19 落 M2 的 2.1~2.2（新增 §8.6 客户端实现与失败分类）；v1.20 落 M2 的 2.3~2.5（新增 §8.7 预算闸门的两道门与三层配置）、AI 配置页从占位改成真页面；v1.21 落 M3 的 3.1~3.3（新增 §9.4 聚类与引用安全的设计取舍）；v1.22 落 3.4 定时生成（新增 §9.5 三种否决与 day_key 的由来）；v1.23 落 M4 全部 4 步高亮（新增 §11.1b 锚定的四个实现决定、§19.5b M4 判据表、§11.4 联动三项落地/两项推后到 M5）；v1.24 补 3.5 简报页（§15.4 落地，修掉一条"生成了没人看得见"的断点；§15.7 移动端 tab 5→6 属规格变更）；**v2.0 需求层新增四项**（24 key 可在界面填、25 未分组源平铺侧栏、26 单篇总结+提示词可编辑、27 资源与性能预算），对应步骤 2.6 / 1.26 / 2.7 / 0.10 与 §5.7、§8.8、§8.9、§15.26、§15.27，**四项均已落地**；**v2.1 需求层新增第 28 行**（分组与源可排序：侧栏长按进排列模式拖/点 ↑↓，源可拖进拖出分组，跨组给可撤销提示；配置 › 分组另有一路常显 ↑↓，因为手机上侧栏是 display:none），对应步骤 1.27 与 §15.28，**已落地，57 条断言**；同轮把 §15.26 的「未分组排在最末」改为「排在最前」｜22 章
+> 版本 **v2.5**｜状态：M0 全部 11 步完成（含 0.10 资源预算、0.11 项目外零写入）；M1 全部 27 步完成（含 1.26 未分组平铺、1.27 分组与源的排序）；**M2 全部 7 步完成**（含 2.6 key 界面填写与 2.7 单篇总结）；**M3 全部 4 步完成**（178 条断言）；**M4 全部 4 步完成**（146 条断言）；**3.5 简报页完成**（43 条断言）；共 **57 个验收脚本、2171 条断言全绿**；**v2.5 落地 CI/CD 与发布**（三个 workflow、五道发布门禁、v0.0.1-rc1）；v1.13 追加 1.18 侧栏分组树与 1.19 三栏密度；v1.14 放宽正文宽度与阅读区留白；v1.15 追加 1.20 阅读区边缘与侧边目录；v1.16 追加 1.21 默认只看未读；v1.17 追加 1.22 未读清零后的落点、1.23 分组/单源未读清零、1.24 标题行对齐、1.25 瞬时失败不判死，并修 §7.5 的 pending 脱钩；v1.18 推翻 1.22 的落点方案（改成列表内分割线补已读）、修「切分组仍停在全部」；v1.19 落 M2 的 2.1~2.2（新增 §8.6 客户端实现与失败分类）；v1.20 落 M2 的 2.3~2.5（新增 §8.7 预算闸门的两道门与三层配置）、AI 配置页从占位改成真页面；v1.21 落 M3 的 3.1~3.3（新增 §9.4 聚类与引用安全的设计取舍）；v1.22 落 3.4 定时生成（新增 §9.5 三种否决与 day_key 的由来）；v1.23 落 M4 全部 4 步高亮（新增 §11.1b 锚定的四个实现决定、§19.5b M4 判据表、§11.4 联动三项落地/两项推后到 M5）；v1.24 补 3.5 简报页（§15.4 落地，修掉一条"生成了没人看得见"的断点；§15.7 移动端 tab 5→6 属规格变更）；**v2.0 需求层新增四项**（24 key 可在界面填、25 未分组源平铺侧栏、26 单篇总结+提示词可编辑、27 资源与性能预算），对应步骤 2.6 / 1.26 / 2.7 / 0.10 与 §5.7、§8.8、§8.9、§15.26、§15.27，**四项均已落地**；**v2.1 需求层新增第 28 行**（分组与源可排序：侧栏长按进排列模式拖/点 ↑↓，源可拖进拖出分组，跨组给可撤销提示；配置 › 分组另有一路常显 ↑↓，因为手机上侧栏是 display:none），对应步骤 1.27 与 §15.28，**已落地，57 条断言**；同轮把 §15.26 的「未分组排在最末」改为「排在最前」｜22 章
 
 ---
 
@@ -3928,6 +3928,20 @@ CREATE INDEX idx_feeds_folder_sort ON feeds(user_id, folder_id, sort);
   只能 `fetch` 样式表原文用正则找。第一版用 `cssText` 查，永远返回 false ——
   而那个 false 看起来像"CSS 没写对"，实际是查法不对。
 
+#### 15.28.12 非目标与退出方式
+
+三条**明确不做**，写下来是为了将来不被"顺便做掉"：
+
+| 不做                   | 为什么                                                                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| 分组嵌套               | 分组仍是一层扁平结构（`folders.ts` 头注释同一理由）；嵌套会连带改侧栏树、排序规则与移动语义，而需求只要求"调顺序" |
+| 拖到边缘自动滚动       | 分组与源通常一屏放得下；做它要维护滚动定时器与速率，收益只在极长的侧栏上。这是已知限制，不是遗漏                  |
+| 「按名称排序」一键按钮 | 排的对象是人脑里的重要性，不是字符串。一键按名排会把用户手排的结果一次抹掉，而且没有撤销入口                      |
+
+**退出排列模式**只有两条路：「完成」按钮、`Esc`。点侧栏其他位置**不退出** ——
+误触一下就把现场清掉，比多点一次「完成」难受得多。退出**不是**撤销，
+已提交的顺序保持（§15.28.5）。
+
 ### 15.29 AI 配置页的分层折叠（v2.2）
 
 **需求方原话**：「AI配置界面太繁琐」。
@@ -4005,196 +4019,169 @@ key 只回显掩码、提示词按指纹缓存。折叠只改**呈现顺序与�
 
 ## 十六、CI 与发布
 
+> 这一节按**实际落地**重写（v2.4）。此前它描述的是规划态：写了三个
+> workflow，仓库里只有一个；给出了 `release.yml` 草稿，那份草稿有 7 处
+> 与真实仓库不符（详见 §16.2 的说明表）；门的数量也写着六条，其中一条
+> 依赖尚未实现的子命令。规划态留在 git 历史里，不再维护。
+
 ### 16.1 三个 workflow
 
-| Workflow | 触发 | 作用 |
-|---|---|---|
-| `ci.yml` | push / PR | 类型检查、单测、lint、构建验证、残留检查 |
-| `release.yml` | tag `v*` | 二进制 + Docker 镜像 + 校验和 + Release |
-| `nightly.yml` | 每日 cron | 拉真实 RSSHub 路由库做集成回归，发现上游变更 |
+| Workflow | 触发 | 作用 | 状态 |
+|---|---|---|---|
+| `ci.yml` | push / PR / 手动 | 类型检查、构建、**全部 57 个验收脚本** | 已落地 |
+| `release.yml` | tag `v*` / 手动 | 二进制 + Docker 镜像 + 校验和 + GitHub Release | 已落地 |
+| `nightly.yml` | 每日 cron | 同一套验收再跑一遍，**只用于发现 runner 镜像漂移** | 见下 |
 
-**CI 与本地用同一套工具链**：三个 workflow 都不装系统 Node，而是 `./scripts/bootstrap.sh` 后直接用 `.toolchain/node/bin/npm`。这样「本地能过、CI 挂掉」这类环境差异不存在，也让 §4.5 的残留检查在 CI 里天然可跑。
+**CI 与本地用同一套工具链**：workflow 不装系统 Node，而是 `./scripts/bootstrap.sh`
+之后直接用 `.toolchain/node`。这样「本地能过、CI 挂掉」这类环境差异不存在。
 
-唯一例外是 `binaries` job 需要**目标平台**的 node 可执行体（Windows 产物在 Linux runner 上造），所以它额外下载一份放到 `vendor-*`，这份不参与运行，只作为 SEA 的注入底本。
+#### 调用 npm 的正确方式
+
+**不要调用 `bin/npm`**。它是 `#!/usr/bin/env node`，依赖 `PATH` 里有 node；
+CI 的 step 里没有，直接以 **127**（command not found）失败。Windows 上反而不报错，
+因为 `npm.cmd` 用 `%~dp0` 自己找同目录的 `node.exe` —— 同一个 bug 在第二个
+平台上被掩盖，这正是「一个平台绿、一个平台红」的典型来源。
+
+正确写法是让 node 执行 npm 自己的入口，两平台同一条命令：
+
+```bash
+NODE=./.toolchain/node/bin/node
+[ -x "$NODE" ] || NODE=./.toolchain/node/node.exe
+"$NODE" ./.toolchain/node/node_modules/npm/bin/npm-cli.js ci
+```
+
+比往 `$GITHUB_PATH` 追加目录更可靠：后者要处理 Windows 下 `E:/...` 与 `E:\...`
+的路径形式差异，多一层会随环境变化的假设。
+
+#### nightly 只做漂移检测
+
+原规划是「拉真实 RSSHub 路由库做集成回归」。**不这么做**：验收套件的价值在于
+自封闭（57 个脚本没有任何一个向外发请求，AI 那 5 个都是起本地 mock 上游），
+引入真实外网会让它变 flaky，而 flaky 的门禁等于没有门禁。
+
+nightly 改为定时重跑同一套验收，用途是发现 runner 镜像的变化 —— 字体、
+Chromium 路径、Node 补丁版本这些会让 UI 断言悄悄偏移的东西。它红了通常意味着
+"环境变了"，而不是"代码坏了"，所以不阻塞主分支。
 
 ### 16.2 `release.yml`
 
-```yaml
-name: Release
-on:
-  push:
-    tags: ["v*"]
-  workflow_dispatch:
+**核心决定：不做跨平台交叉构建。**
 
-permissions:
-  contents: write
-  packages: write
+原草稿让 ubuntu 造 Windows 产物，为此要下载 win 的 node 当 SEA 注入底本，
+再把路径传给 `build-sea.mjs`。真实脚本只认 `--target` + `CHENG_RSS_SEA_BASE`，
+草稿里的 `--main` / `--executable` / `--out` 一个都不存在。
 
-env:
-  # 与 bootstrap 的默认值保持同一处来源，改版本只改这里和 scripts/lib
-  CHENG_RSS_NODE_VERSION: v24.13.0
+改成矩阵：**ubuntu runner 造 linux 产物，windows runner 造 win 产物**。
+此时 `wantTarget === hostTarget`，`build-sea.mjs` 零参数即可运行，不需要任何
+环境变量。产物名由脚本按宿主平台决定（`cheng-rss-linux-x64` / `cheng-rss-win32-x64.exe`）。
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # CI 也用项目内工具链：本地与 CI 走完全相同的解释器，避免「本地过 CI 挂」
-      - name: 引导项目内 Node
-        run: ./scripts/bootstrap.sh
-      - name: 依赖（缓存落在项目内 .cache/npm）
-        run: .toolchain/node/bin/npm ci
-      - run: .toolchain/node/bin/npm run typecheck
-      - run: .toolchain/node/bin/npm run lint
-      - run: .toolchain/node/bin/npm test
-      - run: .toolchain/node/bin/npm run build:client   # Vite → dist/client
-      - name: 残留检查（构建不写 $HOME）
-        run: ./scripts/check-no-residue.sh
-      - uses: actions/upload-artifact@v4
-        with: { name: client-dist, path: dist/client }
+草稿里其余与现实不符的地方：
 
-  binaries:
-    needs: build
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-x64
-            node_os: linux
-            node_arch: x64
-          - target: windows-x64
-            node_os: win
-            node_arch: x64
-    steps:
-      - uses: actions/checkout@v4
-      - name: 引导项目内 Node
-        run: ./scripts/bootstrap.sh
-      - run: .toolchain/node/bin/npm ci
-      - uses: actions/download-artifact@v4
-        with: { name: client-dist, path: dist/client }
-      - name: 构建标准 bundle
-        run: .toolchain/node/bin/npm run build:server
-      - name: 打包前端 zip（SEA assets 用，见 §3.4）
-        run: .toolchain/node/bin/npm run pack:client-zip
-      - name: 取得目标平台的 node 可执行体
-        id: nodebin
-        shell: bash
-        run: |
-          # 版本号来自 job 级 env，不依赖 runner 上装了什么
-          VER="${{ env.CHENG_RSS_NODE_VERSION }}"
-          case "${{ matrix.node_os }}" in
-            win)  PKG="node-$VER-win-x64.zip";          BIN="node.exe" ;;
-            *)    PKG="node-$VER-linux-x64.tar.xz";     BIN="node" ;;
-          esac
-          mkdir -p .tmp && cd .tmp
-          curl -fsSLo pkg "https://nodejs.org/dist/$VER/$PKG"
-          case "$PKG" in
-            *.zip)      unzip -q pkg -d raw ;;
-            *.tar.xz)   mkdir -p raw && tar -xJf pkg -C raw ;;
-          esac
-          SRC="$(find raw -maxdepth 2 -name "$BIN" -type f | head -1)"
-          cp "$SRC" "../vendor-$BIN"
-          echo "bin=vendor-$BIN" >> "$GITHUB_OUTPUT"
-      - name: 生成 SEA
-        run: |
-          # Node 25.5+ 可用一条 node --build-sea；Node 24 用 postject 三步
-          .toolchain/node/bin/node scripts/build-sea.mjs \
-            --main dist/server.js \
-            --executable "${{ steps.nodebin.outputs.bin }}" \
-            --out dist/cheng-rss-${{ matrix.target }}
-      - name: 冒烟测试（linux）
-        if: matrix.target == 'linux-x64'
-        run: |
-          chmod +x dist/cheng-rss-linux-x64
-          ./dist/cheng-rss-linux-x64 version
-          ./dist/cheng-rss-linux-x64 migrate --data .tmp/t
-          ./dist/cheng-rss-linux-x64 serve --data .tmp/t --port 3111 &
-          sleep 3
-          curl -fsS localhost:3111/api/health
-          curl -fsS localhost:3111/ | grep -q 'id="root"'   # 静态资源内嵌校验
-          ./dist/cheng-rss-linux-x64 doctor --data .tmp/t
-      - uses: actions/upload-artifact@v4
-        with: { name: bin-${{ matrix.target }}, path: "dist/cheng-rss-${{ matrix.target }}*" }
+| 草稿写的 | 实际 |
+|---|---|
+| `npm run lint` | 不存在（devDependencies 无 eslint） |
+| `npm test` | `tests/` 下 0 个 `.test.ts`，只有 fixtures |
+| `scripts/check-no-residue.sh` | 真实文件是 `.mjs` |
+| `npm run pack:client-zip` | 不存在，直接调 `scripts/pack-client-zip.mjs` |
 
-  docker:
-    needs: [build, binaries]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-      - uses: actions/download-artifact@v4
-        with: { pattern: "bin-*", path: dist, merge-multiple: true }
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+结构：
+
+```
+gate（发布门禁，全绿才继续）
+  └─ binaries（矩阵：ubuntu / windows）
+  └─ docker（linux/amd64）
+        └─ publish（建 Release、传产物、写 SHA256SUMS）
 ```
 
-### 16.3 Dockerfile
+#### 预发布不覆盖 latest
+
+`docker/metadata-action` 的 `type=raw,value=latest` 默认给**每个** tag 都打
+`latest`，于是一个 rc 就成了所有人的默认镜像。必须显式关掉，只在正式版
+（版本号不含 `-`）补 latest：
+
+```yaml
+flavor: |
+  latest=false
+tags: |
+  type=semver,pattern={{version}}
+  type=semver,pattern={{major}}.{{minor}}
+  type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+```
+
+同理，`contains(github.ref_name, '-')` 为真时 GitHub Release 设 `prerelease: true`，
+预发布不出现在 Releases 页的 Latest 位置。
+
+#### 门禁必须能在打 tag 之前验证
+
+tag 推上去之后，已经有人下载的二进制收不回来。所以 `release.yml` 除
+`push: tags` 之外必须有 `workflow_dispatch` —— 先手动跑一遍全绿，再打 tag。
+
+#### 版本一致性
+
+发布前断言 `v${package.json.version}` 等于 tag。不一致则中止：
+包里的版本号会被 `build-server.mjs` 内嵌进二进制，对不上就是发了个版本号错的产物。
+
+### 16.3 Dockerfile 的三个要点
+
+完整文件见仓库根 `Dockerfile`。容易写错的只有三处：
+
+**① runtime 不能用 alpine。** Node SEA 不支持 musl（§3.2）。用 `debian:bookworm-slim`。
+实测产出的 `cheng-rss-linux-x64` 是动态链接 glibc 的 ELF，这条不是偏好问题。
+
+**② 数据目录必须先建再 chown。**
 
 ```dockerfile
-# syntax=docker/dockerfile:1
-FROM node:24-bookworm-slim AS build
-WORKDIR /app
-# 依赖层单独缓存；.npmrc 里的 cache 路径在容器内指向 /app/.cache
-COPY package*.json .npmrc ./
-RUN --mount=type=cache,target=/app/.cache/npm \
-    npm ci --cache /app/.cache/npm
-COPY . .
-# 构建期临时文件也关在容器内
-ENV TMPDIR=/app/.tmp TMP=/app/.tmp TEMP=/app/.tmp
-RUN --mount=type=cache,target=/app/.cache/npm \
-    npm run build:client && npm run build:server && npm run build:sea
-
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY --from=build /app/dist/cheng-rss-linux-x64 /app/cheng-rss
-ENV DATA_DIR=/app/data PORT=3000
-VOLUME ["/app/data"]
-EXPOSE 3000
-HEALTHCHECK --interval=60s --timeout=5s --start-period=20s \
-  CMD ["/app/cheng-rss", "doctor", "--quiet"]
-ENTRYPOINT ["/app/cheng-rss"]
-CMD ["serve"]
+RUN mkdir -p /app/data && chown -R cheng-rss:cheng-rss /app
 ```
 
-构建期缓存用 BuildKit 的 `--mount=type=cache`（缓存落在构建机 Docker 自己的区域，且不会进入最终镜像层），**不要**把 `npm ci` 的中间产物 COPY 进任何层 —— 那个会让镜像凭空多 300MB。
+只写 `chown -R` 是不够的：那一刻 `/app/data` 还不存在，随后 `VOLUME` 才把它
+创建成 **root 所有**，而进程是 uid 10001 —— 服务起不来或写不进库。
 
-### 16.4 六条发布门禁
+**③ HEALTHCHECK 必须探测 HTTP，不能只读库。**
 
-| 门禁 | 检查 | 拦住的问题 |
-|---|---|---|
-| 二进制冒烟 | 编译后启动 → 访问首页 → 建库 → doctor | 源码能跑、二进制跑不起来 |
-| 静态资源内嵌 | `curl /` 返回含 `id="root"` 的 HTML | 二进制启动但页面 404 |
-| 迁移幂等 | 空目录 migrate 两次不报错 | 重复执行迁移崩库 |
-| Docker healthcheck | 容器起来后变 healthy | 镜像能起但服务不可用 |
-| **导出/导入往返** | 导出 → 新容器导入 → 条目数一致 | 备份不可用 |
-| **项目外零写入** | 干净容器里跑 `bootstrap` + `build`，`$HOME` 与系统目录无新增 | 污染用户机器，卸载留垃圾 |
+`doctor` 查的是磁盘上的数据库。进程活着但 HTTP 挂死时它照样返回 0，
+而 HEALTHCHECK 的语义是"这个容器现在能不能提供服务"。所以 HEALTHCHECK 带 `--url`：
 
-倒数第二条经常被跳过，但它是「存档迁移备份」需求的**实际验收** —— 没有 CI 验证，备份坏了会在真需要时才发现。最后一条是 §4.3 承诺的验收，脚本见 §4.5。
+```dockerfile
+HEALTHCHECK --interval=60s --timeout=15s --start-period=20s --retries=3 \
+  CMD ["/app/cheng-rss", "doctor", "--url", "http://127.0.0.1:3000", "--quiet"]
+```
+
+用 Node 内置 `fetch` 而不是在镜像里装 `curl`：这个二进制本身就是 Node SEA，
+为一个 GET 多背一个包不值得。探测带 `AbortSignal.timeout`，否则探测自身挂死时
+healthcheck 永远不返回 —— 那比不检查更糟。
+
+构建期缓存用 BuildKit 的 `--mount=type=cache`（落在构建机 Docker 自己的区域，
+不进最终镜像层）。**不要**把 `npm ci` 的中间产物 COPY 进任何层。
+
+### 16.4 发布门禁
+
+| # | 门禁 | 检查方式 | 状态 |
+|---|---|---|---|
+| 1 | 二进制冒烟 | 洁净目录 `version` → `migrate` → 起服务 → 首页 200 | 已落地 |
+| 2 | 静态资源内嵌 | `GET /` 响应含 `id="root"` | 已落地（`m0-08`） |
+| 3 | 迁移幂等 | 空目录 `migrate` 连跑两次都不报错 | 已落地（`release.yml`） |
+| 4 | Docker healthcheck | 容器变为 healthy | 已落地（`ci.yml` + `release.yml`） |
+| 5 | 项目外零写入 | `check-no-residue.mjs --run`，`$HOME` 无新增 | 已落地（`m0-08` ④） |
+| 6 | 导出/导入往返 | — | **待 M6** |
+
+**第 6 条为什么空着**：它依赖 `export` / `import` 子命令，而这两个在
+`src/cli.ts` 里是 `throw new Error('…在 M6 落地')`。按里程碑划分它属于 M6，
+不属于本次范围。这一行**保留而不删除** —— 删掉等于假装需求不存在。
+M6 落地时必须同时把这条门禁补上，否则备份坏了要等真需要时才发现。
+
+### 16.5 验收与 CI 的关系
+
+`scripts/verify-all.mjs` 是唯一入口，CI 调它而不是自己写循环。理由：手写
+`for f in scripts/verify/m0-*.mjs` 只跑 10 个（共 56 个），且缺少 `verify-all`
+已有的三样保障 —— 单脚本 10 分钟硬超时、环境抖动重试一次、结尾 `.tmp` 清理。
+
+CI 里失败原因要能读出来。默认只有 "Process completed with exit code 1"，
+而日志下载需要仓库 admin 权限。验收脚本在失败时输出 `::error::` 注解，
+这样原因直接出现在 Actions 页面上，不必翻完整日志。
 
 ---
+
 
 ## 十七、项目结构
 
@@ -4212,13 +4199,19 @@ cheng-rss/
 ├─ README.md                      # 面向使用者：快速开始 / 配置 / 成本 / 已知限制
 ├─ PLAN.md                        # 本文档：规格与决策记录
 ├─ LICENSE                        # MIT
+├─ Dockerfile                     # 两阶段构建，见 §16.3
+├─ docker-compose.yml             # 单机部署（数据挂 ./data）
+├─ .github/workflows/
+│  ├─ ci.yml                      # 类型检查 + 构建 + 全部验收（§16.1）
+│  ├─ release.yml                 # tag 触发：二进制 + 镜像 + Release（§16.2）
+│  └─ nightly.yml                 # 每日重跑，只查 runner 镜像漂移（§16.1）
 ├─ docs/
 │  ├─ configuration.md            # 全部配置项、AI 提供方、预算、排查
 │  ├─ architecture.md             # 模块划分、数据流、选型与放弃的方案
 │  ├─ design.md                   # 界面规格、正文提取、去重、聚类、引用安全
 │  ├─ development.md              # 本地开发、验收机制、写断言的规矩
-│  ├─ 界面设计方案.md               # 视觉规格（配色/密度/控件尺度）
-│  ├─ 分组排序方案.md               # 1.27 的两个入口与长按判定
+│  ├─ 方案/                       # 方案文档（只放跨模块的顶层方案，见 §17.1）
+│  │  └─ 界面设计方案.md          # 视觉规格（配色/密度/控件尺度）
 │  └─ mockups/                    # 静态草图与截图（可直接在浏览器打开）
 ├─ scripts/
 │  ├─ bootstrap.{sh,ps1}          # 下载并解压 .toolchain/node
@@ -4227,9 +4220,12 @@ cheng-rss/
 │  ├─ build-server.mjs            # esbuild → dist/server.cjs（内嵌 .sql）
 │  ├─ build-sea.mjs               # bundle + postject → 单文件二进制
 │  ├─ pack-client-zip.mjs         # dist/client → dist/client.zip
-│  ├─ verify-all.mjs              # 验收总入口（55 个脚本）
+│  ├─ verify-all.mjs              # 验收总入口（57 个脚本）
 │  ├─ clean-tmp.mjs               # 清 .tmp/verify
-│  ├─ check-no-residue.mjs        # 确认没留临时文件
+│  ├─ check-no-residue.mjs        # 确认没往项目外写（门禁 5）
+│  ├─ check-tables.mjs            # 文档表格列对齐检查
+│  ├─ align-tables.mjs            # 按显示宽度重排表格（CJK 占两列）
+│  ├─ fetch-linux-node.mjs        # 下载 linux node 当 SEA 底本（门禁 4）
 │  ├─ lib/{proc,tmp,cdp}.mjs      # 子进程收尾 / 临时目录 / 无头浏览器
 │  └─ verify/                     # 每步一个验收脚本 + harness.mjs
 ├─ src/
@@ -4285,6 +4281,31 @@ data/
 **文档分工**（v2.2 建立）：README 面向使用者，只留"怎么用"；`docs/` 四份按主题
 分（配置/架构/设计/开发）；PLAN 保留规格与决策记录。三者的关系是
 **README 不重复 PLAN 的取舍理由，PLAN 不重复 README 的操作步骤**。
+
+### 17.1 方案文档进 `docs/方案/`，且只有顶层方案进得去
+
+`docs/` 根下四份是**稳定的主题文档**（配置/架构/设计/开发），随项目长期存在。
+方案是另一类东西：它为一件事而写，做完之后要么被实现吸收，要么就该消失。混在
+同一层的结果是 `docs/` 越来越像收件箱 —— 半年后没人知道哪份还算数。
+
+| 层级         | 定义                                 | 放哪                               | 例                                           |
+| ------------ | ------------------------------------ | ---------------------------------- | -------------------------------------------- |
+| 顶层总体方案 | 跨多个模块、定方向与边界             | `docs/方案/<名>.md`                | 界面设计方案（视觉令牌、布局断点、控件尺度） |
+| 细节实现方案 | 单一功能怎么点、怎么提交、接口叫什么 | **不单独成文**，落进 PLAN 对应章节 | 分组排序 → §15.28                            |
+
+判据只有一条，问**"它说的是方向还是步骤？"**
+
+- **方向 → 方案文档**。它描述约束与取舍：实现细节可以变，这里的约束不能悄悄变。
+- **步骤 → PLAN 的规格层章节**。PLAN 本来就是"先改文档再改代码"的落点。
+
+**细节方案不成文的理由**：这类内容写着"我打算这么写"，实现完之后就被代码取代。
+留一份文件在 `docs/` 里，它要么半年后与代码不符却仍被当成规格，要么每次改代码都得
+同步改它 —— 前者更贵，所以干脆不写。代码是唯一不会漂移的版本。
+
+**临时文档不进 `docs/`。** 未定稿的草稿、待批准的提案、一次性调研一律放 `.tmp/`
+（§19.10c 已覆盖该目录的清理）。理由不是洁癖：`docs/` 下的文件默认被引用、被信任、
+被 `scripts/check-tables.mjs` 扫描；一份"待批准"的草稿混在里面，读者无法从路径
+判断它算不算数。结论定了就并入 PLAN，**草稿本身不迁移**。
 
 ---
 
@@ -4398,11 +4419,13 @@ FAIL  m0-02-schema      schema_migrations 应为 1 行，实际 0
 | 0.5 | 认证 | cookie session + Bearer 双认 | `m0-05-auth.mjs` | ① 登录返回 `Set-Cookie`（`SameSite=Lax`、`Path=/`）② 带 cookie 200 ③ 带 Bearer 200 ④ `loginUserInfo` 未登录返回 **200** 而非 401 |
 | 0.6 | Job runner | `jobs/runner.ts` | `m0-06-jobs.mjs` | ① 入队 100 → 全 `done` ② 同 `dedupe_key` 只留 1 条 ③ handler 抛错 → `attempts=3` 后 `dead` ④ 杀进程重启后 `running` 重置为 `pending` |
 | 0.7 | 检索层 | `entries_fts`、bigram 双端切分 | `m0-07-search.mjs` | ① 10 万条下 `"芯片"` 有结果（**2 字词必须能查**）② 无命中 < 5ms ③ `"半导X体"` **不**误命中 `"半导体"` ④ 时间线 < 5ms、未读数 < 3ms |
-| 0.8 | 三路构建 | `build-sea.mjs`、`pack-client-zip.mjs`、Dockerfile | `m0-08-deploy.mjs` | ① 二进制启动首页 200 且含 `id="root"` ② 同一 `data/` 在源码/二进制/Docker 间互换启动 ③ 插件 3 端点在 Docker 里也通 ④ `$HOME` 零写入 |
+| 0.8 | 三路构建 | `build-sea.mjs`、`pack-client-zip.mjs`、Dockerfile | `m0-08-deploy.mjs` | ① 二进制启动首页 200 且含 `id="root"` ② 同一 `data/` 在源码/二进制/Docker 间互换启动 ③ 插件 3 端点在 Docker 里也通 ④ `$HOME` 零写入（v2.5 补真断言：启动前取快照，交互完再取，比较顶层新增；同时正面断言库确实建在 `--data` 指定处，防"什么都没写"也算过） |
 | 0.9 | 界面（v1.1 新增，v1.14 改正文宽度判据） | 三栏布局、`icons.tsx`、`styles.css` | `m0-09-ui.mjs` | ① 三栏并存且不重叠 ② 列表项 70~130px、一屏 8~10 条 ③ 正文列宽 = 偏好字符数（默认 80ch，实测；断言从 `--reader-width` 读出，不写死）且 1440 屏下两侧留白 40~90px ④ 默认暗色 ⑤ 空态有引导 ⑥ `/` `Esc` `j` 键盘可用 ⑦ 窄屏阅读区浮层化 |
 | 0.10 | 资源与性能预算（v2.0 新增） | 日志模板级速率限制、空闲基线采样 | `m0-10-resources.mjs` | ① 空闲 60s：RSS ≤ 130 MB、CPU 均值 ≤ 1.5%、stderr ≤ 20 行/分钟 ② 空闲日志里**没有**逐条重复的同一模板（同一模板 ≤ 3 行 60s）③ 前端产物 gz：JS ≤ 120 KB、CSS ≤ 15 KB、二进制 ≤ 100 MB ④ **空闲不增长**：90s 内 15s 一采，峰值 ≤ 130 MB、峰谷差 ≤ 25 MB、末值 ≤ 峰值（不写"单窗口增量"，因为实测稳态是 V8 锯齿）⑤ 队列空时 `jobs` 表 6s 内不增长、无滞留 pending/running；打完 20 次请求 RSS 仍 ≤ 130 MB ⑥ **P4 限速器**（9 条）：同一模板连灌 20 次只放 3 行、折叠 17 条记在账上、`takeSuppressed` 是取走语义、20 个不同模板全放、窗口内第 4 次折叠、过窗口配额重置、模板归一只动数字（745 篇 ≡ 3 篇）、归一只动数字**不动引号内容**（no-key ≠ http-500）、模板表有上限（灌 1000 个模板后最早被逐出）⑦ **走真实出口再验**（4 条）：经 `log.info` 灌 20 条同一模板只写出 ≤3 行、20 个**字母**模板 20 行全出（名字里带数字会被归一成同一模板 —— 第一版就红在这，红在一个正确行为上）、同窗口 10 条只出 3 行、跨窗口第一行带「另有 7 条同类已折叠」且那行不占配额 ⑧ **临时文件落在项目内**（8 条，§19.10c）：`useProjectTmp()` 后 `os.tmpdir()` 指向 `.tmp/verify`、目录真的建出来、`mkdtempSync` 落在项目内、路径不再含 `/AppData/`、`dirSize` 读出非零体积、`cleanTmp` 删得掉并报出释放量、不越界删掉 `.tmp/linuxnode` 缓存 |
 
-**M0 门禁**：`scripts/verify-all.mjs` 依次跑完 11 项（0.1~0.10 + `docker-path`）、全绿才进 M1。任何一项红都不能跳过 —— 这些是地基，跳过会在 M2 以后以「奇怪 bug」的形式回来。
+| 0.11 | 项目外零写入（v2.5 新增，发布门禁 5） | `check-no-residue.mjs`、`.npmrc` | `m0-11-no-residue.mjs` | ① `npm config get cache` 指向项目内 ② `npm config get prefix` 指向项目内 ③ Node 运行时在项目内 ④ `node_modules` 有实际内容（不只看目录存在）⑤ `.cache/npm` 真的存在（与 ① 互证：① 看 npm 自述，⑤ 看目录实况）⑥ `$HOME` 下没有本项目的残留目录（含改名前的 `.ai-rss*`）⑦ `check-no-residue.mjs` 自身可运行并报 PASS —— 它是人工排查入口，坏掉就再没有可复现的验证手段 ⑧ `config.ts` 的 `dataDir` 默认值不用 `homedir()`（防默认值悄悄改成用户目录） |
+
+**M0 门禁**：`scripts/verify-all.mjs` 依次跑完 12 项（0.1~0.11 + `docker-path`）、全绿才进 M1。任何一项红都不能跳过 —— 这些是地基，跳过会在 M2 以后以「奇怪 bug」的形式回来。
 
 判据是**累积**的：跑到 0.5 时，0.1~0.5 五项过了就算这一步完成，0.6~0.9 仍应报红（它们还没实现）。这正是「先失败再通过」的意义：**每次新增一步，只应让对应的那项从红转绿，其余项状态不变**。如果 0.6 实现完 0.3 反而红了，说明引入了回归。
 
@@ -4739,7 +4762,7 @@ truthy，断言等于恒真）；**`eq()` 是 `Object.is`**，比较数组/对�
 
 理由两条，都是实测出来的：
 
-**① 系统临时目录的垃圾没人负责清。** 一次全量验收（55 个脚本）在 `%TEMP%`
+**① 系统临时目录的垃圾没人负责清。** 一次全量验收（57 个脚本）在 `%TEMP%`
 留下 **32 个目录、合计 4.8GB**，其中最大的几个是 500MB 的无头浏览器 profile。
 这不是"偶尔漏一个"，是稳定复现。项目内的 `.tmp/` 有 `.gitignore` 兜着、
 有清理入口、出问题时也找得到 —— 系统临时目录三样都没有。
@@ -4747,11 +4770,11 @@ truthy，断言等于恒真）；**`eq()` 是 `Object.is`**，比较数组/对�
 **② 路径更短。** `%TEMP%` 在这台机器上是 36 字符，项目内是 17 字符起。
 Windows 260 字符上限下，`--user-data-dir` 里的嵌套 profile 目录很容易顶到。
 
-实现方式**不是**逐个改 55 个脚本，而是把 `os.tmpdir()` 指过去：
+实现方式**不是**逐个改 57 个脚本，而是把 `os.tmpdir()` 指过去：
 
 - `scripts/lib/tmp.mjs` 的 `useProjectTmp()` 设 `TMPDIR / TEMP / TMP` 三个变量
 - `scripts/verify/harness.mjs` 在模块顶层调用它 —— 所有验收脚本都 import
-  harness，所以**一行改动覆盖全部 55 个脚本**，各脚本照旧写
+  harness，所以**一行改动覆盖全部 57 个脚本**，各脚本照旧写
   `mkdtempSync(join(tmpdir(), 'x'))`
 - `scripts/verify-all.mjs` 额外设一次，子进程继承环境变量
 
@@ -4964,6 +4987,7 @@ Docker 镜像 ~80MB、`data/` 预留 20GB、源码目录 ~400MB —— 三者互
 [✓] 运行时 getAsset() + fflate 解压 → 静态服务
 [✓] Dockerfile 多阶段（debian:bookworm-slim runtime，非 root）
 [✓] scripts/verify/m0-08-deploy.mjs
+[✓] scripts/verify/m0-11-no-residue.mjs  # 门禁 5：工具链侧零写入（v2.5）
 [✓] scripts/verify/docker-path.mjs     # Dockerfile 逐条本地验证
 [✓] cheng-rss doctor 输出完整自检
 [ ] /api/page/save + /api/page/pageOperateResult（兼容层 A 起点，留给 M7）
@@ -5000,7 +5024,7 @@ Docker 的验证边界：Dockerfile 结构、四条构建命令、linux ELF 产�
 | ① 三路互换 | 源码 ↔ 二进制已验证；Docker 未验证 | `m0-08-deploy` 的「同一 data/ 可被源码模式接管」 |
 | ② 插件连接 | 后端契约已验证；**真实插件未亲测** | `m0-05-auth` 25 条契约断言 |
 | ③ 性能红线 | 已达标 | `m0-07-search` 四条红线 |
-| ④ 零写入 | 已验证 | `m0-01-toolchain` + `m0-08-deploy` |
+| ④ 零写入 | 已验证 | `m0-08-deploy` 的「$HOME 顶层零新增」+ `m0-11-no-residue`（工具链侧） |
 
 ②的「真实插件保存网页」需要人工操作一次 Chrome + 官方插件，脚本无法替代。
 
@@ -5155,6 +5179,7 @@ v2.0  需求范围变化（增删 §1.1 任一行）
 | v2.2 | 2026-11-04 | **缺陷修复 + 规格层新增（非需求变更，§1.1 不动）**：**① 简报主链四个缺陷**（PLAN §9.6）：`loadMembers` 查不存在的 `e.content_text`/`e.feed_content_text`（正文其实在 `entry_contents.html` 的 gzip BLOB 里）→ 有内容时必然抛异常；`saveDigest` 的 INSERT 漏写 `day_key` → 恒 NULL，调度器每分钟重跑全套模型调用、UI 永远 `pending`、`uq_digest_day` 对 NULL 失效导致同一天多份；`runDigest` 的「不抛异常」契约没兑现（异常发生在 `recordAttempt` 之前 → 退避机制完全不存在，线上 17 行 attempt 全是「没配 key」，跑主链的那些次一行都没落）；新增迁移 0008 把历史 NULL 按本地日回填。**新增 `m3-06-digest-chain`（25 条）** —— 既有 3.1~3.5 的断言全是纯函数或"在调模型之前就返回"的路径，主链上一次都没被跑过，这是验收的覆盖面缺口而不是断言写少了。**② AI 配置页分层折叠**（§15.29，需求方原话「AI配置界面太繁琐」）：四张卡全展开约 1400px、6 输入框 8 按钮，在 900px 弹窗里滚三屏；按访问频率分四层（概览常显 / Key+预算常显 / 模型名与地址收起 / 提示词收起），用原生 `<details>`。**新增 `m2-08-ai-settings`（19 条）**。**③ 数据清洗与省 token 方案**（§9.7，需求方要求"列入之后的修改计划"，**本节是计划未实现**）：实测单篇分析平均输入 1195 / 输出 976 tokens、379 次调用全部失败白烧 701,448 tokens；列 P1~P6 六项措施与各自的验收判据。**④ 文档数字漂移**：1.27 的断言数 55 → 57（v2.1 当时写的是修前的数），脚本数与断言总数 53/2152 → 55/2030（实测），README 验收表补 `m0-02` 13→15、`m1-13` 50→52、`m0-10` 31→39 三处旧值并新增 m2-08 / m3-06 两行 | ✅ 需求方原话「简报功能异常、AI配置界面太繁琐；AI简报的token消耗太多，将数据清洗和节省token的方案列入之后的修改计划」，并明确「接下来的计划先不推进，完善当前的任务。修改文档、完善代码」 |
 | v2.3 | 2026-11-04 | **项目改名为 cheng-rss**（仓库、包名、二进制、docker 服务、cookie、localStorage、环境变量前缀、User-Agent、OPML 导出文件名），**不做向后兼容**：`ai-rss` → `cheng-rss`（247 处 / 71 文件）、`AI_RSS_*` → `CHENG_RSS_*`（70 处）、`ai_rss_sid` → `cheng_rss_sid`（22 文件）、`ai-rss.reader-prefs.v1` →`cheng-rss.reader-prefs.v1`、二进制 `ai-rss-<platform>` → `cheng-rss-<platform>`。**数据库文件名与 `secrets.json` 刻意不改**（仍是 `data/app.db`），所以升级不需要迁移数据、不用重填 AI key —— 改名的影响被限制在"标识"层面，不碰"状态"。代价写进 README 的「从 ai-rss 升级」一节：已登录会话掉线、阅读偏好回默认、环境变量失效、启动脚本路径失效、docker compose 会当成新服务。**为什么不做兼容读取**：需求方明确要求彻底改名。兼容层要在 cookie 上读两个名字、localStorage 上查两个 key、数据库上探两个文件名、环境变量上读两个前缀 —— 四处兼容代码会长期存在，而换来的是"旧实例升级时少点两下"。在只有单一部署者的当前阶段，一次性断掉更干净。**可推翻条件**：一旦有外部用户报升级问题，就按 README 那五条做一次性迁移脚本。 | ✅ 需求方原话「各类文件名和项目名，都改成cheng-rss」；并就兼容性明确答复「彻底改名，不做兼容」 |
 | v2.4 | 2026-11-04 | **修「测试连接总是显示模型返回空」**（§8.6b）。根因不是 key、不是 baseURL、不是网络：`deepseek-flash` 是**推理模型**，`max_tokens: 1` 时那 1 个 token 花在`reasoning_content` 上，`content` 是空串且 `finish_reason='length'`；而空内容被判`empty` 且 `retryable:false`，于是必然失败、只失败一次、看不出原因。**两个独立缺陷**：① 测试连接用 `maxTokens:1`（对推理模型必然失败）→ 提到 64（实测 16 仍被思考吃光）；② 客户端**完全不读 `reasoning_content`**，也不区分"思考被截断"与"模型无话可说" → 新增 kind `reasoning-only`（`retryable:true`，与 `empty` 的 `false` 相反），这类重试时把 `max_tokens` **翻倍**（原样重发只会再截断一次，那正是 379 次调用全失败却毫无进展的原因），错误信息带上`reasoning_tokens` 与**本次实际用的** max_tokens；`chat()` 与 `chatJson()` 两条路径判定一致；`reasoning` 别名（OpenRouter/网关）也认。**新增 `m2-09-reasoning-model`（16 条）**，含 3 条端点级断言（从 HTTP 打 `/settings/ai/test` 并在 mock 上游里记录实际发出的max_tokens —— 而不是自己传 64 再断言等于 64 的自问自答）。**同时修正 `m2-06` 的一条错误断言**：它原本要求探针 `max_tokens===1`，理由写着"探针不是跑推理"—— 那个要求本身就是 bug。改为要求 ≥32。**实测证据**：真实端点 968 字文章、`max_tokens:1200` 时 `reasoning_tokens=515`（近一半预算在思考）；同一模型两次都**主动省略** `entities`/`novelty`/`sentiment` 三个必填字段 —— 那条留给 §9.7 的 P2。修复后真实端点返回 `ok:true, text:"好的"`。 | ✅ 需求方原话「api测试连接总是显示模型返回空」；**可推翻条件**：若将来主流模型不再输出 `reasoning_content` 而用别的字段名，把 `readReasoning()`的候选列表补上即可，其余逻辑不变 |
+| v2.5 | 2026-11-04 | **CI/CD 与 Release 落地，并修三处真缺陷**（§16 全节重写）。**CI 从未绿过**：远程 7 次运行全红，三个 job 三种原因 —— ① ubuntu「安装依赖」退出 127，因为 `bin/npm` 的 shebang 是 `#!/usr/bin/env node` 而 CI 从不把 `.toolchain/node/bin` 加进 `PATH`（Windows 侥幸通过是因为 `npm.cmd` 用 `%~dp0` 自己找 `node.exe`，同一 bug 在第二平台被掩盖）；② Windows「跑验收」只跑 `for f in m0-*.mjs` 共 10 个脚本，56 个里漏掉 m1–m4，且缺 `verify-all` 已有的硬超时/重试/清理；③ Docker「容器冒烟」curl 连不上。**三处真缺陷**：① `doctor` 对「数据库不存在」返回 0（对损坏库返回 1，实测确认），更要紧的是它**只查磁盘不探 HTTP**，进程活着但服务挂死时照样报健康 —— 故新增 `--url` 参数用内置 `fetch` 打 `/api/health`（`AbortSignal.timeout(5000)`），HEALTHCHECK 随之带 `--url`；② `Dockerfile` 的 `chown -R` 在第 48 行跑，而 `VOLUME ["/app/data"]` 在第 57 行才创建目录，属主是 root 而进程是 uid 10001 → 改为 `mkdir -p /app/data && chown`；③ `m0-08` 头部声称「④ $HOME 零写入」但文件里 `homedir` 出现 0 次，是空口承诺 → 补真断言，`check-no-residue` 一并接入。**调用 npm 改为 node 直调 `npm-cli.js`**（两平台同一条命令），不往 `$GITHUB_PATH` 追加目录（那要处理 `E:/` 与 `E:\` 的路径形式差异）。**`release.yml` 改为矩阵构建**：ubuntu 造 linux、windows 造 win，`wantTarget === hostTarget` 时 `build-sea.mjs` 零参数即可运行 —— 原 §16.2 草稿让 ubuntu 交叉造 win 产物，且用的 `--main`/`--executable`/`--out` 三个参数**在脚本里一个都不存在**；草稿另有 4 处与现实不符（`npm run lint` 无 eslint、`npm test` 下 0 个 `.test.ts`、`check-no-residue.sh` 实为 `.mjs`、`pack:client-zip` 脚本不存在）。**rc 不覆盖 latest**：`metadata-action` 的 `type=raw,value=latest` 会给每个 tag 打 latest，用 `flavor: latest=false` + `enable=${{ !contains(github.ref_name, '-') }}` 收住。**门禁从六条改为五条 + 一条待 M6**：第六条「导出/导入往返」依赖 `export`/`import`，二者在 `cli.ts` 里是 `throw new Error('…在 M6 落地')`，按里程碑属 M6，故保留该行并标状态而非删除（删掉等于假装需求不存在）。**`nightly` 不做真实外网回归**：验收套件自封闭（57 个脚本无一外发请求，AI 那 5 个都是本地 mock 上游），引入外网会 flaky，而 flaky 的门禁等于没有门禁；改为定时重跑只查 runner 镜像漂移。**版本 0.1.0 → 0.0.1-rc1**，tag `v0.0.1-rc1` 发预发布。 | ✅ 需求方原话「完善CICD、Release等功能」「需要都可以跑，也要保证自己可用」；范围经三选一选定 **B1**（五条门禁 + 第六条待 M6，不推进里程碑）；发布可见性答复「那就公开吧」；**可推翻条件**：若将来 `export`/`import` 在 M6 之外被需要，第六条门禁随之补上；若 nightly 的漂移检测噪音过大，改为只跑 m0 子集 |
 | v1.20 | 2026-10-29 | **规格层修订，非需求变更**：§8.7 新增（日门降级/月门停止两道门、本地日历边界、`0`=不限额、闸门问在第一个请求之前、embedding 不降级、AI 配置三层合并与「空值不打回默认」的坑、闸门做成注入回调 CallGuard、`ai_usage` 记的是调用不是条目）；§19.7 反查表第 3 行补 2.4/2.5；§19.4 补状态与断言数、明确黄金测试集需真人做 | ✅ 2.3~2.5 落地时确定 |
 | v1.21 | 2026-10-29 | **规格层修订，非需求变更**：§9.4 新增（聚类与去重是两个问题阈值必然不同、hash 与语义向量两套阈值、为什么不用单链接与 k-means、向量来源整体切换、heat 是乘不是加、单来源 conflicts 强制清空、conflicts 来源必须真实且至少两方、引用安全为何强于事后校验、抹裸 URL、简报重跑 id 不变、聚类整窗重算）；§19.5 补状态与 3.1~3.3 断言数、明确误聚率需真人判 | ✅ 3.1~3.3 落地时确定 |
 | v1.24 | 2026-10-30 | **规格层修订 + 补一步**：① **补 3.5 简报页**（§19.5b 之后新增）—— 3.1~3.4 的产物完整，但**前端没有简报页**，侧栏还标着「待接入」，等于"生成了没人看得见"。这一步不新增需求，只是把 §15.4 已批准的设计落地。修掉的既有断点：`renderCitations` 在落库前已把 `{{cite:cl_x}}` 换成 `[1]`，而 `GET /digests/:id` 一直用正则反查 —— 永匹配不到，clusters 恒空、脚注点了没反应。新增 0005 迁移存 `cites`/`worth_reading` 快照列。② §15.7 移动端 tab **5 → 6**（简报成为一等入口），并说明 390px 下 6 格每格约 65px 仍过 44px 下限，真正的约束是高度不是宽度 | ✅ 3.5 落地时确定 |

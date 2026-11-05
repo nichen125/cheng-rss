@@ -1,6 +1,6 @@
 {
   "name": "cheng-rss",
-  "version": "0.1.0",
+  "version": "0.0.1-rc1",
   "private": true,
   "type": "module",
   "description": "自托管 AI RSS 阅读分析器",

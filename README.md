@@ -3,6 +3,7 @@
 **自托管的私人 RSS 知识库。** 订阅自己进来，AI 先读一遍，值得读的留给你。
 
 [![CI](https://github.com/nichen125/cheng-rss/actions/workflows/ci.yml/badge.svg)](https://github.com/nichen125/cheng-rss/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/nichen125/cheng-rss?include_prereleases&sort=semver)](https://github.com/nichen125/cheng-rss/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D24%20%3C25-brightgreen?logo=node.js&logoColor=white)](https://nodejs.org/)
 
@@ -75,13 +76,28 @@ AI_API_KEY=sk-xxx docker compose up -d
 
 ### 方式二：单文件二进制
 
+从 [Releases](https://github.com/nichen125/cheng-rss/releases) 下载对应平台的产物：
+
 ```bash
-# 自行构建（当前没有发布预编译包，只能从源码构建）
+# Linux x64
+chmod +x cheng-rss-linux-x64
+./cheng-rss-linux-x64 migrate --data ./data
+./cheng-rss-linux-x64 serve  --data ./data --port 3000
+
+# Windows x64（PowerShell）
+.\cheng-rss-win32-x64.exe migrate --data .\data
+.\cheng-rss-win32-x64.exe serve  --data .\data --port 3000
+```
+
+也可以自行构建：
+
+```bash
 ./scripts/build.sh --sea
 ./dist/cheng-rss-linux-x64 serve --data ./data --port 3000
 ```
 
 前端资源内嵌在二进制里，**不需要旁边的 `dist/` 目录**。复制一个文件即可运行。
+每个 Release 附带 `SHA256SUMS`，下载后可用 `sha256sum -c SHA256SUMS` 校验。
 
 ### 方式三：源码运行（开发用）
 
@@ -217,20 +233,19 @@ sqlite3 data/app.db "VACUUM INTO 'backup.db'"
 
 ### 部署
 
-| 边界                      | 说明                                                                                                                   |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Docker 镜像未在真机构建过 | 开发机没装 docker。Dockerfile 每条指令已逐条验证，也确实产出了能内嵌资源的 linux-x64 ELF，但 `docker build` 本身没跑过 |
-| 不提供 macOS 二进制       | Node SEA 官方只测 arm64                                                                                                |
-| 不支持 Alpine             | 用 `debian:bookworm-slim` 替代（Node SEA 不支持 musl）                                                                 |
-| 单用户                    | 无多租户。`users` 表存在但只用于认证                                                                                   |
+| 边界                       | 说明                                                                |
+| -------------------------- | ------------------------------------------------------------------- |
+| 只发布 Linux / Windows x64 | Node SEA 未测试 macOS，Alpine 不支持 musl。其他平台请用源码方式运行 |
+| 不支持 Alpine              | 用 `debian:bookworm-slim` 替代（Node SEA 不支持 musl）              |
+| 单用户                     | 无多租户。`users` 表存在但只用于认证                                |
 
 ### 功能
 
-| 边界                                     | 说明                                                                |
-| ---------------------------------------- | ------------------------------------------------------------------- |
-| `export` / `import` / `mcp` 子命令未实现 | 分别在 M6 / M6 / M5。执行时明确报「在 Mx 落地」，不会静默失败       |
-| Huntly 插件仅认证兼容                    | 存页接口未实现，插件还不能真正存页进去。见[灵感与致谢](#灵感与致谢) |
-| 无 embedding 模型时聚类召回受限          | 退化为字符指纹。同一件事若连实体名和数字都换了就聚不起来            |
+| 边界                                     | 说明                                                                              |
+| ---------------------------------------- | --------------------------------------------------------------------------------- |
+| `export` / `import` / `mcp` 子命令未实现 | 分别在 M6 / M6 / M5，执行时明确报「在 Mx 落地」。**备份目前只能直接拷贝 `data/`** |
+| Huntly 插件仅认证兼容                    | 存页接口未实现，插件还不能真正存页进去。见[灵感与致谢](#灵感与致谢)               |
+| 无 embedding 模型时聚类召回受限          | 退化为字符指纹。同一件事若连实体名和数字都换了就聚不起来                          |
 
 ### 质量
 
@@ -243,7 +258,7 @@ sqlite3 data/app.db "VACUUM INTO 'backup.db'"
 
 ```bash
 ./scripts/build.sh          # 构建
-./scripts/verify-all.mjs    # 跑全部验收（56 个脚本、2046 条断言，约 13 分钟）
+./scripts/verify-all.mjs    # 跑全部验收（57 个脚本、2171 条断言，约 22 分钟）
 npm run typecheck:all       # 类型检查
 ```
 
@@ -253,6 +268,10 @@ npm run typecheck:all       # 类型检查
 
 详细流程、写断言的规矩、调试技巧见 [docs/development.md](docs/development.md)。
 
+CI 在 Ubuntu 与 Windows 上各跑一遍这 57 个脚本，任一红即阻塞合并。发布由 tag 触发：
+先过同一套验收，再产出两个平台的二进制与 Docker 镜像，附 `SHA256SUMS`。
+发布门禁与 workflow 的细节见 [PLAN.md §16](PLAN.md)。
+
 ### 文档
 
 | 文档                                           | 内容                                           |
@@ -261,11 +280,15 @@ npm run typecheck:all       # 类型检查
 | [docs/architecture.md](docs/architecture.md)   | 模块划分、数据流、选型与放弃的方案             |
 | [docs/design.md](docs/design.md)               | 界面规格、正文提取、去重、聚类、引用安全       |
 | [docs/development.md](docs/development.md)     | 本地开发、验收机制、写断言的规矩               |
+| [docs/方案/](docs/方案/)                       | 顶层设计方案（界面视觉规格、配色与控件尺度）   |
 | [PLAN.md](PLAN.md)                             | 完整的规格与决策记录，含每一步的取舍与踩过的坑 |
 
 `PLAN.md` 是这个项目最特别的文件：按「需求 → 规格 → 实现」三层记录每一步，写清了每个
 决定的**替代方案与被否掉的原因**。想知道「为什么正文用 gzip 而不用 zstd」、「为什么 FTS5
 要配程序侧 bigram」，答案都在里面。
+
+`docs/方案/` 只放**跨模块的顶层方案**。单个功能的实施细节不单独成文，直接落进 PLAN 的
+对应章节 —— 那种文档写完就被代码取代，留下来只会与代码不符却仍被当成规格。
 
 ## 社区
 

@@ -144,6 +144,33 @@ jobs:
               echo "::error::没有解析出失败脚本名 —— 可能是崩溃/超时，看下面的日志尾"
             fi
 
+            # 把每一条失败断言连同实测值做成注解。
+            #
+            # 只报脚本名不够：UI 类失败几乎都是"数值差一点点"（字体度量不同），
+            # 必须看到**期望值与实际值**才能判断是环境差异还是实现坏了。
+            # 而完整日志要仓库 admin 权限才能下载，注解是唯一匿名可读的通道。
+            #
+            # 失败断言的格式（harness.mjs 的 summary）：
+            #   FAIL  <描述>
+            #         <detail: "lab再: 期望 X，实际 Y">
+            awk '
+              /^[[:space:]]+FAIL[[:space:]]/ {
+                sub(/^[[:space:]]+FAIL[[:space:]]+/, "")
+                desc = $0; getline nxt
+                if (nxt ~ /^[[:space:]]{6,}/) {
+                  sub(/^[[:space:]]+/, "", nxt)
+                  print desc " || " nxt
+                } else {
+                  print desc
+                  # 回退一行不好做，丢掉这条的 detail 可接受
+                }
+              }
+            ' .tmp/verify-plain.log | head -25 | while IFS= read -r line; do
+              # ::error:: 里的换行必须转义，否则注解会被截断
+              msg=$(printf '%s' "$line" | tr '\n' ' ' | cut -c1-800)
+              echo "::error::断言失败: $msg"
+            done
+
             echo "--- 失败断言（最多 40 行）---"
             grep -E '^  - ' .tmp/verify-plain.log | head -40 || true
 

@@ -44,6 +44,30 @@ check('.npmrc 与 .gitignore 存在', () => ok(
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
 const hasToolchain = existsSync(nodeBin);
 
+// 调 npm 一律用「node 执行 npm-cli.js」，不用 bin/npm。
+//
+// bin/npm 是 `#!/usr/bin/env node`，要求 PATH 里有 node。本机开发时
+// PATH 里通常有，所以这个 bug 平时完全看不出来；CI 的 step 里没有，
+// 直接 127。**验收脚本自己也踩了这个坑** —— 在修 workflow 的时候漏了它，
+// 于是 m0-01 / m0-11 在 ubuntu 上红，而在本机永远是绿的。
+//
+// 路径两平台不同（这正是本轮反复踩的同一件事）：
+//   Windows 包（扁平）   node_modules/npm/bin/npm-cli.js
+//   Linux  包（有 lib）  lib/node_modules/npm/bin/npm-cli.js
+function findNpmCli() {
+  const a = join(root, '.toolchain/node/lib/node_modules/npm/bin/npm-cli.js');
+  const b = join(root, '.toolchain/node/node_modules/npm/bin/npm-cli.js');
+  if (existsSync(a)) return a;
+  if (existsSync(b)) return b;
+  return null;
+}
+const npmCli = findNpmCli();
+
+/** 用项目内 node 跑一次 npm 子命令，返回 stdout（已 trim）。 */
+function npmGet(args) {
+  return execFileSync(nodeBin, [npmCli, ...args], { encoding: 'utf8' }).trim();
+}
+
 check('项目内 node 已安装', () => ok(hasToolchain, `缺失: ${nodeBin}\n        先运行 bootstrap`));
 check('项目内 node 版本 = 锁定版本', () => {
   if (!hasToolchain) return ok(false, '工具链未安装，跳过');
@@ -51,15 +75,17 @@ check('项目内 node 版本 = 锁定版本', () => {
   return eq(v, `v${locked}`);
 });
 
+check('能找到 npm-cli.js（两种布局都试过）', () => {
+  if (!hasToolchain) return ok(false, '工具链未安装，跳过');
+  return ok(Boolean(npmCli),
+    '两种布局都没有：lib/node_modules/npm/bin/npm-cli.js 与 node_modules/npm/bin/npm-cli.js');
+});
+
 // ── ② npm 缓存必须在项目内 ─────────────────────────────────────
 check('npm 缓存路径在项目内', () => {
   if (!hasToolchain) return ok(false, '工具链未安装，跳过');
-  const npmBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'npm.cmd' : 'bin/npm');
-  const cache = execFileSync(npmBin, ['config', 'get', 'cache'], {
-    encoding: 'utf8',
-    // npm.cmd 在 Windows 上需要 shell
-    shell: process.platform === 'win32',
-  }).trim();
+  if (!npmCli) return ok(false, '找不到 npm-cli.js');
+  const cache = npmGet(['config', 'get', 'cache']);
   const inProject = resolve(cache).startsWith(resolve(root));
   return {
     ok: inProject,
@@ -69,12 +95,9 @@ check('npm 缓存路径在项目内', () => {
 
 check('未使用系统全局 npm 前缀', () => {
   if (!hasToolchain) return ok(false, '工具链未安装，跳过');
+  if (!npmCli) return ok(false, '找不到 npm-cli.js');
   // 项目内 node 的 npm 应该指向项目内的 lib，不能是 AppData/Roaming 那套
-  const npmBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'npm.cmd' : 'bin/npm');
-  const prefix = execFileSync(npmBin, ['config', 'get', 'prefix'], {
-    encoding: 'utf8',
-    shell: process.platform === 'win32',
-  }).trim();
+  const prefix = npmGet(['config', 'get', 'prefix']);
   const inProject = resolve(prefix).startsWith(resolve(root));
   return {
     ok: inProject,
@@ -213,6 +236,34 @@ check('workflow 里没有手写的 toolchain 相对路径', () => {
     }
     if (/\.toolchain\/node\/node_modules\/npm\/bin\/npm-cli\.js/.test(src)) {
       bad.push(`${f}: 写死扁平 node_modules 布局`);
+    }
+  }
+  return ok(bad.length === 0, bad.join('; '));
+});
+
+// 验收脚本自己也不许犯同样的错。
+//
+// 这条是补上来的：修 workflow 的时候漏了 scripts/verify/ 里的两处，
+// 于是 m0-01 / m0-11 在 ubuntu 上红、在本机永远绿 —— 而这两个脚本
+// 恰恰是"验证工具链正确"的那两个，它们自己错了最讽刺。
+check('验收脚本里没有 bin/npm 或写死的扁平布局', () => {
+  const dir = join(root, 'scripts/verify');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.mjs'));
+  const bad = [];
+  for (const f of files) {
+    if (f === 'harness.mjs') continue;
+    const src = readFileSync(join(dir, f), 'utf8');
+    // 只看非注释行：注释里解释这个坑是好事，不该被罚
+    const code = src.split('\n')
+      .filter((l) => !l.trimStart().startsWith('//') && !l.trimStart().startsWith('*'))
+      .join('\n');
+    if (/'bin\/npm'|"bin\/npm"|'npm\.cmd'|"npm\.cmd"/.test(code)) {
+      bad.push(`${f}: 调 bin/npm（Linux 上 127）`);
+    }
+    // 单写扁平布局且没有 lib/ 分支 → 探测缺失
+    if (/\.toolchain\/node\/node_modules\/npm\/bin\/npm-cli\.js/.test(code)
+        && !/lib\/node_modules\/npm\/bin\/npm-cli\.js/.test(code)) {
+      bad.push(`${f}: 写死扁平布局（缺 lib/ 探测）`);
     }
   }
   return ok(bad.length === 0, bad.join('; '));

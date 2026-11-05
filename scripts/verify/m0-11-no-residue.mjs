@@ -24,7 +24,18 @@ import { group, check, ok, eq, summary } from './harness.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
-const npmCli = join(root, '.toolchain/node/node_modules/npm/bin/npm-cli.js');
+
+// npm 的 JS 入口两平台位置不同，必须探测 —— 写死一个另一个平台就失败：
+//   Windows 包（zip，扁平）    node_modules/npm/bin/npm-cli.js
+//   Linux  包（tar.xz）        lib/node_modules/npm/bin/npm-cli.js
+// 这条在本轮 CI 上真的红过：写死扁平布局，ubuntu 上全是 MODULE_NOT_FOUND。
+const npmCli = (() => {
+  const a = join(root, '.toolchain/node/lib/node_modules/npm/bin/npm-cli.js');
+  const b = join(root, '.toolchain/node/node_modules/npm/bin/npm-cli.js');
+  if (existsSync(a)) return a;
+  if (existsSync(b)) return b;
+  return null;
+})();
 
 group('0.11 项目外零写入');
 

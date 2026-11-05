@@ -2,8 +2,8 @@
 // 构建单文件二进制（SEA）。
 //
 // 流程（PLAN §3.4 / §16.2）：
-//   1. esbuild 打包服务端 → dist/server.cjs（--sea，minify）
-//   2. 打包前端 → dist/client.zip
+//   1. esbuild 打包服务端 → dist/.cache/server.cjs（--sea，minify）
+//   2. 打包前端 → dist/.cache/client.zip
 //   3. 生成 sea-config.json（assets 里放 client.zip）
 //   4. node --experimental-sea-config 产出 blob
 //   5. 复制 node 可执行体 → postject 注入 blob
@@ -72,7 +72,9 @@ const outName = targetName.startsWith('win')
   : `cheng-rss-${targetName}`;
 const outPath = join(dist, outName);
 
-mkdirSync(dist, { recursive: true });
+// 中间产物（bundle / zip / blob）全在 dist/.cache/，交付物在 dist/ 根下。
+const cache = join(dist, '.cache');
+mkdirSync(cache, { recursive: true });
 
 // ── 1. 服务端 bundle ────────────────────────────────────────
 console.log('打包服务端（--sea）');
@@ -93,16 +95,17 @@ execFileSync(nodeBin, [join(root, 'scripts/pack-client-zip.mjs')], {
 });
 
 // ── 3. sea-config ───────────────────────────────────────────
-const seaConfig = join(dist, 'sea-config.json');
-const blobPath = join(dist, 'sea-prep.blob');
+const seaConfig = join(cache, 'sea-config.json');
+const blobPath = join(cache, 'sea-prep.blob');
 
 writeFileSync(seaConfig, JSON.stringify({
-  main: join(dist, 'server.cjs').replace(/\\/g, '/'),
+  main: join(cache, 'server.cjs').replace(/\\/g, '/'),
   output: blobPath.replace(/\\/g, '/'),
   disableExperimentalSEAWarning: true,
   // 静态资源以 assets 形式内嵌；运行时用 getAsset('client.zip') 取出
+  // （zip 内部的文件名是 client.zip，与它落在磁盘哪里无关）
   assets: {
-    'client.zip': join(dist, 'client.zip').replace(/\\/g, '/'),
+    'client.zip': join(cache, 'client.zip').replace(/\\/g, '/'),
   },
 }, null, 2), 'utf8');
 
@@ -179,12 +182,17 @@ const args = [postjectCli, outPath, 'NODE_SEA_BLOB', blobPath, '--sentinel-fuse'
  *
  * 校验取 blob 末尾的一段：SEA blob 是 JSON + payload，末尾必然存在且
  * 不会被 postject 改写（它只插进文件，不改 blob 内容）。
+ *
+ * blob 先读进内存：校验只依赖这些字节，不依赖文件在磁盘上活到最后。
+ * 两个 build-sea 共用同一路径时，先结束的那个会把 blob 删掉，留下
+ * 另一个在重试里踩 ENOENT（实测过）。
  */
+const blobBytes = readFileSync(blobPath);
+
 function injectedOk() {
   if (!existsSync(outPath)) return false;
-  const blob = readFileSync(blobPath);
-  if (blob.length < 64) return false;
-  const probe = blob.subarray(blob.length - 48);
+  if (blobBytes.length < 64) return false;
+  const probe = blobBytes.subarray(blobBytes.length - 48);
   const out = readFileSync(outPath);
   return out.includes(probe);
 }

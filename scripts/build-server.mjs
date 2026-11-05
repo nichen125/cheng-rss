@@ -17,7 +17,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const outFile = join(root, 'dist/server.cjs');
+// 中间产物一律进 dist/.cache/：dist/ 根下只留交付物（二进制）和运行时目录 client/。
+// 混在一起时 ls dist 分不清「这个能不能删」。
+const outFile = join(root, 'dist/.cache/server.cjs');
 
 const isSea = process.argv.includes('--sea');
 
@@ -62,10 +64,10 @@ await build({
 });
 
 const size = statSync(outFile).size;
-console.log(`服务端 bundle: dist/server.cjs ${(size / 1024).toFixed(0)} KB` + (isSea ? ' (minified)' : ''));
+console.log(`服务端 bundle: dist/.cache/server.cjs ${(size / 1024).toFixed(0)} KB` + (isSea ? ' (minified)' : ''));
 
-const zip = join(root, 'dist/client.zip');
+const zip = join(root, 'dist/.cache/client.zip');
 if (existsSync(zip)) {
-  console.log(`前端 zip: dist/client.zip ${(statSync(zip).size / 1024).toFixed(0)} KB`);
+  console.log(`前端 zip: dist/.cache/client.zip ${(statSync(zip).size / 1024).toFixed(0)} KB`);
 }
 

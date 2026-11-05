@@ -361,12 +361,26 @@ const after = await evaluate(`(() => {
   // v1.14：正文默认宽度从 72ch 改成 80ch，但**断言不写死这个数** ——
   // 从 CSS 变量 --reader-width 读出来再量。写死 80 的话，以后调默认值
   // 又要改一遍测试，而测试改实现就等于没测（§19.1）。
+  //
+  // 基准必须与 .reader 同字号同字族。原来这里把 font-size 硬编码成
+  // 16.5px，而 .reader 的实际字号是 var(--reader-font, 16.5px)（可调），
+  // CI 的 Linux runner 上字族也会回退 —— 基准就偏了 22px，本地 Windows
+  // 恰好对上，于是只有 CI 红。见 m1-19 里同一条的详细说明。
+  //
+  // 注意：这段跑在浏览器里（外层是模板字符串），
+  // 注释里不能出现反引号，也不能用嵌套模板字符串。
   const wantCh = Number(getComputedStyle(pane ?? document.body)
     .getPropertyValue('--reader-width').trim() || 80) || 80;
+  const readerCS = reader ? getComputedStyle(reader) : null;
   const probe = document.createElement('div');
-  probe.style.cssText = 'position:absolute;visibility:hidden;width:' + wantCh
-    + 'ch;font-size:16.5px;font-family:'
-    + getComputedStyle(reader ?? document.body).fontFamily;
+  const fk = ['fontSize', 'fontFamily', 'fontWeight', 'letterSpacing', 'wordSpacing'];
+  const fontCss = readerCS
+    ? fk.map(function (k) {
+      const cssName = k.replace(/[A-Z]/g, function (m) { return '-' + m.toLowerCase(); });
+      return cssName + ':' + readerCS[k];
+    }).join(';')
+    : 'font-size:16.5px';
+  probe.style.cssText = 'position:absolute;visibility:hidden;width:' + wantCh + 'ch;' + fontCss;
   document.body.appendChild(probe);
   const wantW = Math.round(probe.getBoundingClientRect().width);
   probe.remove();

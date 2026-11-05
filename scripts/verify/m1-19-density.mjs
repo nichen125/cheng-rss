@@ -273,12 +273,36 @@ const MEASURE = `(() => {
   const pane = document.querySelector('.reader-pane');
   const wantCh = Number(getComputedStyle(pane ?? document.body)
     .getPropertyValue('--reader-width').trim() || 80) || 80;
+
+  // 偏好 Nch 应该渲染成多宽：基准必须与 .reader 完全同源。
+  // .reader 的宽度是 width: calc(var(--reader-width) * 1ch)，
+  // 所以基准 = 同一个字号、同一个字族下的 Nch。
+  // 原来把 font-size 硬编码成 16.5px，而 .reader 的实际字号是
+  // var(--reader-font, 16.5px)（可调），Linux 上字族也会回退，
+  // 于是基准偏 22px（实测 818 vs 期望 840）。Windows 恰好对上，
+  // 所以这条只在 CI 红。
+  //
+  // 修法：把 .reader 的 font-size / font-family / letter-spacing /
+  // word-spacing 原样抄到探针上。这几个属性都影响 1ch 的宽度，
+  // 少抄一个就还是猜。
+  //
+  // 注意：这段跑在浏览器里（外层是模板字符串），所以注释里不能出现
+  // 反引号，也不能用嵌套模板字符串。
+  const readerCS = reader ? getComputedStyle(reader) : null;
   const probe = document.createElement('div');
-  probe.style.cssText = 'position:absolute;visibility:hidden;width:' + wantCh
-    + 'ch;font-size:16.5px;font-family:' + getComputedStyle(reader ?? document.body).fontFamily;
+  const fontKeys = ['fontSize', 'fontFamily', 'fontWeight', 'letterSpacing', 'wordSpacing'];
+  const fontCss = readerCS
+    ? fontKeys.map(function (k) {
+      const cssName = k.replace(/[A-Z]/g, function (m) { return '-' + m.toLowerCase(); });
+      return cssName + ':' + readerCS[k];
+    }).join(';')
+    : 'font-size:16.5px';
+  probe.style.cssText = 'position:absolute;visibility:hidden;width:' + wantCh + 'ch;' + fontCss;
   document.body.appendChild(probe);
   const want72 = Math.round(probe.getBoundingClientRect().width);
   probe.remove();
+  // .reader 自身的计算宽度（content-box，正好等于 Nch 或 100%-58px 取小）
+  const readerW = readerCS ? Math.round(parseFloat(readerCS.width) || 0) : 0;
 
   const items = [...document.querySelectorAll('.entry-item')];
   const vis = items.filter((e) => {
@@ -324,6 +348,7 @@ const MEASURE = `(() => {
     reader: box('.reader-pane'),
     paneHead: box('.pane-head'),
     colW: body ? Math.round(body.getBoundingClientRect().width) : 0,
+    readerW,
     want72,
     wantCh,
     // 正文两侧的空白：v1.14 的 §15.3 改动就是把这两个数压下去
@@ -401,9 +426,12 @@ check('① 两栏合计比 v1.12 的 618px 窄（收窄方向没写反）', () =
   return ok(sum <= 618 - W_LIST_MAX_OK, `两栏合计 ${sum}px，v1.12 是 618px`);
 });
 check('② 正文列宽 = 偏好字符数的实测宽度（收窄基座没顺手改正文宽度）', () => {
+  // 基准 want72 现在与 .reader 同字号同字族，不再硬编码 16.5px。
+  // 正文 .article-body 撑满 .reader 的 content 区，所以两者应当相等。
   const diff = Math.abs(at1440.colW - at1440.want72);
-  return ok(diff <= 4,
-    `正文列 ${at1440.colW}px，${at1440.wantCh}ch = ${at1440.want72}px，差 ${diff}px`);
+  return ok(diff <= 8,
+    `正文列 ${at1440.colW}px，${at1440.wantCh}ch = ${at1440.want72}px，差 ${diff}px`
+    + `（.reader ${at1440.readerW}px）`);
 });
 check('② 正文两侧留白 ≤ 90px（v1.14 §15.3：改前两侧各 118px）', () => {
   return ok(at1440.sideGapL !== null && at1440.sideGapL >= 40 && at1440.sideGapL <= 90

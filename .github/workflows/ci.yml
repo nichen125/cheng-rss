@@ -1,24 +1,25 @@
 name: CI
 
-# 触发方式：**只手动**，不随 push 自动跑。
+# 触发方式：**打标签时**自动跑，其余情况手动。
 #
-# 为什么（2026-11-06）：CI 资源有限，而一轮 CI 要占两个平台各 ~12 分钟
-# （实测 ubuntu 700s、windows 723s，再加 Docker job 67s），而绝大多数 push
-# 只改文档或注释，根本不需要跑完整验收。改成「本地先跑绿，再手动推一次」
-# 的顺序：本地 `node scripts/verify-all.mjs` 约 765s 但可以边改边跑，
-# CI 只在真正需要一份「干净 runner 上的结论」时占用。
+# 为什么不用 push 触发（2026-11-06 需求方决定）：
+#   验收功能先本地跑通，再去 CI 跑；CI 资源有限，在 CI 侧调稳之前避免
+#   "每次 push 都触发"。绝大多数 push 只改文档或注释，不需要跑完整验收。
 #
-# 顺带的好处：CI 红过很多次（都是一平台红一平台绿），改手动后不会再让
-# "旧提交红着"这种噪音一直挂在页面上。
+# 为什么挂在 tag 上：打标签意味着要发版，那时必须有一份「干净 runner 上的
+# 结论」，而本机能过不等于 CI 能过（字体、浏览器路径、Node 补丁版本都会漂）。
+# 挂在 tag 上等于「发版即验」，且与 release.yml 天然同步。
 #
-# 恢复自动跑：取消 push / pull_request 两段的注释即可。
+# 日常流程因此变成：
+#   1. 本地 ./scripts/verify-all.mjs 跑绿
+#   2. 打 tag 并推送 → ci.yml 与 release.yml 同时跑
+#   3. 想单独验而不发版时，手动触发本 workflow
+#
 # 注意：GitHub Actions **不认** commit message 里的 `[skip ci]`
-# （那是 GitLab/Cirrus 的行为），所以只能靠注释掉触发器。
+# （那是 GitLab / Cirrus 的行为），要跳过只能靠不触发。
 on:
-  # push:
-  #   branches: [main]
-  # pull_request:
-  #   branches: [main]
+  push:
+    tags: ["v*"]
   workflow_dispatch:
 
 # 同一分支上新的 push 取消旧的运行，节省额度也避免"旧提交红了"的混乱

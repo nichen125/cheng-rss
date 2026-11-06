@@ -4,7 +4,7 @@
 >
 > 支持二进制 / 源码 / Docker 三种部署，单个数据目录即可备份迁移。
 >
-> 版本 **v2.5**｜状态：M0 全部 11 步完成（含 0.10 资源预算、0.11 项目外零写入）；M1 全部 27 步完成（含 1.26 未分组平铺、1.27 分组与源的排序）；**M2 全部 7 步完成**（含 2.6 key 界面填写与 2.7 单篇总结）；**M3 全部 4 步完成**（178 条断言）；**M4 全部 4 步完成**（146 条断言）；**3.5 简报页完成**（43 条断言）；共 **57 个验收脚本、2171 条断言全绿**；**v2.5 落地 CI/CD 与发布**（三个 workflow、五道发布门禁、v0.0.1-rc1）；v1.13 追加 1.18 侧栏分组树与 1.19 三栏密度；v1.14 放宽正文宽度与阅读区留白；v1.15 追加 1.20 阅读区边缘与侧边目录；v1.16 追加 1.21 默认只看未读；v1.17 追加 1.22 未读清零后的落点、1.23 分组/单源未读清零、1.24 标题行对齐、1.25 瞬时失败不判死，并修 §7.5 的 pending 脱钩；v1.18 推翻 1.22 的落点方案（改成列表内分割线补已读）、修「切分组仍停在全部」；v1.19 落 M2 的 2.1~2.2（新增 §8.6 客户端实现与失败分类）；v1.20 落 M2 的 2.3~2.5（新增 §8.7 预算闸门的两道门与三层配置）、AI 配置页从占位改成真页面；v1.21 落 M3 的 3.1~3.3（新增 §9.4 聚类与引用安全的设计取舍）；v1.22 落 3.4 定时生成（新增 §9.5 三种否决与 day_key 的由来）；v1.23 落 M4 全部 4 步高亮（新增 §11.1b 锚定的四个实现决定、§19.5b M4 判据表、§11.4 联动三项落地/两项推后到 M5）；v1.24 补 3.5 简报页（§15.4 落地，修掉一条"生成了没人看得见"的断点；§15.7 移动端 tab 5→6 属规格变更）；**v2.0 需求层新增四项**（24 key 可在界面填、25 未分组源平铺侧栏、26 单篇总结+提示词可编辑、27 资源与性能预算），对应步骤 2.6 / 1.26 / 2.7 / 0.10 与 §5.7、§8.8、§8.9、§15.26、§15.27，**四项均已落地**；**v2.1 需求层新增第 28 行**（分组与源可排序：侧栏长按进排列模式拖/点 ↑↓，源可拖进拖出分组，跨组给可撤销提示；配置 › 分组另有一路常显 ↑↓，因为手机上侧栏是 display:none），对应步骤 1.27 与 §15.28，**已落地，57 条断言**；同轮把 §15.26 的「未分组排在最末」改为「排在最前」｜22 章
+> 版本 **v2.6**｜状态：M0 全部 11 步完成（含 0.10 资源预算、0.11 项目外零写入）；M1 全部 27 步完成（含 1.26 未分组平铺、1.27 分组与源的排序）；**M2 全部 7 步完成**（含 2.6 key 界面填写与 2.7 单篇总结）；**M3 全部 4 步完成**（178 条断言）；**M4 全部 4 步完成**（146 条断言）；**3.5 简报页完成**（43 条断言）；共 **57 个验收脚本、2171 条断言全绿**；**v2.5 落地 CI/CD 与发布**（三个 workflow、五道发布门禁、v0.0.1-rc1）；v1.13 追加 1.18 侧栏分组树与 1.19 三栏密度；v1.14 放宽正文宽度与阅读区留白；v1.15 追加 1.20 阅读区边缘与侧边目录；v1.16 追加 1.21 默认只看未读；v1.17 追加 1.22 未读清零后的落点、1.23 分组/单源未读清零、1.24 标题行对齐、1.25 瞬时失败不判死，并修 §7.5 的 pending 脱钩；v1.18 推翻 1.22 的落点方案（改成列表内分割线补已读）、修「切分组仍停在全部」；v1.19 落 M2 的 2.1~2.2（新增 §8.6 客户端实现与失败分类）；v1.20 落 M2 的 2.3~2.5（新增 §8.7 预算闸门的两道门与三层配置）、AI 配置页从占位改成真页面；v1.21 落 M3 的 3.1~3.3（新增 §9.4 聚类与引用安全的设计取舍）；v1.22 落 3.4 定时生成（新增 §9.5 三种否决与 day_key 的由来）；v1.23 落 M4 全部 4 步高亮（新增 §11.1b 锚定的四个实现决定、§19.5b M4 判据表、§11.4 联动三项落地/两项推后到 M5）；v1.24 补 3.5 简报页（§15.4 落地，修掉一条"生成了没人看得见"的断点；§15.7 移动端 tab 5→6 属规格变更）；**v2.0 需求层新增四项**（24 key 可在界面填、25 未分组源平铺侧栏、26 单篇总结+提示词可编辑、27 资源与性能预算），对应步骤 2.6 / 1.26 / 2.7 / 0.10 与 §5.7、§8.8、§8.9、§15.26、§15.27，**四项均已落地**；**v2.1 需求层新增第 28 行**（分组与源可排序：侧栏长按进排列模式拖/点 ↑↓，源可拖进拖出分组，跨组给可撤销提示；配置 › 分组另有一路常显 ↑↓，因为手机上侧栏是 display:none），对应步骤 1.27 与 §15.28，**已落地，57 条断言**；同轮把 §15.26 的「未分组排在最末」改为「排在最前」；**v2.6 修 CI/CD 并使首发成功**（`v0.0.1-rc1` 端到端跑通；修掉 `release.yml` 两个阻断缺陷、`nightly` 与 `ci` 的写法不一致、19 个验收脚本缺 `busy_timeout` 导致的跨平台偶发 `database is locked`；CI 触发改为挂在 `v*` tag 上）｜22 章
 
 ---
 
@@ -4045,9 +4045,31 @@ key 只回显掩码、提示词按指纹缓存。折叠只改**呈现顺序与�
 
 | Workflow | 触发 | 作用 | 状态 |
 |---|---|---|---|
-| `ci.yml` | push / PR / 手动 | 类型检查、构建、**全部 57 个验收脚本** | 已落地 |
-| `release.yml` | tag `v*` / 手动 | 二进制 + Docker 镜像 + 校验和 + GitHub Release | 已落地 |
-| `nightly.yml` | 每日 cron | 同一套验收再跑一遍，**只用于发现 runner 镜像漂移** | 见下 |
+| `ci.yml` | **push `v*` tag** / 手动 | 类型检查、构建、全部验收脚本 | 已落地、**已两次全绿** |
+| `release.yml` | push `v*` tag / 手动 | 二进制 + Docker 镜像 + 校验和 + GitHub Release | 已落地、**`v0.0.1-rc1` 首发成功** |
+| `nightly.yml` | **cron 已关**，仅手动 | 同一套验收再跑一遍，只用于发现 runner 镜像漂移 | 见下 |
+
+**v2.6 起：CI 挂在打标签上，日常提交不触发**（需求方 2026-11-06 决定）：
+
+> 验收功能现在本地跑通，再去 cicd 跑。cicd 的资源有限。在 cicd 调试完成之前，
+> 避免推送时的 cicd。
+
+`nightly.yml` 的 `schedule` 也一并注释掉了，只留 `workflow_dispatch`。
+
+理由：绝大多数日常提交只改文档或注释，不值得跑完整验收；而**打标签意味着要发版**，
+那时必须有一份「干净 runner 上的结论」—— 本机能过不等于 CI 能过（字体、浏览器路径、
+Node 补丁版本都会漂）。挂在 tag 上等于「发版即验」，且与 `release.yml` 天然同步。
+
+配套流程：
+
+1. 本地 `./scripts/verify-all.mjs` 跑绿
+2. 打 tag 并推送 → `ci.yml` 与 `release.yml` 同时跑
+3. 想单独验 CI 而不发版时，手动触发 `ci.yml`
+
+**为什么不写 `[skip ci]`**：GitHub Actions **不认** commit message 里的这个标记
+（那是 GitLab / Cirrus 的行为），要跳过只能靠不触发。
+
+**恢复夜间定时**：取消 `nightly.yml` 里 `schedule` 的注释。
 
 **CI 与本地用同一套工具链**：workflow 不装系统 Node，而是 `./scripts/bootstrap.sh`
 之后直接用 `.toolchain/node`。这样「本地能过、CI 挂掉」这类环境差异不存在。
@@ -4095,6 +4117,15 @@ CI 的 step 里没有，直接以 **127**（command not found）失败。Windows
 nightly 改为定时重跑同一套验收，用途是发现 runner 镜像的变化 —— 字体、
 Chromium 路径、Node 补丁版本这些会让 UI 断言悄悄偏移的东西。它红了通常意味着
 "环境变了"，而不是"代码坏了"，所以不阻塞主分支。
+
+**v2.6 补**：nightly 与 `ci.yml` 必须用**同一套**取 SEA 底本的写法，否则
+两边的红意义不同、看日志的人会误判。曾经只修了 `ci.yml`，nightly 仍是老写法
+（`if: runner.os == 'Linux'` + 无降级开关），而 `docker-path.mjs` 在缺底本时
+**有意**判 FAIL（"未执行 ≠ 通过"）—— 于是 Windows 的 nightly 每天必红一次。
+
+一个恒定红的定时任务会淹掉真正的漂移告警，正好印证它自己注释里那句
+「红了没人信」。现在两个文件用完全相同的三步：`continue-on-error` 取底本 →
+判断是否就绪 → 缺底本时给 `verify-all` 补 `--allow-skip-docker-artifact`。
 
 ### 16.2 `release.yml`
 
@@ -4162,10 +4193,39 @@ tags: |
 tag 推上去之后，已经有人下载的二进制收不回来。所以 `release.yml` 除
 `push: tags` 之外必须有 `workflow_dispatch` —— 先手动跑一遍全绿，再打 tag。
 
+这条在 v2.6 之前是**空话**：`publish` 没有判 `github.ref_type`，手动触发
+会真的建出一个 Release，于是「先跑一遍验证」等于「先发一次」。
+现已加 `if: github.ref_type == 'tag'`，手动触发只跑 gate + 构建 + 镜像。
+
 #### 版本一致性
 
 发布前断言 `v${package.json.version}` 等于 tag。不一致则中止：
 包里的版本号会被 `build-server.mjs` 内嵌进二进制，对不上就是发了个版本号错的产物。
+
+#### gate 里那个裸 `node` 的教训（v2.6 修）
+
+`release.yml` 的 gate 第一件事是读版本号，原来写的是：
+
+```bash
+PKG=$(node -p "require('./package.json').version")   # ✗ 在 CI 上退出 127
+```
+
+`scripts/ci-env.sh` 只写 `$GITHUB_ENV`、**不写 `$GITHUB_PATH`**，所以后续 step
+的 `PATH` 里没有 node。本地能过是因为开发者 `PATH` 里本来就有 node ——
+又一个「本机绿、CI 红」。改成 `"$NODE_BIN" -p ...`。
+
+这是同一类 bug 的第 5 次（前 4 次见 §16.1）。**规矩**：workflow 里任何调用
+node 的地方都必须是 `"$NODE_BIN"`，没有例外。
+
+#### `binaries` job 缺 `build-client`（v2.6 修）
+
+各 job 之间不共享文件系统，checkout 后 `dist/` 是空的（`.gitignore` 有 `dist/`）。
+而 `build-sea.mjs:89` 硬性要求 `dist/client/index.html` 存在，否则
+fail「前端未构建」。
+
+**容易误判的点**：`build-sea.mjs` 自己会调 `pack-client-zip`（打 zip），
+但**不会**调 `build-client` —— 看起来像「它什么前置都自己做了」，其实没有。
+现在 `binaries` job 在 `build-sea` 之前单独跑一步 `build-client`。
 
 ### 16.3 Dockerfile 的三个要点
 
@@ -4204,12 +4264,17 @@ healthcheck 永远不返回 —— 那比不检查更糟。
 
 | # | 门禁 | 检查方式 | 状态 |
 |---|---|---|---|
-| 1 | 二进制冒烟 | 洁净目录 `version` → `migrate` → 起服务 → 首页 200 | 已落地 |
+| 1 | 二进制冒烟 | 洁净目录 `version` → `migrate` → 起服务 → 首页 200 | 已落地（`v0.0.1-rc1` 实测通过） |
 | 2 | 静态资源内嵌 | `GET /` 响应含 `id="root"` | 已落地（`m0-08`） |
 | 3 | 迁移幂等 | 空目录 `migrate` 连跑两次都不报错 | 已落地（`release.yml`） |
 | 4 | Docker healthcheck | 容器变为 healthy | 已落地（`ci.yml` + `release.yml`） |
 | 5 | 项目外零写入 | `check-no-residue.mjs --run`，`$HOME` 无新增 | 已落地（`m0-08` ④） |
 | 6 | 导出/导入往返 | — | **待 M6** |
+
+**前五条已在真实发布中全部验证**（`v0.0.1-rc1`，2026-11-06）：五个 job 全绿，
+产出 `cheng-rss-linux-x64`（116.5 MB）、`cheng-rss-win32-x64.exe`（86.8 MB）、
+`SHA256SUMS`，镜像标签为 `0.0.1-rc1` 且**未出现 `latest`**，Release 的
+`prerelease` 为 `true`。这四条正是当初只能靠推导的部分，现在有实证。
 
 **第 6 条为什么空着**：它依赖 `export` / `import` 子命令，而这两个在
 `src/cli.ts` 里是 `throw new Error('…在 M6 落地')`。按里程碑划分它属于 M6，
@@ -4219,12 +4284,52 @@ M6 落地时必须同时把这条门禁补上，否则备份坏了要等真需�
 ### 16.5 验收与 CI 的关系
 
 `scripts/verify-all.mjs` 是唯一入口，CI 调它而不是自己写循环。理由：手写
-`for f in scripts/verify/m0-*.mjs` 只跑 10 个（共 56 个），且缺少 `verify-all`
+`for f in scripts/verify/m0-*.mjs` 只跑 10 个（共 57 个），且缺少 `verify-all`
 已有的三样保障 —— 单脚本 10 分钟硬超时、环境抖动重试一次、结尾 `.tmp` 清理。
 
-CI 里失败原因要能读出来。默认只有 "Process completed with exit code 1"，
-而日志下载需要仓库 admin 权限。验收脚本在失败时输出 `::error::` 注解，
-这样原因直接出现在 Actions 页面上，不必翻完整日志。
+#### 失败原因怎么读
+
+默认日志只有 "Process completed with exit code 1"，而**匿名**调
+`/actions/jobs/{id}/logs` 返回 403「Must have admin rights」。所以：
+
+- CI 失败时先看 **annotations**（匿名可读），`ci.yml` 会把失败的脚本名与
+  断言连实测值一起写成 `::error::` 注解。
+- 需要完整日志时，用带 `Actions: read` 的 PAT 调同一个接口即可（实测 200）。
+
+做注解时踩过两个坑，都写在了 `ci.yml` 的注释里：
+
+| 坑 | 现象 | 修法 |
+|---|---|---|
+| 汇总表行与断言行同形 | 多报一条「断言失败: x.mjs 1.4s」，看着像两处失败 | awk 用 `\.mjs[[:space:]]+[0-9.]+s` 排掉 |
+| 断言行不带脚本名 | 连报几条时分不清归属 | 记住 `▶ <脚本>` 记号并前缀 |
+
+#### 跨平台偶然失败：`database is locked`（v2.6 修）
+
+CI 上 Windows 曾报 `m1-07` 在 1.4s 失败、断言是「服务就绪」。查真实日志
+（PAT 才读得到）后发现服务**早已 PASS**，炸的是紧接着那句造数据的
+`BEGIN IMMEDIATE`：
+
+```
+PASS  服务就绪
+Error: database is locked  at m1-07-folders.mjs:102:4
+  db.exec('BEGIN IMMEDIATE')
+```
+
+根因：产品代码 `openDb()` 会设 `PRAGMA busy_timeout = 5000`
+（`src/server/db/client.ts`），但验收脚本为造数据绕过 `openDb`、
+直接 `new DatabaseSync()` —— 裸连接的 `busy_timeout` 是 **0**，服务端那一刻
+正在提交就立刻 `SQLITE_BUSY`。
+
+这类竞争非确定性：本机快、窗口窄，连跑三次都过；Windows runner 慢就撞上。
+**扫出 19 个脚本有这个隐患**，统一改用 `scripts/lib/sqlite.mjs` 的
+`openSqlite()`（设 `busy_timeout = 8000`）。
+
+语义上不改变任何断言可通过的条件 —— 只是「撞锁时多等一会儿」，真死锁仍会
+超时报错。
+
+**教训**：`1.4s` 这个数字本身就是线索。那个就绪循环是 `80 × 250ms`
+（实测空跑 20.2s），1.4s 根本装不下它 —— 当时应该顺着这个矛盾去挖，而不是
+先猜「注解归属错了」。
 
 ---
 
@@ -4248,9 +4353,9 @@ cheng-rss/
 ├─ Dockerfile                     # 两阶段构建，见 §16.3
 ├─ docker-compose.yml             # 单机部署（数据挂 ./data）
 ├─ .github/workflows/
-│  ├─ ci.yml                      # 类型检查 + 构建 + 全部验收（§16.1）
+│  ├─ ci.yml                      # 类型检查 + 构建 + 全部验收（§16.1，挂在 v* tag 上）
 │  ├─ release.yml                 # tag 触发：二进制 + 镜像 + Release（§16.2）
-│  └─ nightly.yml                 # 每日重跑，只查 runner 镜像漂移（§16.1）
+│  └─ nightly.yml                 # 同一套验收重跑，只查 runner 镜像漂移（§16.1）
 ├─ docs/
 │  ├─ configuration.md            # 全部配置项、AI 提供方、预算、排查
 │  ├─ architecture.md             # 模块划分、数据流、选型与放弃的方案
@@ -4272,7 +4377,7 @@ cheng-rss/
 │  ├─ check-tables.mjs            # 文档表格列对齐检查
 │  ├─ align-tables.mjs            # 按显示宽度重排表格（CJK 占两列）
 │  ├─ fetch-linux-node.mjs        # 下载 linux node 当 SEA 底本（门禁 4）
-│  ├─ lib/{proc,tmp,cdp}.mjs      # 子进程收尾 / 临时目录 / 无头浏览器
+│  ├─ lib/{proc,tmp,cdp,sqlite}.mjs  # 子进程收尾 / 临时目录 / 无头浏览器 / 开库（带 busy_timeout）
 │  └─ verify/                     # 每步一个验收脚本 + harness.mjs
 ├─ src/
 │  ├─ index.ts                    # 入口：serve|worker|migrate|doctor|version|mcp|export|import
@@ -4305,7 +4410,7 @@ cheng-rss/
 │     └─ api.ts  arrange.ts  icons.tsx
 ├─ Dockerfile
 ├─ docker-compose.yml
-├─ .github/workflows/ci.yml
+├─ .github/workflows/{ci,release,nightly}.yml
 ├─ tests/fixtures/                # HTML 快照、AI 响应样本
 └─ data/                          # 唯一状态：app.db, secrets.json, config.json, files/, backups/
 ```
@@ -5237,6 +5342,7 @@ v2.0  需求范围变化（增删 §1.1 任一行）
 | v2.3 | 2026-11-04 | **项目改名为 cheng-rss**（仓库、包名、二进制、docker 服务、cookie、localStorage、环境变量前缀、User-Agent、OPML 导出文件名），**不做向后兼容**：`ai-rss` → `cheng-rss`（247 处 / 71 文件）、`AI_RSS_*` → `CHENG_RSS_*`（70 处）、`ai_rss_sid` → `cheng_rss_sid`（22 文件）、`ai-rss.reader-prefs.v1` →`cheng-rss.reader-prefs.v1`、二进制 `ai-rss-<platform>` → `cheng-rss-<platform>`。**数据库文件名与 `secrets.json` 刻意不改**（仍是 `data/app.db`），所以升级不需要迁移数据、不用重填 AI key —— 改名的影响被限制在"标识"层面，不碰"状态"。代价写进 README 的「从 ai-rss 升级」一节：已登录会话掉线、阅读偏好回默认、环境变量失效、启动脚本路径失效、docker compose 会当成新服务。**为什么不做兼容读取**：需求方明确要求彻底改名。兼容层要在 cookie 上读两个名字、localStorage 上查两个 key、数据库上探两个文件名、环境变量上读两个前缀 —— 四处兼容代码会长期存在，而换来的是"旧实例升级时少点两下"。在只有单一部署者的当前阶段，一次性断掉更干净。**可推翻条件**：一旦有外部用户报升级问题，就按 README 那五条做一次性迁移脚本。 | ✅ 需求方原话「各类文件名和项目名，都改成cheng-rss」；并就兼容性明确答复「彻底改名，不做兼容」 |
 | v2.4 | 2026-11-04 | **修「测试连接总是显示模型返回空」**（§8.6b）。根因不是 key、不是 baseURL、不是网络：`deepseek-flash` 是**推理模型**，`max_tokens: 1` 时那 1 个 token 花在`reasoning_content` 上，`content` 是空串且 `finish_reason='length'`；而空内容被判`empty` 且 `retryable:false`，于是必然失败、只失败一次、看不出原因。**两个独立缺陷**：① 测试连接用 `maxTokens:1`（对推理模型必然失败）→ 提到 64（实测 16 仍被思考吃光）；② 客户端**完全不读 `reasoning_content`**，也不区分"思考被截断"与"模型无话可说" → 新增 kind `reasoning-only`（`retryable:true`，与 `empty` 的 `false` 相反），这类重试时把 `max_tokens` **翻倍**（原样重发只会再截断一次，那正是 379 次调用全失败却毫无进展的原因），错误信息带上`reasoning_tokens` 与**本次实际用的** max_tokens；`chat()` 与 `chatJson()` 两条路径判定一致；`reasoning` 别名（OpenRouter/网关）也认。**新增 `m2-09-reasoning-model`（16 条）**，含 3 条端点级断言（从 HTTP 打 `/settings/ai/test` 并在 mock 上游里记录实际发出的max_tokens —— 而不是自己传 64 再断言等于 64 的自问自答）。**同时修正 `m2-06` 的一条错误断言**：它原本要求探针 `max_tokens===1`，理由写着"探针不是跑推理"—— 那个要求本身就是 bug。改为要求 ≥32。**实测证据**：真实端点 968 字文章、`max_tokens:1200` 时 `reasoning_tokens=515`（近一半预算在思考）；同一模型两次都**主动省略** `entities`/`novelty`/`sentiment` 三个必填字段 —— 那条留给 §9.7 的 P2。修复后真实端点返回 `ok:true, text:"好的"`。 | ✅ 需求方原话「api测试连接总是显示模型返回空」；**可推翻条件**：若将来主流模型不再输出 `reasoning_content` 而用别的字段名，把 `readReasoning()`的候选列表补上即可，其余逻辑不变 |
 | v2.5 | 2026-11-04 | **CI/CD 与 Release 落地，并修三处真缺陷**（§16 全节重写）。**CI 从未绿过**：远程 7 次运行全红，三个 job 三种原因 —— ① ubuntu「安装依赖」退出 127，因为 `bin/npm` 的 shebang 是 `#!/usr/bin/env node` 而 CI 从不把 `.toolchain/node/bin` 加进 `PATH`（Windows 侥幸通过是因为 `npm.cmd` 用 `%~dp0` 自己找 `node.exe`，同一 bug 在第二平台被掩盖）；② Windows「跑验收」只跑 `for f in m0-*.mjs` 共 10 个脚本，56 个里漏掉 m1–m4，且缺 `verify-all` 已有的硬超时/重试/清理；③ Docker「容器冒烟」curl 连不上。**三处真缺陷**：① `doctor` 对「数据库不存在」返回 0（对损坏库返回 1，实测确认），更要紧的是它**只查磁盘不探 HTTP**，进程活着但服务挂死时照样报健康 —— 故新增 `--url` 参数用内置 `fetch` 打 `/api/health`（`AbortSignal.timeout(5000)`），HEALTHCHECK 随之带 `--url`；② `Dockerfile` 的 `chown -R` 在第 48 行跑，而 `VOLUME ["/app/data"]` 在第 57 行才创建目录，属主是 root 而进程是 uid 10001 → 改为 `mkdir -p /app/data && chown`；③ `m0-08` 头部声称「④ $HOME 零写入」但文件里 `homedir` 出现 0 次，是空口承诺 → 补真断言，`check-no-residue` 一并接入。**调用 npm 改为 node 直调 `npm-cli.js`**（两平台同一条命令），不往 `$GITHUB_PATH` 追加目录（那要处理 `E:/` 与 `E:\` 的路径形式差异）。**`release.yml` 改为矩阵构建**：ubuntu 造 linux、windows 造 win，`wantTarget === hostTarget` 时 `build-sea.mjs` 零参数即可运行 —— 原 §16.2 草稿让 ubuntu 交叉造 win 产物，且用的 `--main`/`--executable`/`--out` 三个参数**在脚本里一个都不存在**；草稿另有 4 处与现实不符（`npm run lint` 无 eslint、`npm test` 下 0 个 `.test.ts`、`check-no-residue.sh` 实为 `.mjs`、`pack:client-zip` 脚本不存在）。**rc 不覆盖 latest**：`metadata-action` 的 `type=raw,value=latest` 会给每个 tag 打 latest，用 `flavor: latest=false` + `enable=${{ !contains(github.ref_name, '-') }}` 收住。**门禁从六条改为五条 + 一条待 M6**：第六条「导出/导入往返」依赖 `export`/`import`，二者在 `cli.ts` 里是 `throw new Error('…在 M6 落地')`，按里程碑属 M6，故保留该行并标状态而非删除（删掉等于假装需求不存在）。**`nightly` 不做真实外网回归**：验收套件自封闭（57 个脚本无一外发请求，AI 那 5 个都是本地 mock 上游），引入外网会 flaky，而 flaky 的门禁等于没有门禁；改为定时重跑只查 runner 镜像漂移。**版本 0.1.0 → 0.0.1-rc1**，tag `v0.0.1-rc1` 发预发布。 | ✅ 需求方原话「完善CICD、Release等功能」「需要都可以跑，也要保证自己可用」；范围经三选一选定 **B1**（五条门禁 + 第六条待 M6，不推进里程碑）；发布可见性答复「那就公开吧」；**可推翻条件**：若将来 `export`/`import` 在 M6 之外被需要，第六条门禁随之补上；若 nightly 的漂移检测噪音过大，改为只跑 m0 子集 |
+| v2.6 | 2026-11-06 | **CI/CD 收尾，`v0.0.1-rc1` 端到端首发成功；触发策略改为挂在 tag 上**（§16 全节修订）。**跨平台偶发失败的真实根因**：CI 上 Windows 报 `m1-07` 在 1.4s 失败、断言是「服务就绪」。用 PAT 读到完整日志（匿名调 `/actions/jobs/{id}/logs` 恒 403）才看清服务**早已 PASS**，炸的是紧接着那句造数据的 `BEGIN IMMEDIATE` —— `database is locked`。根因不是实现缺陷：产品 `openDb()` 设了 `busy_timeout = 5000`，但验收脚本为造数据绕过 `openDb` 直接 `new DatabaseSync()`，裸连接 `busy_timeout` 是 **0**，服务端那一刻正在提交就立刻 `SQLITE_BUSY`。**扫出 19 个脚本有此隐患**，统一改用 `scripts/lib/sqlite.mjs` 的 `openSqlite()`（8000ms）。**教训**：`1.4s` 本身就是线索 —— 那个就绪循环是 `80 × 250ms`（实测空跑 20.2s），1.4s 装不下；当时先猜「注解归属错了」而不是顺着矛盾挖下去。**`release.yml` 两个阻断缺陷**：① gate 第一句用裸 `node` 读版本号，而 `ci-env.sh` 只写 `$GITHUB_ENV` 不写 `$GITHUB_PATH` → 建库 platform 上退出 127（同类 bug 第 5 次）；② `binaries` job 缺 `build-client`，而各 job 不共享文件系统、`dist/` 被 gitignore，`build-sea.mjs` 硬前置要求 `dist/client/index.html` → 两个平台都产不出二进制。要点：`build-sea` 自己会调 `pack-client-zip`，但**不会**调 `build-client`，容易误判。**手动触发会真的发版**：`publish` 原无 `ref_type` 判断，而保留 `workflow_dispatch` 的用途是"打 tag 前先跑一遍全绿" —— 已加 `if: github.ref_type == 'tag'`，并给镜像补 `manual` 兜底标签（手动触发时两条 semver 都不匹配会让 `build-push-action` 报错）。**注解两个坑**：汇总表行与断言行同形会被误当断言（多报一条假失败）、断言行不带脚本名（连报多条时分不清归属）→ awk 用 `\.mjs[[:space:]]+[0-9.]+s` 排掉并前缀 `▶ <脚本>`。**`nightly` 与 `ci` 必须同一套取底本写法**：只修 `ci.yml` 时 Windows nightly 每天必红一次（`docker-path` 缺底本**有意**判 FAIL），恒定红的定时任务会淹掉真正的漂移告警。**触发策略（需求方决定）**：验收先在本地跑通再上 CI，CI 资源有限 → `ci.yml` 的 `push`/`pull_request` 改为 `push: tags: v*`，`nightly` 的 `schedule` 注释掉，两处均保留 `workflow_dispatch`。GitHub Actions **不认** `[skip ci]`（那是 GitLab/Cirrus 的行为）。**首发实证**：五个 job 全绿，产出 `cheng-rss-linux-x64`、`cheng-rss-win32-x64.exe`、`SHA256SUMS`，镜像标签仅 `0.0.1-rc1`（**未出现 `latest`**），Release `prerelease=true` —— 这四点此前只能靠推导。**通用文档去数字化**：README / development.md 里「57 个脚本、2171 条断言、22 分钟、34MB、629KB、1195/976 tokens」等随迭代必然漂移的数字全部改为定性表述，规模类数字只留在 PLAN 与本表的决策记录里。 | ✅ 需求方原话「完善CICD、Release等功能」「需要都可以跑，也要保证自己可用」「本地跑通再去 cicd 跑，cicd 资源有限」「每次打标签再触发 CI 检查和 release」「文档某些不要含有具体的数字，注意这个是个通用性的 readme，而不是记录文档」；**可推翻条件**：CI 稳定若干轮后若希望恢复每次 push 都验，把 `ci.yml` 的 `push` 换回 `branches: [main]` 即可；若 nightly 漂移告警产生可用信号，恢复 `schedule`；若将来 `export`/`import` 在 M6 之外被需要，第六条门禁随之补上 |
 | v1.20 | 2026-10-29 | **规格层修订，非需求变更**：§8.7 新增（日门降级/月门停止两道门、本地日历边界、`0`=不限额、闸门问在第一个请求之前、embedding 不降级、AI 配置三层合并与「空值不打回默认」的坑、闸门做成注入回调 CallGuard、`ai_usage` 记的是调用不是条目）；§19.7 反查表第 3 行补 2.4/2.5；§19.4 补状态与断言数、明确黄金测试集需真人做 | ✅ 2.3~2.5 落地时确定 |
 | v1.21 | 2026-10-29 | **规格层修订，非需求变更**：§9.4 新增（聚类与去重是两个问题阈值必然不同、hash 与语义向量两套阈值、为什么不用单链接与 k-means、向量来源整体切换、heat 是乘不是加、单来源 conflicts 强制清空、conflicts 来源必须真实且至少两方、引用安全为何强于事后校验、抹裸 URL、简报重跑 id 不变、聚类整窗重算）；§19.5 补状态与 3.1~3.3 断言数、明确误聚率需真人判 | ✅ 3.1~3.3 落地时确定 |
 | v1.24 | 2026-10-30 | **规格层修订 + 补一步**：① **补 3.5 简报页**（§19.5b 之后新增）—— 3.1~3.4 的产物完整，但**前端没有简报页**，侧栏还标着「待接入」，等于"生成了没人看得见"。这一步不新增需求，只是把 §15.4 已批准的设计落地。修掉的既有断点：`renderCitations` 在落库前已把 `{{cite:cl_x}}` 换成 `[1]`，而 `GET /digests/:id` 一直用正则反查 —— 永匹配不到，clusters 恒空、脚注点了没反应。新增 0005 迁移存 `cites`/`worth_reading` 快照列。② §15.7 移动端 tab **5 → 6**（简报成为一等入口），并说明 390px 下 6 格每格约 65px 仍过 44px 下限，真正的约束是高度不是宽度 | ✅ 3.5 落地时确定 |

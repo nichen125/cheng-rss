@@ -5,7 +5,7 @@
 Node 24（`>=24 <25`）。**所有依赖与工具链装在项目目录内**，不污染系统：
 
 ```bash
-./scripts/bootstrap.sh      # 下载项目内 Node 24 到 .toolchain/（约 34MB，仅一次）
+./scripts/bootstrap.sh      # 下载项目内 Node 24 到 .toolchain/（仅一次）
 ./scripts/build.sh          # 构建前端 + 服务端
 ./scripts/dev.sh            # 启动开发服务器
 ```
@@ -34,7 +34,7 @@ Node 24 的 type stripping 让 `import ... from './x.ts'` 直接可用，**不�
 src/server/     后端（Hono + SQLite）
 src/client/     前端（React 19）
 scripts/        构建、验收、工具
-scripts/verify/ 验收脚本（57 个）
+scripts/verify/ 验收脚本（一个模块一个脚本；需求→脚本的映射表见 PLAN §19）
 tests/fixtures/ 测试夹具（HTML 快照、AI 响应样本）
 docs/           主题文档（配置/架构/设计/开发）
 docs/specs/     顶层设计方案（跨模块的方向与约束）
@@ -61,8 +61,8 @@ useProjectTmp();              // 设定 TMPDIR/TEMP/TMP 三个变量
 `scripts/verify/harness.mjs` 在模块顶层已调用它，所以**所有验收脚本自动生效**。
 验证跑完会清空 `.tmp/verify/`，手动清用 `node scripts/clean-tmp.mjs`。
 
-原因是一次全量验收会在 `%TEMP%` 留 26 个临时目录、约 629KB，
-跑几十次之后系统盘会莫名其妙少几百 MB，而没人知道是谁留下的。
+原因是一次全量验收会在 `%TEMP%` 留下一批临时目录，跑几十次之后系统盘会
+莫名其妙少掉不少空间，而没人知道是谁留下的。
 
 ## 验收机制
 
@@ -107,9 +107,9 @@ check('生成后 digestDue 说今天已生成', () => ok(!digestDue(db, uid, cfg
 ### 跑验收
 
 ```bash
-./scripts/verify-all.mjs                 # 全部（57 个脚本、2171 条断言，约 22 分钟）
+./scripts/verify-all.mjs                 # 全部
 ./scripts/verify-all.mjs m3              # 只跑名字匹配的（支持 glob，如 m0-0[5-8]）
-./scripts/verify-all.mjs --no-docker-path  # 跳过需要 docker 的那 1 个
+./scripts/verify-all.mjs --no-docker-path  # 跳过需要 docker 的那些
 ./scripts/verify-all.mjs --keep-tmp      # 留着 .tmp/verify 便于排查失败
 
 # 单个
@@ -129,8 +129,9 @@ check('生成后 digestDue 说今天已生成', () => ok(!digestDue(db, uid, cfg
 每个脚本末尾 `summary('m3-06-digest-chain')` 打印 `N/M PASS`。
 文件头注释里标注的条数与实际可能不一致（改了脚本忘了改注释）。
 
-**README 与 PLAN 里的总数以 `verify-all` 的实测输出为准**，不要手算。
-v2.2 之前文档里写的 55/2152 与实际 57/1986 对不上，就是这么来的。
+**README 与 PLAN 里不写死总数**，需要时以 `verify-all` 的实测输出为准。
+早期文档写过具体数字，改了几轮脚本之后就与实际对不上了 —— 这类数字在
+通用文档里只会变成过期信息。
 
 ## 前端开发
 

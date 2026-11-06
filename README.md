@@ -107,7 +107,7 @@ chmod +x cheng-rss-linux-x64
 git clone https://github.com/nichen125/cheng-rss.git && cd cheng-rss
 
 # Linux / macOS
-./scripts/bootstrap.sh        # 下载项目内 Node 24（约 34MB，仅一次）
+./scripts/bootstrap.sh        # 下载项目内 Node 24（仅一次）
 ./scripts/build.sh            # 构建前端 + 服务端
 ./scripts/dev.sh              # 启动
 
@@ -198,12 +198,11 @@ git clone https://github.com/nichen125/cheng-rss.git && cd cheng-rss
 | 简报开关 | 设置页            | 简报是 N+1 次调用（每簇一次 + 一次生成） |
 | 抓取频率 | 源设置            | 抓得越慢新增条目越少，分析量随之下降     |
 
-> **token 效率有已知问题。** 实测单篇分析平均输入 1195 / 输出 976 tokens，而产物只是
-> 一张卡片；`entities`、`sentiment` 两个字段没有任何界面在读。优化方案已列入计划但
-> **尚未实施** —— 见 [PLAN.md §9.7](PLAN.md)。在实施之前，成本就是上面这个数。
+> **token 效率有已知问题。** 单篇分析的输入远大于产物所需 —— 产出的只是一张卡片，
+> 而请求里还带着 `entities`、`sentiment` 两个没有任何界面在读的字段。优化方案已列入
+> 计划但**尚未实施**，见 [PLAN.md §9.7](PLAN.md)。在实施之前，成本就是上面这个量级。
 
-**推理模型的额外成本**：如果用的是推理模型（如 `deepseek-flash`），思考也会计费。
-实测一篇 968 字文章在 `max_tokens: 1200` 下，`reasoning_tokens` 占了 515 ——
+**推理模型的额外成本**：如果用的是推理模型（如 `deepseek-flash`），思考过程也计费 ——
 预算要留得比非推理模型宽一些。
 
 ## 数据与备份
@@ -258,7 +257,7 @@ sqlite3 data/app.db "VACUUM INTO 'backup.db'"
 
 ```bash
 ./scripts/build.sh          # 构建
-./scripts/verify-all.mjs    # 跑全部验收（57 个脚本、2171 条断言，约 22 分钟）
+./scripts/verify-all.mjs    # 跑全部验收
 npm run typecheck:all       # 类型检查
 ```
 
@@ -268,9 +267,10 @@ npm run typecheck:all       # 类型检查
 
 详细流程、写断言的规矩、调试技巧见 [docs/development.md](docs/development.md)。
 
-CI 在 Ubuntu 与 Windows 上各跑一遍这 57 个脚本，任一红即阻塞合并。发布由 tag 触发：
-先过同一套验收，再产出两个平台的二进制与 Docker 镜像，附 `SHA256SUMS`。
-发布门禁与 workflow 的细节见 [PLAN.md §16](PLAN.md)。
+CI 挂在打标签上：推送 `v*` tag 会同时在 Ubuntu 与 Windows 上跑一遍验收，任一红即
+中止发布；随后产出两个平台的二进制与 Docker 镜像，附 `SHA256SUMS`。
+日常提交不触发 CI —— 先在本地跑绿，发版时让 CI 再确认一次。
+细节见 [PLAN.md §16](PLAN.md)。
 
 ### 文档
 

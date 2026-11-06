@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { AiClient, resolveAiConfig, type AiConfig } from './client.ts';
+import { readCapabilities } from './capabilities.ts';
 import { recordUsage } from './usage.ts';
 import { budgetGuard, budgetState, type BudgetState } from './budget.ts';
 import { keyFingerprint, maskKey, resolveKey, type KeySource } from './secrets.ts';
@@ -165,7 +166,13 @@ export function aiForUser(
 
   // 缓存键必须含 key 的指纹：用户在界面上换了 key、但 baseURL 与模型都没动时，
   // 不含指纹的缓存会继续用旧客户端，症状是"换了 key 还是 401"。
-  const key = `${userId}|${JSON.stringify(config)}|${keyFingerprint(resolved.key)}`;
+  //
+  // 画像也必须进 key（§8.10）：自检跑完会改写"这个网关认不认 system"，
+  // 而那是 AiClient 构造时就吃进去的。不进 key 的话，跑完自检还要重启才生效，
+  // 而"跑完没变化"正是用户会来问的那句话。
+  const caps = readCapabilities(db, userId);
+  const key = `${userId}|${JSON.stringify(config)}|${keyFingerprint(resolved.key)}|${
+    caps ? JSON.stringify(caps.models) : ''}`;
 
   let client = cache.get(key);
   if (!client) {
@@ -174,6 +181,7 @@ export function aiForUser(
       // 显式传 key（而不是让它自己读环境变量）：这样文件里的 key 才生效，
       // 且"文件优先于环境变量"这条规则只有一个实现点（secrets.ts）。
       apiKey: resolved.key,
+      capabilities: caps,
       onUsage: (u) => {
         try {
           recordUsage(db, { ...u, userId });

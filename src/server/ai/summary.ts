@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AiClient, AiFailure } from './client.ts';
+import { UNTRUSTED_OPEN, UNTRUSTED_CLOSE } from './client.ts';
 import { unpackText } from '../db/text-blob.ts';
 import { htmlToText } from '../feeds/parse.ts';
 
@@ -153,6 +154,14 @@ export function buildSummaryUser(template: string, input: SummaryInput): BuildRe
     ? input.body.slice(0, SUMMARY_BODY_CLIP) + '\n\n（正文已截断，共 ' + input.body.length + ' 字）'
     : input.body;
 
+  // 正文是抓来的，模板是用户自己写的 —— 只有正文不可信，所以只包正文。
+  //
+  // 为什么不像 analyze 那样整条包：analyze 的 user 里全是资料（标题、分类
+  // 清单、标签、正文），指令在 system；而总结的 user 里**指令就在模板里**。
+  // 整条包起来等于告诉模型"这段要求也是资料、不必照做"，总结质量会塌。
+  // 定界符与 client.ts 的 UNTRUSTED_OPEN/CLOSE 是同一对，靠 import 保证一致。
+  const guardedBody = `${UNTRUSTED_OPEN}\n${body}\n${UNTRUSTED_CLOSE}`;
+
   const hl = input.highlights.length > 0
     ? '我在这篇文章里标出的高亮（可作为重点参考）：\n'
       + input.highlights.slice(0, 20)
@@ -162,7 +171,7 @@ export function buildSummaryUser(template: string, input: SummaryInput): BuildRe
 
   const values: Record<string, string> = {
     '{{title}}': `标题：${input.title}`,
-    '{{body}}': body,
+    '{{body}}': guardedBody,
     '{{summary}}': input.summary ? `已有的机器摘要（供参考，不要照抄）：\n${input.summary}` : '',
     '{{highlights}}': hl,
   };

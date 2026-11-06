@@ -226,8 +226,14 @@ const KEY = 'sk-m206-abcdefghijklmnop-9f8e7d';
     } catch (e) {
       return ok(false, String(e.message));
     }
-    // 去掉继承后不应再出现 (I) 标记的条目
-    const hasInherited = /\(I\)/.test(out);
+    // 去掉继承后不应再出现 (I) 标记的条目。
+    //
+    // 但要先排掉 `Mandatory Label\Low Mandatory Level:(I)(NW)` 那一行：
+    // 那是**完整性标签**，不是文件 ACE。低完整性级别下（沙箱、部分 CI）每个
+    // 写入的文件都会带这一行，于是"输出里有 (I)"会把环境差异误报成权限没收紧 ——
+    // 实测就是这条在假红，而文件对当前用户的 ACE 明明是 `(F)`（完全控制）。
+    const aceLines = out.split(/\r?\n/).filter((l) => !/Mandatory Label/i.test(l));
+    const hasInherited = aceLines.some((l) => /\(I\)/.test(l));
     return ok(!hasInherited && out.includes(user), out.replace(/\s+/g, ' ').slice(0, 300));
   });
 

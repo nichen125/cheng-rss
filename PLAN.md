@@ -4138,11 +4138,24 @@ flavor: |
 tags: |
   type=semver,pattern={{version}}
   type=semver,pattern={{major}}.{{minor}}
-  type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+  type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
+  type=raw,value=manual,enable=${{ github.ref_type != 'tag' }}
 ```
 
+两个条件缺一不可：
+
+- `contains(github.ref_name, '-')` 挡预发布 —— `v0.0.1-rc1` 含 `-`，求值为
+  `true`，故 `!contains(...)` 为 `false`，不产出 latest。
+- `github.ref_type == 'tag'` 挡手动触发 —— `workflow_dispatch` 时 ref 是分支
+  （`main`），它不含 `-`，**只看 ref_name 会把手动构建错打成 latest**。
+  `manual` 那条是兜底：手动触发时两条 semver 都不匹配（ref 不是 tag），
+  标签集为空会让 `build-push-action` 报错，给个 `manual` 既验证了镜像能构建，
+  也绝不碰 latest 或正式版本号。
+
 同理，`contains(github.ref_name, '-')` 为真时 GitHub Release 设 `prerelease: true`，
-预发布不出现在 Releases 页的 Latest 位置。
+预发布不出现在 Releases 页的 Latest 位置。`publish` job 另加
+`if: github.ref_type == 'tag'`，否则手动触发会真的建出一个 Release ——
+而 §16.2 要求保留 `workflow_dispatch` 的用途是"打 tag 前先手动跑一遍全绿"。
 
 #### 门禁必须能在打 tag 之前验证
 

@@ -55,7 +55,11 @@ jobs:
         shell: bash
         run: |
           set -e
-          PKG=$(node -p "require('./package.json').version")
+          # 必须用 "$NODE_BIN"：ci-env.sh 只写 $GITHUB_ENV，不写 $GITHUB_PATH
+          # （scripts/ci-env.sh 的注释解释了为什么），所以裸 `node` 在这里
+          # 是 command not found → 127。曾经写成裸 node，手动跑 PASS、
+          # 上 CI 就红 —— 本地能过是因为开发者 PATH 里本来就有 node。
+          PKG=$("$NODE_BIN" -p "require('./package.json').version")
           echo "package.json: $PKG"
           if [ "${{ github.ref_type }}" = "tag" ]; then
             TAG="${GITHUB_REF_NAME#v}"
@@ -141,6 +145,16 @@ jobs:
       - name: 安装依赖
         shell: bash
         run: '"$NODE_BIN" "$NPM_CLI" ci --no-audit --no-fund'
+
+      # build-sea 会自己调 pack-client-zip（打 zip），但**不会**调 build-client，
+      # 而且 build-sea.mjs:89 硬性要求 dist/client/index.html 存在，否则直接
+      # fail「前端未构建」。job 之间不共享文件系统，checkout 后 dist/ 是空的
+      # （.gitignore 里有 dist/），所以这一步必须在构建二进制之前单独跑。
+      # 漏了它的后果：两个平台的二进制都产不出来，upload-artifact 的
+      # if-no-files-found: error 再红一次 —— 整条 Release 断在这里。
+      - name: 构建前端
+        shell: bash
+        run: '"$NODE_BIN" scripts/build-client.mjs'
 
       - name: 构建二进制
         shell: bash
@@ -248,10 +262,17 @@ jobs:
           # 只有"这是个 tag"且"版本号不含 -"两条同时成立才补 latest。
           flavor: |
             latest=false
+          # 最后一个 manual 标签是兜底：手动触发时两条 semver 都不匹配
+          # （ref 是分支不是 tag），标签集为空会让 build-push-action 报错，
+          # 给个 manual 既验证了镜像能构建，也绝不碰 latest 或正式版本号。
+          #
+          # 注意：tags: | 是 YAML 字面块，里面的 # 行**不是注释**而是内容，
+          # 会被原样传给 metadata-action 并导致解析失败。注释只能写在这里。
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
+            type=raw,value=manual,enable=${{ github.ref_type != 'tag' }}
 
       - name: 构建并推送
         uses: docker/build-push-action@v6
@@ -302,6 +323,10 @@ jobs:
   publish:
     name: 发布
     needs: [gate, binaries, docker]
+    # 只有真·tag 才发 Release。workflow_dispatch 的用途是"打 tag 之前先手动
+    # 跑一遍全绿"（PLAN §16.2 要求保留它），那时 ref_type 是 branch、
+    # ref_name 是 main；没有这道判断的话手动触发会真的建出一个 Release。
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

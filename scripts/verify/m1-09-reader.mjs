@@ -269,16 +269,25 @@ const { sanitizeHtml } = await import('../../src/server/feeds/sanitize.ts');
 }
 
 // ── ⑤ 浏览器交互（真点、真派发中键、真读 location）──────────
-const browserCandidates = [
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-];
+// 两个平台的候选都要列。曾经这里只有 Windows 四条，于是 ubuntu runner 上
+// 恒 FAIL（Chrome 装在 /usr/bin，四条 C:/ 全不存在）。这不是"Linux 没浏览器"，
+// 是候选表漏了平台 —— 其余 20 个 UI 脚本都带 /usr/bin，只这里漏了。
+const browserCandidates = process.platform === 'win32'
+  ? [
+      'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+      'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+      'C:/Program Files/Google/Chrome/Application/chrome.exe',
+      'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+    ]
+  : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
 const browser = browserCandidates.find((p) => existsSync(p));
 
 if (!browser) {
-  check('找到可用浏览器', () => ok(false, 'Edge / Chrome 都不在默认路径，跳过 UI 断言'));
+  // 找不到浏览器是**环境缺失**，不是产品缺陷：判 FAIL 会让"没装 Chrome 的机器"
+  // 永远红，而它其实什么都没验到。与 m1-19 等脚本一致，打 SKIP 后正常退出。
+  console.log('  \u001b[33mSKIP\u001b[0m  未找到 Chromium 系浏览器，UI 断言跳过');
+  summary('m1-09-reader');
+  process.exit(0);
 } else {
   const profile = mkdtempSync(join(tmpdir(), 'cheng-rss-rdprof-'));
   const cdpPort = 9800 + Math.floor(Math.random() * 200);

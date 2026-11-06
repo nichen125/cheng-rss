@@ -89,21 +89,47 @@ jobs:
         run: '"$NODE_BIN" scripts/pack-client-zip.mjs'
 
       # docker-path 要验 Dockerfile 里 `build-sea --target linux-x64` 那一步，
-      # 需要一个 linux 的 node 当 SEA 注入底本。
+      # 需要一个 linux 的 node 当 SEA 注入底本（约 25MB，从 nodejs.org 下）。
       #
-      # **两个平台都要取**，不只是 Linux：docker-path 的设计是"跳过即失败"
-      # （它把 SKIP 也算一条 FAIL，理由是核心验证没执行不能显示成 PASS）。
-      # 之前只在 Linux 上下载，于是 Windows 上恒 FAIL —— 那不是实现坏了，
-      # 是缺底本。SEA 在哪个宿主上产 linux ELF 不重要，注入底本对就行。
+      # 这一步的性质是**尽力而为**：拿到就完整跑 docker-path，拿不到就降级
+      # （Docker 镜像那个 job 只在 ubuntu 上跑，Windows 这里本就是交叉检查）。
+      #
+      # 为什么不能让它的失败拖垮整个 job（实测踩过）：
+      #   第一版只给 Linux 加这步，Windows 恒 FAIL —— 于是去掉条件改成两平台都跑。
+      #   结果 Windows 上这一步 4 秒就退出，把后面「跑全部验收（57 个脚本）」
+      #   整个 skipped 掉：**一条产品断言都没跑**，却报了个红。
+      #   下载失败是网络问题，不该等价于"代码坏了"。
+      #
+      # 所以：continue-on-error 让 job 继续，再用一个 step 输出判断是否需要
+      # 给 verify-all 加 --allow-skip-docker-artifact（缺底本时它默认报 FAIL）。
       - name: 取 linux node（供 docker-path 验证 linux 产物）
+        id: linuxnode
+        continue-on-error: true
         shell: bash
         run: '"$NODE_BIN" scripts/fetch-linux-node.mjs'
+
+      - name: 判断底本是否就绪
+        id: linuxnode-check
+        shell: bash
+        run: |
+          BASE=".tmp/linuxnode/node-v${CHENG_RSS_NODE_VERSION:-v24.13.0}-linux-x64/bin/node"
+          if [ -f "$BASE" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "底本就绪：$BASE"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::没取到 linux node 底本，docker-path 的 ELF 产物断言将跳过（不影响其余 56 个脚本）"
+          fi
 
       # 用 verify-all 而不是自己写循环。
       #
       # 曾经的写法是 `for f in scripts/verify/m0-*.mjs`，只跑 10 个（共 57 个），
       # m1~m4 全都不在门禁里；而且缺 verify-all 已有的三样东西：
       # 单脚本 10 分钟硬超时、环境抖动重试一次、结尾 .tmp 清理。
+      #
+      # 缺底本时补 --allow-skip-docker-artifact：docker-path 的默认行为是
+      # "未执行即 FAIL"（有意的，避免 SKIP 被读成 PASS），但这里缺底本已被
+      # 上一步显式告警，不该再让整个套件红。
       #
       # tee 一份到文件：下一步要把"哪个脚本红了"变成注解。
       # 默认日志只有 exit code 1，而下载完整日志需要仓库 admin 权限
@@ -112,7 +138,11 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          "$NODE_BIN" scripts/verify-all.mjs 2>&1 | tee .tmp/verify-out.log
+          EXTRA=""
+          if [ "${{ steps.linuxnode-check.outputs.ready }}" != "true" ]; then
+            EXTRA="--allow-skip-docker-artifact"
+          fi
+          "$NODE_BIN" scripts/verify-all.mjs $EXTRA 2>&1 | tee .tmp/verify-out.log
 
       # 把失败的脚本名推到 Actions 页面。
       # 泛泛说"验收失败"没有用 —— 要能一眼看出是哪个脚本、哪条断言。

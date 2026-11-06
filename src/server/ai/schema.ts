@@ -17,7 +17,7 @@ import { z } from 'zod';
  * 多出来的字段丢掉即可，缺字段才是真问题。验收脚本对这一点有断言，
  * 免得将来有人把 `.strict()` 当成"更严谨"加上去。
  */
-export const EntryAnalysisSchema = z
+export const RawEntryAnalysisSchema = z
   .object({
     summary: z.string().min(10, '摘要太短（至少要一句话）'),
     key_points: z
@@ -38,7 +38,91 @@ export const EntryAnalysisSchema = z
   })
   .strip();
 
-export type EntryAnalysis = z.infer<typeof EntryAnalysisSchema>;
+export type EntryAnalysis = z.infer<typeof RawEntryAnalysisSchema>;
+
+/**
+ * 把模型吐出来的东西归一成 schema 认得的形状（PLAN §8.10，v2.7）。
+ *
+ * 原则是**归一化之后再校验**，而不是放宽校验。区别很重要：放宽（`optional`、
+ * `unknown`）会让"字段彻底没出来"变成"字段是空的"，下游看不出区别；
+ * 归一化只是把**同一件事的不同写法**对齐，缺得离谱的仍然报错。
+ *
+ * 每一条都对应线上实测到的一种偏差，不是预防性设计：
+ *
+ *   entities  模型给 `["AMD","World Labs"]`（数组）而不是四桶对象 —— 实测 100 次。
+ *             塞进 `tech` 是有意的：**没有任何界面元素读 entities**（grep 过），
+ *             四个桶里 `tech` 最泛，混进去无害；而为此把整篇判死是亏的。
+ *   key_points 给 7 条（提示词写的是 6 条）—— 实测 94 次。截断，不报错。
+ *   topics     同上，超 5 个截断。
+ *   sentiment  干脆不给 —— 无消费方，兜底 neutral。
+ *   novelty    不给 —— 用 importance 的水平分，总比缺失强。
+ *   importance/novelty 越界 —— 夹取。分级只看 importance，越界会让 tier 算错。
+ *
+ * **刻意不做**：从中文散文里正则抠字段（`分类：**tech**`）。那会让"模型没按契约
+ * 回答"变得不可见，而 v2.7 定位根因正是靠"它返回了散文"这条线索。
+ */
+export function normalizeEntryAnalysis(input: unknown): unknown {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+  const src = input as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...src };
+
+  // entities：数组 → 四桶对象；缺失 → 四桶空
+  const ENTITY_BUCKETS = ['people', 'orgs', 'products', 'tech'] as const;
+  const entities = src.entities;
+  if (Array.isArray(entities)) {
+    out.entities = {
+      people: [], orgs: [], products: [],
+      tech: entities.filter((x): x is string => typeof x === 'string' && x.trim() !== ''),
+    };
+  } else if (!entities || typeof entities !== 'object') {
+    out.entities = { people: [], orgs: [], products: [], tech: [] };
+  } else {
+    const e = entities as Record<string, unknown>;
+    out.entities = Object.fromEntries(
+      ENTITY_BUCKETS.map((k) => [k, Array.isArray(e[k]) ? e[k] : []]),
+    );
+  }
+
+  // 超限截断。下限不动 —— "少于 2 条要点"仍然是真问题（模型没读正文）
+  for (const [key, max] of [['key_points', 6], ['topics', 5]] as const) {
+    const v = src[key];
+    if (Array.isArray(v)) out[key] = v.slice(0, max);
+  }
+
+  // sentiment 兜底：枚举外的写法（"中性"、"Neutral"）不该让整篇失败
+  const SENTIMENTS = ['positive', 'neutral', 'negative', 'mixed'];
+  if (typeof src.sentiment !== 'string' || !SENTIMENTS.includes(src.sentiment)) {
+    const raw = typeof src.sentiment === 'string' ? src.sentiment.toLowerCase() : '';
+    out.sentiment = SENTIMENTS.includes(raw) ? raw : 'neutral';
+  }
+
+  // 数值夹取；字符串数字也认（模型常写 "78"）
+  const clamp = (v: unknown): number | undefined => {
+    const n = typeof v === 'number' ? v : Number(String(v ?? '').trim());
+    if (!Number.isFinite(n)) return undefined;
+    return Math.max(0, Math.min(100, Math.round(n)));
+  };
+  const importance = clamp(src.importance);
+  if (importance !== undefined) out.importance = importance;
+  const novelty = clamp(src.novelty);
+  out.novelty = novelty ?? importance ?? 0;
+
+  return out;
+}
+
+/**
+ * 归一化 + 校验，一次搞定 —— 三处调用（analyze、验收脚本、将来的批量重跑）
+ * 都必须走这一个出口，否则"某条路径忘了归一化"会表现成"这篇莫名失败"。
+ *
+ * 所以**导出的就是这一个**：`RawEntryAnalysisSchema` 只在文件内可见，
+ * 外面拿到的 `EntryAnalysisSchema` 一定是归一化过的。名字保持不变是为了
+ * 让所有既有调用点（含 m2-01 / m2-09 的断言）自动获得归一化，而不用逐处改 ——
+ * 逐处改必然漏一处，而漏掉的那处正是将来出事的那条路径。
+ */
+export const EntryAnalysisSchema = z.preprocess(
+  normalizeEntryAnalysis,
+  RawEntryAnalysisSchema,
+);
 
 /** 簇级归纳（§9.2）。2.3 之后才用，先定义好让 schema 集中在一处 */
 export const ClusterSummarySchema = z

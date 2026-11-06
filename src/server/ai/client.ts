@@ -595,8 +595,10 @@ export class AiClient {
     let mode = this.initialFormat(opts.model);
     let structureAttempts = 0;
     let feedback: string | null = null;
-    // 投递切换的独立计数（§8.10）：与格式降级、结构重试是三件事。
+    // 投递切换与格式降级的独立计数（§8.10）：与结构重试是三件事。
+    // 混用一个计数器就会出现"少试一次或多试一次"，而两者都表现为钱花多了。
     let deliverySwitches = 0;
+    let formatDegrades = 0;
 
     // 循环的上界要算清楚：每个 format 模式最多试 1 + TRANSPORT_RETRIES 次，
     // 格式降级最多 2 次（schema → object → text），结构重试 1 次。
@@ -617,16 +619,29 @@ export class AiClient {
         continue;
       }
 
-      // ② 模型答非所问（200 但是散文 / 空）：**先怀疑投递方式**（§8.10）。
+      // ② 模型答非所问（200 但是散文 / 空）—— 分两级处置，顺序不能反：
       //
-      //   网关丢弃 system 时，模型收到的是一条没有任何指令的正文 ——
-      //   它要么自己猜任务用散文答（bad-json），要么回空（empty）。
-      //   这两种都不是"模型能力不行"，换 merged 再问一次就有救。
-      //   放在格式降级之前，是因为投递不对的话换多少种格式都没用。
-      if ((failure.kind === 'bad-json' || failure.kind === 'empty')
-        && deliverySwitches < 1 && this.learnMerged(opts.model)) {
-        deliverySwitches++;
-        continue;
+      //   先怀疑**投递方式**：网关丢弃 system 时，模型收到的是一条没有任何
+      //   指令的正文，它要么自己猜任务用散文答（bad-json），要么回空（empty）。
+      //   这不是"模型能力不行"，换 merged 再问一次就有救。
+      //
+      //   再怀疑**格式**：投递正常但上游忽略 response_format，那也是 200 + 散文，
+      //   §8.6 的降级链只认 4xx 报文，永远触发不到。这里补上。
+      //
+      // 顺序反了就会先降到 text 再换投递，多花一次请求，而且 text 模式下
+      // 再切投递等于把"字段清单在提示词里"和"指令在 system 里"混着试，难归因。
+      if (failure.kind === 'bad-json' || failure.kind === 'empty') {
+        if (deliverySwitches < 1 && this.learnMerged(opts.model)) {
+          deliverySwitches++;
+          continue;
+        }
+        const next = nextFormat(mode);
+        if (next && formatDegrades < 2) {
+          formatDegrades++;
+          this.formatUnsupported.add(this.formatKey(opts.model, mode));
+          mode = next;
+          continue;
+        }
       }
 
       // ③ 结构不合规：把 issues 回灌，重试一次

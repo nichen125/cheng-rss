@@ -93,7 +93,14 @@ async function withMock({ dropSystem = false, ignoreFormat = false, shape = 'cle
 
       // 指令到没到手：到了才可能给出结构化结果
       const payload = shape === 'sloppy' ? SLOPPY : CLEAN;
-      const text = ignoreFormat ? PROSE : (sawInstructions ? JSON.stringify(payload) : PROSE);
+      // ignoreFormat 的真实语义：**无视 response_format，但听得懂提示词**。
+      // 所以只要请求里带了 response_format（json_schema / json_object），
+      // 它就回散文；纯文本模式（没有该字段、字段清单写在提示词里）才照做。
+      // 这正是实测网关的行为 —— 若把它写成"永远回散文"，这条断言就变成
+      // "验证客户端不可能成功"，而不是"验证它会自己降到能work的那一档"。
+      const text = (ignoreFormat && body.response_format)
+        ? PROSE
+        : (sawInstructions ? JSON.stringify(payload) : PROSE);
 
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({
@@ -261,6 +268,50 @@ group('能力画像与按需投递（§8.10）');
     return ok(
       at > 0 && reqAt >= 0 && reqAt < at && titleAt >= 0 && titleAt < at,
       `要求位置=${reqAt} 定界位置=${at} 标题位置=${titleAt}`,
+    );
+  });
+}
+
+// ── ⑧ 不完美的输出要能救（归一化后再校验，§8.10）──
+{
+  const r = await withMock({ shape: 'sloppy' }, async (baseURL, calls) => {
+    const c = mkClient(baseURL);
+    const res = await ask(c);
+    return { res, calls };
+  });
+
+  check('⑧ entities 数组 / key_points 7 条 / 缺 sentiment → 归一化后成功', () => {
+    const d = r.res.data ?? {};
+    const e = d.entities ?? {};
+    const buckets = ['people', 'orgs', 'products', 'tech'].every((k) => Array.isArray(e[k]));
+    const hasAny = ['people', 'orgs', 'products', 'tech'].some((k) => (e[k] ?? []).length > 0);
+    return ok(
+      r.res.ok === true
+      && buckets && hasAny
+      && Array.isArray(d.key_points) && d.key_points.length === 6
+      && d.sentiment === 'neutral',
+      `ok=${r.res.ok} 四桶齐=${buckets} 有值=${hasAny} key_points=${d.key_points?.length} sentiment=${d.sentiment}`,
+    );
+  });
+}
+
+// ── ⑨ 同时丢 system + 两档 response_format 都回 200 散文 ──
+//    这是线上故障的完整组合：只修其中一条都过不了这条断言。
+{
+  const r = await withMock({ dropSystem: true, ignoreFormat: true }, async (baseURL, calls) => {
+    const c = mkClient(baseURL);
+    const res = await ask(c);
+    return { res, calls };
+  });
+
+  check('⑨ 丢 system 且忽略 response_format 时仍能降到第三档并成功', () => {
+    const last = r.calls.at(-1) ?? {};
+    const text = (last.messages ?? []).map((m) => m.content).join('\n');
+    return ok(
+      r.res.ok === true
+      && r.calls.length >= 3
+      && text.includes('输出要求'),
+      `ok=${r.res.ok} calls=${r.calls.length} 末次带字段清单=${text.includes('输出要求')}`,
     );
   });
 }

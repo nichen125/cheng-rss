@@ -140,12 +140,17 @@ for (const [label, content] of [
 }
 
 // 反面：真的不是 JSON 时必须失败，不能"猜"。
-// 三条脚本：v2.7 起 bad-json 的处置有两级 —— 先换投递方式（§8.10），
-// 再回灌提示做一次结构重试，所以最多三次请求，三次都得给定回包。
+//
+// v2.7 起 bad-json 的处置是**三级**（§8.10）：先换投递方式（split → merged），
+// 再把格式降两档（json_schema → json_object → text），最后回灌提示做一次结构
+// 重试。脚本按顺序给回包，所以最多五次请求，五次都得给定，否则会撞
+// 'unscripted' 500 而把"多试了一次"误报成"判错了"。
 await script([
   okBody('抱歉，我无法回答这个问题。'),
   okBody('仍然不是 JSON'),
   okBody('还是不是 JSON'),
+  okBody('依然不是 JSON'),
+  okBody('最后仍然不是 JSON'),
 ]);
 {
   const { client } = mkClient();
@@ -453,12 +458,20 @@ check('缺 summary → 拒绝', () => {
 check('key_points 少于 2 条 → 拒绝（§8.2 要求 2~6）', () => ok(
   !EntryAnalysisSchema.safeParse({ ...goodAnalysis, key_points: ['只有一条'] }).success,
 ));
-check('importance 越界（101）→ 拒绝', () => ok(
-  !EntryAnalysisSchema.safeParse({ ...goodAnalysis, importance: 101 }).success,
-));
-check('sentiment 不在枚举里 → 拒绝', () => ok(
-  !EntryAnalysisSchema.safeParse({ ...goodAnalysis, sentiment: '开心' }).success,
-));
+// v2.7（§8.10）：越界的 importance **不再拒绝，改为夹取到 0~100**。
+//
+// 判定为什么变了：分级只看 importance（§8.4），一个 101 不会让谁看不懂，
+// 而整篇分析被判死会让列表少一张卡片 —— 后者代价更高。同理 sentiment 无任何
+// 消费方（grep 过），"开心"兜底成 neutral 比失败好。
+// 注意**下限仍然拦**：key_points 少于 2 条、summary 太短是真问题（模型没读正文）。
+check('importance 越界（101）→ 夹取到 100，不整篇拒绝', () => {
+  const r = EntryAnalysisSchema.safeParse({ ...goodAnalysis, importance: 101 });
+  return ok(r.success && r.data.importance === 100, JSON.stringify(r.success ? r.data.importance : r.error.issues));
+});
+check('sentiment 不在枚举里 → 兜底 neutral，不整篇拒绝', () => {
+  const r = EntryAnalysisSchema.safeParse({ ...goodAnalysis, sentiment: '开心' });
+  return ok(r.success && r.data.sentiment === 'neutral', JSON.stringify(r.success ? r.data.sentiment : r.error.issues));
+});
 check('多余字段被剥掉而不是报错（模型常多吐一个 confidence）', () => {
   const r = EntryAnalysisSchema.safeParse({ ...goodAnalysis, confidence: 0.9 });
   return ok(r.success && !('confidence' in r.data), JSON.stringify(r.success ? Object.keys(r.data) : r.error.issues));

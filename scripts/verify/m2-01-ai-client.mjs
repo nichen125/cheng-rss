@@ -140,8 +140,13 @@ for (const [label, content] of [
 }
 
 // 反面：真的不是 JSON 时必须失败，不能"猜"。
-// 两条脚本：bad-json 会触发一次结构重试（回灌提示），所以第二次也得给定。
-await script([okBody('抱歉，我无法回答这个问题。'), okBody('仍然不是 JSON')]);
+// 三条脚本：v2.7 起 bad-json 的处置有两级 —— 先换投递方式（§8.10），
+// 再回灌提示做一次结构重试，所以最多三次请求，三次都得给定回包。
+await script([
+  okBody('抱歉，我无法回答这个问题。'),
+  okBody('仍然不是 JSON'),
+  okBody('还是不是 JSON'),
+]);
 {
   const { client } = mkClient();
   const r = await client.chatJson(CHAT_OPTS);

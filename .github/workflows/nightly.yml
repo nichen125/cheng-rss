@@ -65,14 +65,37 @@ jobs:
           "$NODE_BIN" scripts/build-client.mjs
           "$NODE_BIN" scripts/pack-client-zip.mjs
 
+      # 与 ci.yml 保持同一套写法，理由见 ci.yml 那段注释：
+      # 取底本是尽力而为（网络下载），拿到就跑完整的 docker-path，拿不到就降级。
+      # 不能让一次下载失败把「全部验收」整个 skipped 掉 —— 那样一条产品断言
+      # 都没跑，却报了个红，而 nightly 的用途恰恰是"看断言有没有漂移"。
       - name: 取 linux node（供 docker-path）
-        if: runner.os == 'Linux'
+        id: linuxnode
+        continue-on-error: true
         shell: bash
         run: '"$NODE_BIN" scripts/fetch-linux-node.mjs'
 
+      - name: 判断底本是否就绪
+        id: linuxnode-check
+        shell: bash
+        run: |
+          BASE=".tmp/linuxnode/node-v${CHENG_RSS_NODE_VERSION:-v24.13.0}-linux-x64/bin/node"
+          if [ -f "$BASE" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "底本就绪：$BASE"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::没取到 linux node 底本，docker-path 的 ELF 产物断言将跳过（不影响其余 56 个脚本）"
+          fi
+
       - name: 全部验收
         shell: bash
-        run: '"$NODE_BIN" scripts/verify-all.mjs'
+        run: |
+          EXTRA=""
+          if [ "${{ steps.linuxnode-check.outputs.ready }}" != "true" ]; then
+            EXTRA="--allow-skip-docker-artifact"
+          fi
+          "$NODE_BIN" scripts/verify-all.mjs $EXTRA
 
       # 漂移时的提示：告诉看日志的人"这多半是环境问题"
       - name: 失败提示

@@ -183,15 +183,25 @@ jobs:
             # 失败断言的格式（harness.mjs 的 summary）：
             #   FAIL  <描述>
             #         <detail: "lab再: 期望 X，实际 Y">
+            #
+            # 两个坑（都实测过，用 .tmp/t-awk2.sh 那种假日志复现）：
+            #   ① 汇总表行也长成「FAIL  <名字>.mjs  <耗时>s (第 N 次)」，
+            #      不排掉会多报一条「断言失败: m1-07-folders.mjs  1.4s」，
+            #      看着像断言，其实是脚本级结论 —— 会让人以为有两处失败。
+            #   ② 断言行本身不带脚本名，连着报几条就分不清是哪一份日志。
+            #      靠 `▶ <脚本>` 记号记住当前脚本，前缀到每条注解上。
             awk '
+              /^▶ / { script = $2; next }
               /^[[:space:]]+FAIL[[:space:]]/ {
-                sub(/^[[:space:]]+FAIL[[:space:]]+/, "")
-                desc = $0; getline nxt
-                if (nxt ~ /^[[:space:]]{6,}/) {
+                line = $0
+                if (line ~ /\.mjs[[:space:]]+[0-9.]+s/) next
+                sub(/^[[:space:]]+FAIL[[:space:]]+/, "", line)
+                desc = line
+                if ((getline nxt) > 0 && nxt ~ /^[[:space:]]{6,}/) {
                   sub(/^[[:space:]]+/, "", nxt)
-                  print desc " || " nxt
+                  print script ": " desc " || " nxt
                 } else {
-                  print desc
+                  print script ": " desc
                   # 回退一行不好做，丢掉这条的 detail 可接受
                 }
               }

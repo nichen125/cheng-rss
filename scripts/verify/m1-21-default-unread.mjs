@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -103,8 +104,7 @@ const j = async (method, path, body) => {
 //   · 未分组：3 条（1 已读 + 2 未读）
 // 已读占多数正是这条需求要解决的问题 —— 默认给"混着的 12 条"，
 // 用户第一屏几乎全是读过的。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');

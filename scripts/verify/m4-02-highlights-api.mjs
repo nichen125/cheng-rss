@@ -22,6 +22,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, gt, summary } from './harness.mjs';
 import { killTree } from '../lib/proc.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
@@ -105,10 +106,9 @@ if (start < 0) {
 }
 
 // 直接写库造条目（走 API 造要配 feed，与本节无关）
-const { DatabaseSync } = await import('node:sqlite');
 const { packText } = await import('../../src/server/db/text-blob.ts');
 const DB_PATH = join(dir, 'data', 'app.db');
-const w = new DatabaseSync(DB_PATH);
+const w = openSqlite(DB_PATH);
 const uid = w.prepare('SELECT id FROM users LIMIT 1').get().id;
 
 /**
@@ -273,7 +273,7 @@ group('4.2 高亮 API · orphaned 可见');
 await post('/highlights', { entryId: 'e3', quote: '完全不同' });
 const NEW_E3 = '这是一段全新的、与之前没有任何重叠的正文。';
 {
-  const w2 = new DatabaseSync(DB_PATH);
+  const w2 = openSqlite(DB_PATH);
   w2.prepare('UPDATE entry_contents SET html = ? WHERE entry_id = ?')
     .run(packText(`<p>${NEW_E3}</p>`), 'e3');
   w2.close();
@@ -282,7 +282,7 @@ const NEW_E3 = '这是一段全新的、与之前没有任何重叠的正文。'
 // 因为 API 层不负责"正文变了就重锚" —— 那是提取器的职责。
 const { reanchorEntry } = await import('../../src/server/highlights/anchor.ts');
 {
-  const w3 = new DatabaseSync(DB_PATH);
+  const w3 = openSqlite(DB_PATH);
   reanchorEntry(w3, 'e3', NEW_E3);
   w3.close();
 }
@@ -301,7 +301,7 @@ check('orphaned 的 quote 仍保留（用户至少看得到原来标的是什么
 group('4.2 高亮 API · 游标分页');
 
 {
-  const w4 = new DatabaseSync(DB_PATH);
+  const w4 = openSqlite(DB_PATH);
   w4.prepare(`INSERT INTO entries (id, user_id, feed_id, guid, url, url_norm, title,
       published_at, fetched_at, stage) VALUES ('e4', ?, NULL, 'g4',
       'https://e.test/4', 'https://e.test/4', '分页测试', ?, ?, 'extracted')`)
@@ -335,7 +335,7 @@ check('第二页有内容（不是被删除操作搞空）', () => gt(p2.body.it
 group('4.2 高亮 API · 越权');
 
 {
-  const w5 = new DatabaseSync(DB_PATH);
+  const w5 = openSqlite(DB_PATH);
   w5.prepare('INSERT INTO users (id, email, name, role, created_at) VALUES (?,?,?,?,?)')
     .run('u_other', 'o@t.local', 'O', 'member', Date.now());
   w5.prepare(`INSERT INTO entries (id, user_id, feed_id, guid, url, url_norm, title,
@@ -366,7 +366,7 @@ check('读别人的条目高亮列表是空数组（不是 404，也不是他的
 
 // 确认越权操作真的没改成
 {
-  const w6 = new DatabaseSync(DB_PATH);
+  const w6 = openSqlite(DB_PATH);
   const row = w6.prepare("SELECT note FROM highlights WHERE id='hl_other'").get();
   w6.close();
   check('越权 PATCH 没有真的写进去', () => eq(row.note, null));

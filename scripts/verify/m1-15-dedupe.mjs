@@ -25,6 +25,7 @@ import {
   cosine, hashEmbed, packVec, signatureText, unpackVec,
 } from '../../src/server/dedupe/cosine.ts';
 import { isSameEvent } from '../../src/server/dedupe/index.ts';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -424,10 +425,9 @@ const api = async (path, init = {}) => {
   return { status: r.status, body };
 };
 
-const { DatabaseSync } = await import('node:sqlite');
 const dbPath = join(dataDir, 'app.db');
 const q = (sql, ...args) => {
-  const d = new DatabaseSync(dbPath, { readOnly: true });
+  const d = openSqlite(dbPath, { readOnly: true });
   try { return d.prepare(sql).all(...args); } finally { d.close(); }
 };
 const one = (sql, ...args) => q(sql, ...args)[0];
@@ -492,7 +492,7 @@ check('不同事件 c1 没有被误判为重复（负向）', () => {
   // 3000 这个基数不是随便取的：判据要求 20 条重复的重复率 < 1%，
   // 而 20 / 2000 恰好等于 1%（不满足"<"）。加上前面真实抓取产生的
   // 条目与重复，基数必须留出余量，否则断言会在边界上摇摆。
-  const ins = new DatabaseSync(dbPath);
+  const ins = openSqlite(dbPath);
   try {
     const uid = one('SELECT id FROM users LIMIT 1')?.id;
     const now = Date.now();
@@ -582,7 +582,7 @@ check('每个非重复条目都有向量（正文够长的都有）', () => {
 
 // ── ⑦ 边角：空正文/超短正文不写向量（负向）──
 {
-  const d = new DatabaseSync(dbPath);
+  const d = openSqlite(dbPath);
   try {
     const uid = one('SELECT id FROM users LIMIT 1')?.id;
     const now = Date.now();
@@ -592,7 +592,7 @@ check('每个非重复条目都有向量（正文够长的都有）', () => {
     ).run('tiny_1', uid, 'tiny-g', 'http://tiny.test/1', 'http://tiny.test/1', '短', now, now);
   } finally { d.close(); }
   const { ensureLocalVector } = await import('../../src/server/dedupe/index.ts');
-  const d2 = new DatabaseSync(dbPath);
+  const d2 = openSqlite(dbPath);
   let wrote = true;
   try {
     wrote = ensureLocalVector(d2, 'tiny_1', '短', '<p>就一行</p>');
@@ -606,7 +606,7 @@ check('每个非重复条目都有向量（正文够长的都有）', () => {
 {
   // 这条防的是"摘要型 feed 永远漏判"：入库时用两行导语算的向量，
   // 与另一条自带全文的转载算出的向量，余弦达不到 0.95。
-  const d = new DatabaseSync(dbPath);
+  const d = openSqlite(dbPath);
   try {
     const uid = one('SELECT id FROM users LIMIT 1')?.id;
     const now = Date.now();
@@ -618,7 +618,7 @@ check('每个非重复条目都有向量（正文够长的都有）', () => {
   } finally { d.close(); }
 
   const { runExtract } = await import('../../src/server/extract/run.ts');
-  const d2 = new DatabaseSync(dbPath);
+  const d2 = openSqlite(dbPath);
   let r = null;
   try { r = await runExtract(d2, 'abs_1'); } finally { d2.close(); }
   check('摘要型条目的提取成功（抓到原文）', () => ok(r?.replaced === true, JSON.stringify(r)));
@@ -639,7 +639,7 @@ check('每个非重复条目都有向量（正文够长的都有）', () => {
 // ── ⑨ 过期向量会被清理（否则 10 万条白占 100MB）──
 {
   const { pruneOldVectors, VECTOR_WINDOW_DAYS } = await import('../../src/server/dedupe/index.ts');
-  const d = new DatabaseSync(dbPath);
+  const d = openSqlite(dbPath);
   try {
     const uid = one('SELECT id FROM users LIMIT 1')?.id;
     const now = Date.now();
@@ -666,7 +666,7 @@ check('每个非重复条目都有向量（正文够长的都有）', () => {
     }
   } finally { d.close(); }
 
-  const d2 = new DatabaseSync(dbPath);
+  const d2 = openSqlite(dbPath);
   let removed = 0;
   try { removed = pruneOldVectors(d2); } finally { d2.close(); }
 
@@ -695,7 +695,7 @@ check('每个非重复条目都有向量（正文够长的都有）', () => {
   // 常量属于向量实现，走实现模块的出口更直接。
   const { findDuplicate } = await import('../../src/server/dedupe/index.ts');
   const MODEL = LOCAL_MODEL;
-  const d = new DatabaseSync(dbPath);
+  const d = openSqlite(dbPath);
   try {
     const uid = one('SELECT id FROM users LIMIT 1')?.id;
     const now = Date.now();

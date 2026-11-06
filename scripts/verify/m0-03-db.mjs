@@ -27,7 +27,6 @@ const dataDir = tmp;
 const dbPath = join(dataDir, 'app.db');
 
 const probe = String.raw`
-import { DatabaseSync } from 'node:sqlite';
 import { gzipSync } from 'node:zlib';
 import { drizzle } from 'drizzle-orm/node-sqlite';
 import { migrate } from './src/server/db/migrate.ts';

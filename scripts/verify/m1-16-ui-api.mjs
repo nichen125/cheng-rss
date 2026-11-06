@@ -23,11 +23,11 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
 import { group, check, eq, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
 import { bucketOf, groupByDay, HISTORY_BUCKETS } from '../../src/server/entries/history.ts';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -186,7 +186,7 @@ const api = async (path, init = {}) => {
 
 const dbPath = join(dataDir, 'app.db');
 const withDb = (fn) => {
-  const d = new DatabaseSync(dbPath);
+  const d = openSqlite(dbPath);
   try { return fn(d); } finally { d.close(); }
 };
 const one = (sql, ...args) => withDb((d) => d.prepare(sql).get(...args));

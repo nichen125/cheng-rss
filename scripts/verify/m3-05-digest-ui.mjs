@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, gt, summary } from './harness.mjs';
 import { removeDir } from '../lib/tmp.mjs';
 import { killTree } from '../lib/proc.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BROWSERS = process.platform === 'win32'
@@ -192,9 +193,8 @@ const api = async (p, init = {}) => {
 
 // 用接口造数据（被验的是接口本身，不能绕过它直接写库）
 const DB2 = join(tmp, 'data2', 'app.db');
-const { DatabaseSync } = await import('node:sqlite');
 {
-  const w = new DatabaseSync(DB2);
+  const w = openSqlite(DB2);
   const uid = w.prepare('SELECT id FROM users LIMIT 1').get().id;
   const now = Date.now();
   // 三个簇，其中 cl_b 有 conflicts（用来验冲突渲染）
@@ -242,7 +242,7 @@ const { DatabaseSync } = await import('node:sqlite');
 }
 
 {
-  const w = new DatabaseSync(DB2);
+  const w = openSqlite(DB2);
   const uid = w.prepare('SELECT id FROM users LIMIT 1').get().id;
   saveDigest(w, {
     userId: uid, kind: 'daily', body: BODY,
@@ -301,7 +301,7 @@ check('不存在的简报 → 404', () => eq(missing.status, 404));
 
 // 别人的简报
 {
-  const w = new DatabaseSync(DB2);
+  const w = openSqlite(DB2);
   w.prepare('INSERT INTO users (id, email, name, role, created_at) VALUES (?,?,?,?,?)')
     .run('u_o', 'o@t.local', 'O', 'member', Date.now());
   saveDigest(w, {
@@ -312,7 +312,7 @@ check('不存在的简报 → 404', () => eq(missing.status, 404));
   w.close();
 }
 {
-  const w = new DatabaseSync(DB2);
+  const w = openSqlite(DB2);
   const other = w.prepare("SELECT id FROM digests WHERE user_id = 'u_o'").get();
   w.close();
   const r = await api(`/digests/${other.id}`);

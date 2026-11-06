@@ -25,6 +25,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, gt, summary } from './harness.mjs';
 import { killTree } from '../lib/proc.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -211,15 +212,14 @@ const api = async (path, init = {}) => {
 };
 
 // 直接读库（stage / source_hash / 成本不在 API 里）
-const { DatabaseSync } = await import('node:sqlite');
 const dbPath = join(dataDir, 'app.db');
 const q = (sql, ...args) => {
-  const d = new DatabaseSync(dbPath, { readOnly: true });
+  const d = openSqlite(dbPath, { readOnly: true });
   try { return d.prepare(sql).all(...args); } finally { d.close(); }
 };
 const one = (sql, ...args) => q(sql, ...args)[0];
 const write = (fn) => {
-  const d = new DatabaseSync(dbPath);
+  const d = openSqlite(dbPath);
   try { return fn(d); } finally { d.close(); }
 };
 

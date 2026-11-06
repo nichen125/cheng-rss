@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -109,8 +110,7 @@ try {
 // 第一版以为 seed 里有源可以挪过去，结果 SELECT 拿到空数组 ——
 // 组内源那一层没有控件，两条断言报"测不到"。那不是通过，是前提不成立。
 try {
-  const { DatabaseSync } = await import('node:sqlite');
-  const d = new DatabaseSync(join(dataDir, 'app.db'));
+  const d = openSqlite(join(dataDir, 'app.db'));
   const uid = d.prepare('SELECT id FROM users LIMIT 1').get()?.id;
   if (uid) {
     d.exec('BEGIN IMMEDIATE');

@@ -26,6 +26,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, gt, lt, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
@@ -379,11 +380,7 @@ const KEY = 'sk-m206-abcdefghijklmnop-9f8e7d';
   stderrBuf = '';
   await aiCtl({ mode: 'normal' });
 
-  const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync(join(dataDir, 'app.db'));
-  // 服务端在同一个库上写（WAL）。裸 DatabaseSync 没有 busy_timeout，
-  // 撞上服务端正在提交时会立刻 SQLITE_BUSY —— 而这不是实现的问题。
-  db.exec('PRAGMA busy_timeout = 8000;');
+  const db = openSqlite(join(dataDir, 'app.db'));
   const uid = db.prepare('SELECT id FROM users LIMIT 1').get().id;
 
   // 造 100 条 extracted 条目（**必须带正文**，否则走的是"空正文"那条分支：
@@ -434,9 +431,7 @@ const KEY = 'sk-m206-abcdefghijklmnop-9f8e7d';
   // 时长压到可接受。入队走 /entries/:id/analyze 的批量替代 —— 直接调
   // 内部的 backfill 不是 HTTP 面，所以这里用一个小脚本进程调它。
   // 但 handler 只有在队列里有任务时才会跑，所以先让 backfill 排上：
-  const { DatabaseSync: DS } = await import('node:sqlite');
-  const db2 = new DS(join(dataDir, 'app.db'));
-  db2.exec('PRAGMA busy_timeout = 8000;');
+  const db2 = openSqlite(join(dataDir, 'app.db'));
   const {
     enqueueOrphanAnalyze, countOrphanAnalyze,
   } = await import('../../src/server/ai/backfill.ts');
@@ -496,8 +491,7 @@ const KEY = 'sk-m206-abcdefghijklmnop-9f8e7d';
 
   // 填完 key 需要有人重新排队。这正是不变式：不填 key 时那些任务已经 done，
   // 所以必须有回填把"没有分析行"的条目重新认领。
-  const db3 = new DS(join(dataDir, 'app.db'));
-  db3.exec('PRAGMA busy_timeout = 8000;');
+  const db3 = openSqlite(join(dataDir, 'app.db'));
   const requeued = enqueueOrphanAnalyze(db3, 100);
   check('⑩ 填 key 后回填能重新认领那 100 条（>0 即证明"没有东西锁死它们"）', () => {
     return ok(requeued >= 100, `requeued=${requeued}`);

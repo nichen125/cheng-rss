@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { findBrowser, launchBrowser, connectCdp } from '../lib/cdp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
@@ -102,8 +103,7 @@ const j = async (method, path, body) => {
 //
 // 三个分组（甲/乙/丙）+ 每个 2~3 个源 + 2 个未分组源。
 // sort 刻意都写 0：模拟"迁移上来的老库"，也是并列时退回标题序的场合。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');

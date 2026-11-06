@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -108,8 +109,7 @@ const j = async (method, path, body) => {
 //   「空组」       0 个源 —— ⑤ 不渲染子节点
 //   「超长名组」   1 个源、源名 40 个字符 —— ⑥ 截断
 // 加上一个未分组源，验证它不出现在任何一组的分支里。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');

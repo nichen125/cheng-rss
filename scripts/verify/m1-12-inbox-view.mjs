@@ -37,6 +37,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -107,8 +108,7 @@ const j = async (method, path, body) => {
 //   组「科技IT」2 个源：源甲 4 条（其中 2 条已读）、源乙 2 条（0 已读）
 //   未分组 1 个源：散装 2 条（其中 1 条已读）
 // 全库 8 条 / 已读 3 条 / 未读 5 条。三个数互相不等，写错任何一个都会红。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');

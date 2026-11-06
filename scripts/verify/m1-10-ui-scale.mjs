@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -101,8 +102,7 @@ const cookie = (loginRes.headers.get('set-cookie') ?? '').split(';')[0];
 check('登录拿到 cookie', () => ok(cookie.includes('='), cookie));
 
 // ── 造数据：一个组 3 个源（够展开出 3 个子行），一个组 1 个源 ────
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');

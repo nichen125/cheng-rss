@@ -26,13 +26,17 @@ if (!existsSync(nodeBin)) {
 }
 
 // 用项目内 node 跑一个内联脚本做检查，避免把 TS 逻辑复制到验收脚本里
+//
+// 注意这里的相对路径基准是**仓库根**（execFileSync 的 cwd: root），
+// 不是 scripts/verify/ —— 所以是 './src/...' 与 './scripts/lib/...'，
+// 与文件顶部那些 import 的写法（'./harness.mjs'）不同。
 const probe = String.raw`
-import { DatabaseSync } from 'node:sqlite';
 import { migrate, CURRENT_SCHEMA_VERSION, MIGRATIONS } from './src/server/db/migrate.ts';
+import { openSqlite } from './scripts/lib/sqlite.mjs';
 
 const path = process.env.CHENG_RSS_PROBE_DB;
 if (!path) throw new Error('缺少 CHENG_RSS_PROBE_DB');
-const db = new DatabaseSync(path);
+const db = openSqlite(path);
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
 

@@ -43,6 +43,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -116,8 +117,7 @@ const j = async (method, path, body) => {
 //   组C「编程」    2 个源 —— 验证"换组时源筛选清空、手风琴只开新组"
 //   组D「大组」    1 个源、45 条 —— 验证"N 条"用总数不是本页条数
 // 另外留一个不归组的源，验证它不出现在任何一组的分支里。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');

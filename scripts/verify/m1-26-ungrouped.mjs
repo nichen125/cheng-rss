@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { findBrowser, launchBrowser, connectCdp } from '../lib/cdp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
@@ -80,9 +81,7 @@ check('登录拿到 cookie', () => ok(cookie.includes('='), cookie));
 // 两个分组（一个 3 源、一个 1 源）+ 3 个未分组源。
 // 未分组源的未读数刻意取 0 / 3 / 7：0 用来验"不显示 badge"，
 // 两个非零用来验"数字对得上且不是抄了别人的"。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
-db.exec('PRAGMA busy_timeout = 8000;');
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = db.prepare('SELECT id FROM users LIMIT 1').get().id;
 const now = Date.now();
 
@@ -409,9 +408,7 @@ const reload = async () => {
 
 // ── ⑥ 没有未分组源时整块不渲染 ────────────────────────────
 {
-  const { DatabaseSync: DS } = await import('node:sqlite');
-  const d = new DS(join(dataDir, 'app.db'));
-  d.exec('PRAGMA busy_timeout = 8000;');
+  const d = openSqlite(join(dataDir, 'app.db'));
   d.exec('BEGIN IMMEDIATE');
   d.prepare('INSERT INTO folders (id,user_id,name,sort) VALUES (?,?,?,?)')
     .run('lf_tmp', uid, '暂存', 2);
@@ -432,8 +429,7 @@ const reload = async () => {
   });
 
   // 还原，供 ⑨ 手机用例
-  const d2 = new DS(join(dataDir, 'app.db'));
-  d2.exec('PRAGMA busy_timeout = 8000;');
+  const d2 = openSqlite(join(dataDir, 'app.db'));
   d2.prepare("UPDATE feeds SET folder_id = NULL WHERE id IN ('lf_x0','lf_x3','lf_x7')").run();
   d2.prepare("DELETE FROM folders WHERE id = 'lf_tmp'").run();
   d2.close();

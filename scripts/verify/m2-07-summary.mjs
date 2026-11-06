@@ -24,6 +24,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, gt, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
@@ -160,10 +161,8 @@ const j = async (method, path, body) => {
 };
 
 // ── 造数据：两条带正文的条目，第二条属于另一个用户（⑥ 越权）──
-const { DatabaseSync } = await import('node:sqlite');
 const { packText } = await import('../../src/server/db/text-blob.ts');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
-db.exec('PRAGMA busy_timeout = 8000;');
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = db.prepare('SELECT id FROM users LIMIT 1').get().id;
 const now = Date.now();
 
@@ -230,8 +229,7 @@ db.close();
   const st = await aiState();
   check('① mock 上游被调用 1 次', () => eq(st.calls, 1));
 
-  const { DatabaseSync: DS } = await import('node:sqlite');
-  const d = new DS(join(dataDir, 'app.db'));
+  const d = openSqlite(join(dataDir, 'app.db'));
   const row = d.prepare("SELECT body, prompt_fp FROM summaries WHERE entry_id = 's_short'").get();
   check('① 总结真的落库了（body 非空）', () => ok(Boolean(row?.body && row.body.length > 20),
     JSON.stringify(row)?.slice(0, 200)));
@@ -284,8 +282,7 @@ db.close();
     return ok(r.data?.cached === false && st.calls === 1, `calls=${st.calls} cached=${r.data?.cached}`);
   });
 
-  const { DatabaseSync: DS } = await import('node:sqlite');
-  const d = new DS(join(dataDir, 'app.db'));
+  const d = openSqlite(join(dataDir, 'app.db'));
   const n = d.prepare("SELECT COUNT(*) c FROM summaries WHERE entry_id = 's_short'").get();
   check('③ **旧的那条没被覆盖**（同一篇有 2 行）', () => eq(Number(n.c), 2));
   d.close();
@@ -396,8 +393,7 @@ db.close();
 
 // ── ⑧ 空正文 / 空模型输出 ─────────────────────────────────
 {
-  const { DatabaseSync: DS } = await import('node:sqlite');
-  const d = new DS(join(dataDir, 'app.db'));
+  const d = openSqlite(join(dataDir, 'app.db'));
   d.prepare("UPDATE entry_contents SET html = NULL WHERE entry_id = 's_short'").run();
   d.close();
 
@@ -408,7 +404,7 @@ db.close();
   });
 
   const { packText: pt } = await import('../../src/server/db/text-blob.ts');
-  const d2 = new DS(join(dataDir, 'app.db'));
+  const d2 = openSqlite(join(dataDir, 'app.db'));
   d2.prepare("UPDATE entry_contents SET html = ? WHERE entry_id = 's_short'")
     .run(pt(SHORT_BODY));
   d2.close();

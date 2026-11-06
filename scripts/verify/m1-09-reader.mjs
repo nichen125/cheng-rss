@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -95,8 +96,7 @@ const j = async (method, path, body) => {
 // A：正文里同时有「外链」「站内相对链接」「锚点」「mailto」——四类出口各验一次。
 // B：只有正文没链接（对照组：证明"没链接"和"链接被吃了"能区分）。
 // C：用来验已读回退与进度。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 // 正文 HTML 自己写：走真实 sanitize（写入侧会清洗），不是伪造清洗结果
@@ -152,7 +152,7 @@ db.close();
 const { packText } = await import('../../src/server/db/text-blob.ts');
 const { sanitizeHtml } = await import('../../src/server/feeds/sanitize.ts');
 {
-  const db2 = new DatabaseSync(join(dataDir, 'app.db'));
+  const db2 = openSqlite(join(dataDir, 'app.db'));
   // 模拟写入侧：先清洗再压缩（feeds/store.ts 就是这么做的）
   const cleanA = sanitizeHtml(BODY_A, { baseUrl: 'https://src.example.org/post/a' }).html;
   const cleanB = sanitizeHtml('<p>这篇没有任何链接，纯文字。</p>', { baseUrl: 'https://src.example.org/post/b' }).html;
@@ -226,7 +226,7 @@ const { sanitizeHtml } = await import('../../src/server/feeds/sanitize.ts');
     `isStarred=${after.data?.isStarred}`));
 
   // 阅读历史不能被抹掉 —— 这是"读过但视图上想让它算未读"的分界线
-  const dbh = new DatabaseSync(join(dataDir, 'app.db'), { readOnly: true });
+  const dbh = openSqlite(join(dataDir, 'app.db'), { readOnly: true });
   const hist = dbh.prepare('SELECT first_read_at, last_read_at, read_count FROM entries WHERE id = ?')
     .get('re_c');
   dbh.close();

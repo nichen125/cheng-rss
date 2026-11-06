@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -110,8 +111,7 @@ const j = async (method, path, body) => {
 //   T2「无标题」  只有 <p> —— ④ 的 0 标题分支
 //   T3「单标题」  只有 1 个 h2 —— ④ 的 1 标题分支（不该出目录）
 //   T4「短标题名」2 个 h2 —— 用于 ⑤ 跳转（标题短，定位不会被图片影响）
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');

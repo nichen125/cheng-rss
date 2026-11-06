@@ -23,6 +23,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, gt, summary } from './harness.mjs';
 import { killTree } from '../lib/proc.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
@@ -164,13 +165,12 @@ const PARAS = [
 const QUOTE = '长江存储宣布 232 层 QLC 闪存量产，单颗容量 1Tb';
 
 const DB_PATH = join(dir, 'data', 'app.db');
-const { DatabaseSync } = await import('node:sqlite');
 const { packText } = await import('../../src/server/db/text-blob.ts');
 const { htmlToText } = await import('../../src/server/feeds/parse.ts');
 const toHtml = (ps) => ps.map((p) => `<p>${p}</p>`).join('');
 
 {
-  const w = new DatabaseSync(DB_PATH);
+  const w = openSqlite(DB_PATH);
   const uid = w.prepare('SELECT id FROM users LIMIT 1').get().id;
   w.prepare(`INSERT INTO entries (id, user_id, feed_id, guid, url, url_norm, title,
       published_at, fetched_at, stage) VALUES ('e_ai', ?, NULL, 'gai',
@@ -290,7 +290,7 @@ const { buildFewshotBlock, recentHighlightsForFewshot, shouldInjectFewshot, FEWS
 check(`FEWSHOT_MIN 是 ${FEWSHOT_MIN}（少于它不注入）`, () => ok(FEWSHOT_MIN >= 3, String(FEWSHOT_MIN)));
 
 {
-  const w = new DatabaseSync(DB_PATH);
+  const w = openSqlite(DB_PATH);
   const uid = w.prepare('SELECT id FROM users LIMIT 1').get().id;
 
   // 先清空，测"不足 3 条不注入"
@@ -316,7 +316,7 @@ check(`FEWSHOT_MIN 是 ${FEWSHOT_MIN}（少于它不注入）`, () => ok(FEWSHOT
 }
 
 {
-  const w = new DatabaseSync(DB_PATH);
+  const w = openSqlite(DB_PATH);
   const uid = w.prepare('SELECT id FROM users LIMIT 1').get().id;
   const few = recentHighlightsForFewshot(w, uid);
   const block = buildFewshotBlock(few);
@@ -355,7 +355,7 @@ check(`FEWSHOT_MIN 是 ${FEWSHOT_MIN}（少于它不注入）`, () => ok(FEWSHOT
 
 {
   // 端到端：分析时 prompt 里真的出现了 few-shot 段
-  const w = new DatabaseSync(DB_PATH);
+  const w = openSqlite(DB_PATH);
   const uid = w.prepare('SELECT id FROM users LIMIT 1').get().id;
   w.prepare('DELETE FROM highlights WHERE user_id = ?').run(uid);
   for (let i = 0; i < 4; i++) {
@@ -390,7 +390,7 @@ const { listDayHighlights, renderDigestHighlightSection, DIGEST_HIGHLIGHT_MAX } 
   await import('../../src/server/highlights/insight.ts');
 
 {
-  const w = new DatabaseSync(DB_PATH);
+  const w = openSqlite(DB_PATH);
   const uid = w.prepare('SELECT id FROM users LIMIT 1').get().id;
   w.prepare('DELETE FROM highlights WHERE user_id = ?').run(uid);
 

@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -102,8 +103,7 @@ check('登录拿到 cookie', () => ok(cookie.includes('='), cookie));
 //   · 一个**标题偏长**的分组（⑤ 看它压不压角标）
 //   · 一个组里有多个源（④ 看头部高度是否被 chip 行撑高）
 // 条目造 40 条、标题长短不一，这样 ⑥ 的"首屏条数"不是全部同一高度下的巧合。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');

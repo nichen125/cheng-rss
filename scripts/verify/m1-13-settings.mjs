@@ -41,6 +41,7 @@ import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
 import { openSettings as openSettingsShared } from '../lib/ui.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -111,8 +112,7 @@ const j = async (method, path, body) => {
 // 另留 2 个未归组的源，用于验证"未分组"这一项。
 // 数量刻意不同：科技1 / 财经1 / 生活1 / 未分组2，全库 5。
 // 只数行数变少的断言在"过滤成 0 行"时也会绿，所以下面逐行比对 folderName。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');

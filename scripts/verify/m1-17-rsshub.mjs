@@ -31,6 +31,7 @@ import { removeDir } from '../lib/tmp.mjs';
 import {
   domainOf, fillRoute, joinRsshub, looksLikeUrl, paramsOf,
 } from '../../src/server/rsshub/library.ts';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -293,14 +294,13 @@ const api = async (path, init = {}) => {
   return { status: r.status, body };
 };
 
-const { DatabaseSync } = await import('node:sqlite');
 const dbPath = join(dataDir, 'app.db');
 const one = (sql, ...args) => {
-  const d = new DatabaseSync(dbPath, { readOnly: true });
+  const d = openSqlite(dbPath, { readOnly: true });
   try { return d.prepare(sql).get(...args); } finally { d.close(); }
 };
 const all = (sql, ...args) => {
-  const d = new DatabaseSync(dbPath, { readOnly: true });
+  const d = openSqlite(dbPath, { readOnly: true });
   try { return d.prepare(sql).all(...args); } finally { d.close(); }
 };
 
@@ -735,7 +735,7 @@ if (!browserPath) {
 
   // 缓存超过 7 天 → 标记过期，但仍返回（用户不该因为上游挂了就搜不了）
   {
-    const d = new DatabaseSync(dbPath);
+    const d = openSqlite(dbPath);
     try {
       d.prepare('UPDATE rsshub_cache SET fetched_at = ?')
         .run(Date.now() - 8 * 86400_000);
@@ -763,7 +763,7 @@ if (!browserPath) {
     // 所以那条断言挡不住"改成 Math.max"的变异（实测没抓到）。
     // 这里只让 routes 过期、radar 保持刚才，取 min 才会报 stale。
     {
-      const d = new DatabaseSync(dbPath);
+      const d = openSqlite(dbPath);
       try {
         d.prepare("UPDATE rsshub_cache SET fetched_at = ? WHERE key LIKE 'routes%'")
           .run(Date.now() - 30 * 86400_000);

@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -101,8 +102,7 @@ check('登录拿到 cookie', () => ok(cookie.includes('='), cookie));
 //
 // 不走 API 是因为要造的正是"接不到的源"：API 订阅前会先抓一次，
 // 这些 example.com 全都失败。这里直接写库，只关心渲染。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 const NAMES = ['少数派', '晚点LatePost', 'Reuters', 'The Verge', 'Ars Technica',

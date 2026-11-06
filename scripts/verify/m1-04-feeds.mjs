@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, summary } from './harness.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -339,8 +340,7 @@ check('没有 feed 时 found=false 且给出说明', () => {
 // 404 是**永久失效**，第一次就该置 broken；但仍然抓三次，是为了顺带确认
 // "已经 broken 的源再抓也不会变成别的状态"（v1.17 起判据只剩 !retryable，
 // 三次的写法保留是因为它同时覆盖了"再次失败不该把 broken 改回 active"）。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const ghostId = 'f_ghosttest0001';
 const uidRow = db.prepare('SELECT id FROM users LIMIT 1').get();
 db.prepare(`
@@ -355,7 +355,7 @@ const r2 = await api(`/feeds/${ghostId}/fetch-now`, { method: 'POST' });
 const r3 = await api(`/feeds/${ghostId}/fetch-now`, { method: 'POST' });
 check('404/410 是永久失效 → 置 broken', () => ok(r3.body?.status === 'broken', JSON.stringify(r3.body)));
 
-const db2 = new DatabaseSync(join(dataDir, 'app.db'));
+const db2 = openSqlite(join(dataDir, 'app.db'));
 const ghost = db2.prepare('SELECT error_count, status FROM feeds WHERE id = ?').get(ghostId);
 check('error_count 已累加到 3', () => ok(Number(ghost?.error_count) === 3, String(ghost?.error_count)));
 check('broken 源不再被 sweep 选中', () => {
@@ -378,7 +378,7 @@ db2.close();
 // "第 4 次才置 broken"的实现照样能通过，那不叫修好了。
 {
   const flakyId = 'f_flakytest0001';
-  const d = new DatabaseSync(join(dataDir, 'app.db'));
+  const d = openSqlite(join(dataDir, 'app.db'));
   d.prepare(`
     INSERT INTO feeds (id, user_id, url, title, fetch_interval, error_count, status, source_kind)
     VALUES (?,?,?,'网络抖动的源',1800,0,'active','rss')
@@ -392,13 +392,13 @@ db2.close();
   check('⑨ 瞬时失败（500）5 次后仍是 active，没有变成 broken', () =>
     ok(last?.body?.ok === false && last?.body?.status === 'active', JSON.stringify(last?.body)));
 
-  const d2 = new DatabaseSync(join(dataDir, 'app.db'));
+  const d2 = openSqlite(join(dataDir, 'app.db'));
   const f = d2.prepare('SELECT error_count, status FROM feeds WHERE id = ?').get(flakyId);
   d2.close();
   check('⑨ 瞬时失败仍在累加 error_count（供退避与"最近老失败"提示用）', () =>
     ok(Number(f?.error_count) === 5, String(f?.error_count)));
   check('⑨ 瞬时失败的源仍在 sweep 的候选里（status=active 且已到期）', () => {
-    const d3 = new DatabaseSync(join(dataDir, 'app.db'));
+    const d3 = openSqlite(join(dataDir, 'app.db'));
     const due = d3.prepare(
       "SELECT COUNT(*) c FROM feeds WHERE status='active' AND next_fetch_at <= ? AND id = ?",
     ).get(Date.now() + 86400_000, flakyId);
@@ -434,7 +434,7 @@ db2.close();
     return ok(Number(g?.errorCount) === 0, String(g?.errorCount));
   });
 
-  const d4 = new DatabaseSync(join(dataDir, 'app.db'));
+  const d4 = openSqlite(join(dataDir, 'app.db'));
   const nf = d4.prepare('SELECT next_fetch_at FROM feeds WHERE id = ?').get(ghostId);
   d4.close();
   check('⑩ 复活的源 next_fetch_at 立刻到期（不用等退避窗口）', () =>

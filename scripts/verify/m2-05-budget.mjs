@@ -20,6 +20,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, gt, summary } from './harness.mjs';
 import { z } from 'zod';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -386,8 +387,7 @@ if (!browser) {
     const cookie = (lr.headers.get('set-cookie') ?? '').split(';')[0];
 
     // 造出"月预算已超"的状态
-    const { DatabaseSync: W } = await import('node:sqlite');
-    const w = new W(jn(dataDir, 'app.db'));
+    const w = openSqlite(jn(dataDir, 'app.db'));
     try {
       const uid = w.prepare('SELECT id FROM users LIMIT 1').get().id;
       w.prepare(`INSERT INTO ai_usage (user_id, purpose, model, in_tokens, out_tokens,

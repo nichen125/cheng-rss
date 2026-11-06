@@ -26,6 +26,7 @@ import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
 import { launchBrowser } from '../lib/cdp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -98,8 +99,7 @@ const j = async (method, path, body) => {
 //
 // 「每个源都有 2 条未读」是刻意的：按源清之后如果同一组另一个源也掉了，
 // 立刻能看见。全部源未读数相同 —— 任何一个"多清了一个"的 bug 都会被抓到。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');
@@ -146,7 +146,7 @@ insDup.run('ma_e1', dupId);
 db.exec('COMMIT');
 
 const stat = () => {
-  const d = new DatabaseSync(join(dataDir, 'app.db'), { readOnly: true });
+  const d = openSqlite(join(dataDir, 'app.db'), { readOnly: true });
   try {
     const one = (sql, ...p) => d.prepare(sql).get(...p);
     // byFeed 必须**现在**就把数字取出来，不能返回一个稍后执行的闭包 ——
@@ -406,7 +406,7 @@ check('⑥ 点按钮先弹确认框（不是点一下就清）', () =>
 check('⑥ 确认文案里写明了要清多少条（2）', () =>
   ok(/\b2\b/.test(confirmInfo[0] ?? ''), JSON.stringify(confirmInfo[0])));
 check('⑥ 取消之后一条都没被改（仍是 2 条未读）', () => {
-  const d = new DatabaseSync(join(dataDir, 'app.db'), { readOnly: true });
+  const d = openSqlite(join(dataDir, 'app.db'), { readOnly: true });
   try {
     const c = d.prepare(
       'SELECT COUNT(*) c FROM entries WHERE is_read = 0 AND duplicate_of IS NULL AND feed_id = ?',

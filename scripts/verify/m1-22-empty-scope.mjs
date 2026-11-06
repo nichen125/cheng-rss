@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -102,8 +103,7 @@ const j = async (method, path, body) => {
 //   · 丙组：3 条全已读          → 第二份"读光了"，用来区分"源"和"分组"
 // 全库 10 条 vs 甲组 4 条 vs 丙组 3 条 vs 乙组源 2 条 —— 四个数字互不相同，
 // 于是"跳到全库"这件事在条数上就能被抓出来。
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');
@@ -694,7 +694,7 @@ check('⑤ 刚读完最后一篇的那一刻**不**自动补已读（列表仍�
   // 解绑的已读条目 —— 那样根本不是"新装用户的空库"。这一档要模拟的是
   // **真的一条条目都没有**，只能连条目一起清掉。
   {
-    const w = new DatabaseSync(join(dataDir, 'app.db'));
+    const w = openSqlite(join(dataDir, 'app.db'));
     try {
       w.prepare('DELETE FROM entry_fts_map').run();
       w.prepare('DELETE FROM entries').run();

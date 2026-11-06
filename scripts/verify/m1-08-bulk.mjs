@@ -24,6 +24,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -98,8 +99,7 @@ const j = async (method, path, body) => {
 };
 
 // ── 造数据：直接写库（批量操作用不到网络）───────────────────
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 
 db.exec('BEGIN IMMEDIATE');
@@ -302,7 +302,7 @@ check('纯未读条目确实被删了（证明上面那条不是空转）', () =
 });
 
 // 保留的条目必须解绑 feed（否则下次删分组/查来源会指向不存在的 feed）
-const db2 = new DatabaseSync(join(dataDir, 'app.db'));
+const db2 = openSqlite(join(dataDir, 'app.db'));
 const orphan = db2.prepare('SELECT feed_id FROM entries WHERE id = ?').get('be_0_r');
 check('保留下来的条目 feed_id 被置空（解绑，不指向已删源）', () => {
   return ok(orphan?.feed_id === null, `feed_id=${JSON.stringify(orphan?.feed_id)}`);

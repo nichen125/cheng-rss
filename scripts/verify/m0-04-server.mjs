@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, summary } from './harness.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -160,8 +161,7 @@ if (srv.ready) {
   });
 
   // ── 凭证：直接往 sessions 插一条，验证两种传递方式都通 ──
-  const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync(join(dataDir, 'app.db'));
+  const db = openSqlite(join(dataDir, 'app.db'));
   db.prepare('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)')
     .run('u-test', Date.now());
   db.prepare('INSERT INTO sessions (id, user_id, token, expires_at, created_at) VALUES (?,?,?,?,?)')
@@ -193,7 +193,7 @@ if (srv.ready) {
   });
 
   // 过期会话应被拒
-  const db2 = new DatabaseSync(join(dataDir, 'app.db'));
+  const db2 = openSqlite(join(dataDir, 'app.db'));
   db2.prepare('INSERT INTO sessions (id, user_id, token, expires_at, created_at) VALUES (?,?,?,?,?)')
     .run('s2', 'u-test', 'tok-expired', Date.now() - 1000, Date.now());
   db2.close();
@@ -208,7 +208,7 @@ if (srv.ready) {
   // 验收长期只看列表，所以"正文解不出来"能一路绿灯到最后。正文一定要真读一次。
   const { gzipSync } = await import('node:zlib');
   const bodyHtml = '<p>' + '正文可读性回归 '.repeat(60) + '</p>';
-  const db3 = new DatabaseSync(join(dataDir, 'app.db'));
+  const db3 = openSqlite(join(dataDir, 'app.db'));
   db3.prepare(
     'INSERT INTO entries (id,user_id,guid,url,url_norm,title,published_at,fetched_at) VALUES (?,?,?,?,?,?,?,?)'
   ).run('e-detail', 'u-test', 'g-detail', 'https://e.com/d', 'e.com/d', '详情测试', Date.now(), Date.now());

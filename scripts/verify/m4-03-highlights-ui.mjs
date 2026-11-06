@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, eq, ok, gt, summary } from './harness.mjs';
 import { killTree } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BROWSERS = process.platform === 'win32'
@@ -84,9 +85,8 @@ const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
 // ── 造一篇有正文的文章 ──────────────────────────────────────
 const PARA = '长江存储宣布 232 层 QLC 闪存量产，单颗容量 1Tb。';
 {
-  const { DatabaseSync } = await import('node:sqlite');
   const { packText } = await import('../../src/server/db/text-blob.ts');
-  const w = new DatabaseSync(join(dir, 'data', 'app.db'));
+  const w = openSqlite(join(dir, 'data', 'app.db'));
   const uid = w.prepare('SELECT id FROM users LIMIT 1').get().id;
   w.prepare(`INSERT INTO entries (id, user_id, feed_id, guid, url, url_norm, title,
       published_at, fetched_at, stage) VALUES ('e_ui', ?, NULL, 'gui',
@@ -332,8 +332,7 @@ check('有批注的那条仍显示「编辑批注」（不是两个按钮合并�
 // 视图是「未读」（§15.19），刷新后列表本来就是空的 —— 那不是高亮的问题，
 // 但会让下面的断言全部因为"没有文章"而失败，看起来很像是高亮坏了。
 {
-  const { DatabaseSync } = await import('node:sqlite');
-  const w = new DatabaseSync(join(dir, 'data', 'app.db'));
+  const w = openSqlite(join(dir, 'data', 'app.db'));
   w.prepare("UPDATE entries SET is_read = 0 WHERE id = 'e_ui'").run();
   w.close();
 }
@@ -371,10 +370,9 @@ check('**重画落在同一段文字上**（服务端偏移与浏览器纯文本
 // 把正文改掉再重锚，然后把页面刷新 —— 列表里必须出现
 // 「原文已变化，无法定位」那一段。
 {
-  const { DatabaseSync } = await import('node:sqlite');
   const { packText } = await import('../../src/server/db/text-blob.ts');
   const { reanchorEntry } = await import('../../src/server/highlights/anchor.ts');
-  const w = new DatabaseSync(join(dir, 'data', 'app.db'));
+  const w = openSqlite(join(dir, 'data', 'app.db'));
   const NEW = '这是一段完全重写过的正文，与之前的任何内容都不重叠。';
   w.prepare('UPDATE entry_contents SET html = ? WHERE entry_id = ?')
     .run(packText(`<p>${NEW}</p>`), 'e_ui');

@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { group, check, ok, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
 import { removeDir } from '../lib/tmp.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const binName = process.platform === 'win32'
@@ -88,8 +89,7 @@ const cookie = (loginRes.headers.getSetCookie?.() ?? []).map((x) => x.split(';')
 check('登录拿到 cookie', () => ok(cookie.includes('='), cookie));
 
 // ── 造数据：一个分组、一个源、2 条（1 未读 1 已读）─────────
-const { DatabaseSync } = await import('node:sqlite');
-const db = new DatabaseSync(join(dataDir, 'app.db'));
+const db = openSqlite(join(dataDir, 'app.db'));
 const uid = (db.prepare('SELECT id FROM users LIMIT 1').get()).id;
 const now = Date.now();
 db.exec('BEGIN IMMEDIATE');

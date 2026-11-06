@@ -24,6 +24,7 @@ import { parseHTML } from 'linkedom';
 import {
   MIN_FEED_CHARS, MIN_IMPROVEMENT, needsExtract, extractArticle, extractForEntry, estimateWordCount,
 } from '../../src/server/extract/article.ts';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const nodeBin = join(root, '.toolchain/node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
@@ -368,9 +369,8 @@ const api = async (path, init = {}) => {
 };
 
 // 直接读库：stage / extracted_by / stage_error 不在列表 API 里
-const { DatabaseSync } = await import('node:sqlite');
 const dbPath = join(dataDir, 'app.db');
-const db = () => new DatabaseSync(dbPath, { readOnly: true });
+const db = () => openSqlite(dbPath, { readOnly: true });
 const q = (sql, ...args) => {
   const d = db();
   try { return d.prepare(sql).all(...args); } finally { d.close(); }
@@ -468,7 +468,7 @@ check('长正文条目的详情仍是 feed 正文（含 FEED-MARKER-244）', () 
 
 // ── ⑥ 重复入队不重复抓（幂等） ──
 {
-  const w = new DatabaseSync(dbPath);
+  const w = openSqlite(dbPath);
   try {
     w.prepare(`INSERT INTO jobs (kind, dedupe_key, payload, status, priority, run_after,
                                  attempts, max_attempts, created_at, updated_at)

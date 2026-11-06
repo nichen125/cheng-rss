@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { group, check, ok, eq, summary } from './harness.mjs';
 import { killTree, onExit } from '../lib/proc.mjs';
+import { openSqlite } from '../lib/sqlite.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = join(root, 'dist', process.platform === 'win32'
@@ -374,9 +375,7 @@ check(`④ 第二个 60s 的日志量不比第一个多（${window2Lines.length}
 
 // ── ⑤ 空队列不增长 ────────────────────────────────────────
 {
-  const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync(join(dataDir, 'app.db'));
-  db.exec('PRAGMA busy_timeout = 8000;');
+  const db = openSqlite(join(dataDir, 'app.db'));
   const n1 = Number(db.prepare('SELECT COUNT(*) c FROM jobs').get().c);
   await sleep(6000);
   const n2 = Number(db.prepare('SELECT COUNT(*) c FROM jobs').get().c);

@@ -660,13 +660,20 @@ export class AiClient {
     }
   }
 
-  /** 初始格式：已确知不支持就跳过严格模式，少撞一次墙 */
+  /**
+   * 初始格式：已确知不支持就跳过严格模式，少撞一次墙。
+   *
+   * 两个来源，进程内记忆优先（同 deliveryFor 的理由：它来自"刚才真的失败过"，
+   * 比一个月前测的画像更新）。画像在这里的作用是**新进程的起点**：用户跑过一次
+   * 自检、库里记着 text，重启后不该再为每篇文章各撞一次 schema。
+   */
   private initialFormat(model: string): FormatMode {
-    if (this.formatUnsupported.has(this.formatKey(model, 'json_schema'))) {
-      if (this.formatUnsupported.has(this.formatKey(model, 'json_object'))) return 'text';
-      return 'json_object';
-    }
-    return 'json_schema';
+    const order: FormatMode[] = ['json_schema', 'json_object', 'text'];
+    const image = capabilityFor(this.capabilities, this.config.baseURL, model).responseFormat;
+    const startAt = order.indexOf(image as FormatMode);
+    const from = startAt >= 0 ? startAt : 0;
+    return order.slice(from).find((m) => !this.formatUnsupported.has(this.formatKey(model, m)))
+      ?? 'text';
   }
 
   private formatKey(model: string, mode: FormatMode): string {
@@ -1171,8 +1178,15 @@ export class AiClient {
     // 排队与首字等待不该记在"生成速度"上，否则慢的网关会显得"模型也慢"。
     // 分子取 usage.completion_tokens 而**不从 content 长度推** —— 实测这台
     // 网关会把推理文本混进 content，按字符数算会得出一个偏高的假速度。
+    //
+    // 但生成窗口本身也可能是假的：实测 ty19217.top 会把正文块攒到最后一起送，
+    // 首个正文块 2193ms、总耗时 2208ms，于是"生成阶段"只有 15ms，
+    // 167 tok 除出 6466 tok/s —— 那不是模型速度，是缓冲区速度。
+    // 所以窗口短到不足以是一次真实逐字生成时，宁可不给数（null = 没测到），
+    // 也不要给一个会被当成"这个模型超快"的假数字。
+    const MIN_GEN_WINDOW_MS = 200;
     const genMs = firstContentMs !== null ? totalMs - firstContentMs : 0;
-    const tokensPerSec = outTokens !== null && genMs > 0
+    const tokensPerSec = outTokens !== null && genMs >= MIN_GEN_WINDOW_MS
       ? Math.round((outTokens / (genMs / 1000)) * 10) / 10
       : null;
 

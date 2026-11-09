@@ -43,8 +43,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 group('2.10 AI 自检八步');
 
 // ── 一个"丢 system、忽略 response_format"的上游（线上故障的组合）──
-// 只转发 role==='user'，且只要请求带了 response_format 就回散文。
-// 这两条同时成立时，客户端必须靠自己把指令送到模型手上并降到纯文本档。
+// 只转发 role==='user'；**完全不理 response_format**，只按提示词说话。
+//
+// 这个 mock 的"只按提示词说话"是关键：它会照做「只输出一个 JSON 对象」，
+// 也会照做「用一句自然语言描述天气」。于是"要不要相信模型吐了 JSON 就等于
+// 支持 json_schema"这件事有了解法 —— 探针必须反过来要求散文（见
+// FORMAT_ANTI_PROMPT）：要求散文却仍回 JSON 才说明解码被约束了。
+// 用旧探针（要求 JSON）时，这个 mock 会回 JSON，档位被误记成 json_schema，
+// 所以下面 ③ 的断言同时守着这两件事。
 async function startUpstream() {
   const calls = [];
   const srv = createServer((req, res) => {
@@ -66,16 +72,16 @@ async function startUpstream() {
         .map((m) => m.content).join('\n');
       // 指令有没有到手：合并投递后，user 里会带指令原文
       const instructed = /情报卡片|你是一只猫|只回复|输出要求/.test(userText);
-      // 有要求在 user 里让它输出 JSON —— 模拟"听得懂提示词，但不认 response_format"
-      const askedJson = /JSON/.test(userText);
-      const wantsFormat = Boolean(body.response_format);
+      // 提示词在要散文（自检的反提示词）—— 这个上游照做，因为它是"只读提示词"的模型
+      const asksProse = /不要输出 ?JSON|不要出现花括号|描述今天的天气/.test(userText);
+      const asksJson = !asksProse && /JSON/.test(userText);
 
       let content;
-      if (wantsFormat) {
-        content = '分类：industry（产业）\n\n标签：AMD、并购\n\n理由：事件核心是并购。';
-      } else if (/猫/.test(userText) && /喵/.test(userText)) {
+      if (/猫/.test(userText) && /喵/.test(userText)) {
         content = instructed ? '喵' : '2';
-      } else if (askedJson || instructed) {
+      } else if (asksProse) {
+        content = '今天多云转晴，气温适中，微风拂面，适合外出。';
+      } else if (asksJson || instructed) {
         content = JSON.stringify({
           summary: 'AMD 以 32 亿美元收购 World Labs，补齐推理训练栈。',
           key_points: ['32 亿美元', '2027 年一季度完成'],
@@ -215,11 +221,17 @@ if (appA.up && appB.up) {
     const byId = Object.fromEntries((report.steps ?? []).map((s) => [s.id, s]));
     const sys = byId.system ?? {};
     const fmt = byId.format ?? {};
+    // 这个上游**完全不看 response_format**，只按提示词说话。所以档位必须是
+    // text —— 记成 json_schema 就是"模型吐了 JSON 就算支持严格模式"那个假阳性
+    // 回来了（探针会退化成"提示词自己要 JSON"，必然通过）。
+    const cap = report.capabilities?.models?.['deepseek-flash']?.responseFormat
+      ?? Object.values(report.capabilities?.models ?? {})[0]?.responseFormat;
     return ok(
       sys.status === 'fail' && Boolean(String(sys.hint ?? '').trim())
       && fmt.status === 'warn'
+      && cap === 'text'
       && /system/i.test(String(report.verdict ?? '')),
-      `system=${sys.status} hint=${JSON.stringify(sys.hint)} format=${fmt.status} verdict=${report.verdict}`,
+      `system=${sys.status} hint=${JSON.stringify(sys.hint)} format=${fmt.status} cap=${cap} verdict=${report.verdict}`,
     );
   });
 

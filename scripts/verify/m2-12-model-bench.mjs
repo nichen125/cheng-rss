@@ -202,4 +202,30 @@ group('2.11 模型测速');
   });
 }
 
+// ── ⑥ 正文攒成一波送达时不报假速度（实测 ty19217.top 就是这样）──
+//
+// 真实现象：首字 2193ms、总耗时 2208ms，167 tok 除出 6466 tok/s。
+// 那个数不是模型速度，是上游缓冲区的速度。窗口短到不足以是一次逐字生成时，
+// 契约是返回 null（= 没测到），而不是给一个会被读成"这个模型超快"的数。
+{
+  const r = await withUpstream({
+    sse: true,
+    usage: 167,
+    chunks: [
+      { delay: 80, kind: 'content', text: '一整段正文' },
+      { delay: 5, kind: 'content', text: '立刻补上' },
+      { delay: 5, kind: 'content', text: '又一段' },
+    ],
+  }, async (baseURL) => {
+    const c = mkClient(baseURL);
+    return c.probeSpeed({ model: 'm', prompt: 'ping' });
+  });
+
+  const span = r.totalMs - (r.firstContentMs ?? 0);
+  check('⑥ 生成窗口太短（<200ms）时 tokensPerSec=null，不拿缓冲速度冒充', () => ok(
+    r.outTokens === 167 && span < 200 && r.tokensPerSec === null,
+    `outTokens=${r.outTokens} tokensPerSec=${r.tokensPerSec} span=${span}ms`,
+  ));
+}
+
 summary('m2-12-model-bench');

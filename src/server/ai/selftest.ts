@@ -68,6 +68,17 @@ const FORMAT_PROBE_SCHEMA = {
   properties: { a: { type: 'string' }, b: { type: 'number' } },
   required: ['a', 'b'],
 };
+/**
+ * 探测档位时的**反提示词**：故意要求散文。
+ *
+ * 这是 v2.7 修掉的一个假阳性：原来让模型"输出 JSON"，于是模型就算完全不
+ * 理 response_format、只是照提示词做，也会吐出 JSON，被记成"支持 json_schema"。
+ * 那个结论会让客户端一直发带 response_format 的请求、拿回散文、再逐次降级 ——
+ * 而这是每次分析都要多烧一次请求的账。
+ *
+ * 反过来说：提示词要散文、却仍然回了一个 {a,b} 对象，那只可能是解码被约束了。
+ */
+const FORMAT_ANTI_PROMPT = '用一句自然语言描述今天的天气，不要输出 JSON，不要出现花括号。';
 
 interface RawCallResult {
   ok: boolean;
@@ -323,16 +334,21 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
   // ── ⑤ 结构化输出最高可用档 ──────────────────────────────────
   //
   // 一次只试一档，且用裸 fetch：借道客户端的话"说能用"可能其实是它偷偷降级了。
+  //
+  // 判据是反提示词（见 FORMAT_ANTI_PROMPT 的注释）：
+  //   · json_schema 档要求回出 {a,b} 且字段类型对 —— 提示词在要散文，只有
+  //     解码被 schema 约束才可能这样，这是"真支持"的证据；
+  //   · json_object 档只要求是个 JSON 对象（该档本来就不保证字段）；
+  //   · text 档是兜底，不再发请求：前两档都没过，就说明 response_format
+  //     确实被忽略，客户端改用"提示词描述字段 + 归一化"这条路。
   {
-    const modes: { mode: 'json_schema' | 'json_object' | 'text'; rf?: unknown }[] = [
+    const modes: { mode: 'json_schema' | 'json_object'; rf: unknown }[] = [
       {
         mode: 'json_schema',
         rf: { type: 'json_schema', json_schema: { name: 'probe', strict: true, schema: FORMAT_PROBE_SCHEMA } },
       },
       { mode: 'json_object', rf: { type: 'json_object' } },
-      { mode: 'text' },
     ];
-    const instruction = '只输出一个 JSON 对象，不要解释文字、不要 Markdown 围栏。字段：a 是字符串，b 是数字。';
     let best: 'json_schema' | 'json_object' | 'text' | null = null;
     const timeline: string[] = [];
 
@@ -342,46 +358,56 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
         body: {
           model: cfg.models.fast,
           messages: [
-            // system 被丢的网关上，把要求放 system 等于没放 —— 这里两处都放，
-            // 否则 text 档会"因为模型不知道该输出 JSON"而误判成不支持
-            { role: 'system', content: instruction },
-            { role: 'user', content: `${instruction}\n\n现在输出。` },
+            // 反提示词也放两份：system 被丢的网关上，只放 system 等于没要求，
+            // 而这一档恰恰要靠"要求了散文"来反证 schema 被遵守。
+            { role: 'system', content: FORMAT_ANTI_PROMPT },
+            { role: 'user', content: FORMAT_ANTI_PROMPT },
           ],
           temperature: 0,
           max_tokens: 200,
-          ...(m.rf ? { response_format: m.rf } : {}),
+          response_format: m.rf,
         },
       });
       addCost(r, 'format');
       const text = contentOf(r);
-      let jsonOk = false;
+      let parsed: unknown = null;
       try {
         const t = text.trim();
         const body = t.startsWith('{') ? t : (t.match(/\{[\s\S]*\}/)?.[0] ?? '');
-        const v = JSON.parse(body);
-        jsonOk = v && typeof v === 'object';
-      } catch { jsonOk = false; }
-      timeline.push(`${m.mode}=${jsonOk ? 'ok' : `no(${text.slice(0, 12)})`}`);
-      if (jsonOk) { best = m.mode; break; }
-    }
+        parsed = JSON.parse(body);
+      } catch { parsed = null; }
 
-    const status: StepResult['status'] = best === 'json_schema' ? 'pass'
-      : best ? 'warn' : 'fail';
-    const detail = best === 'json_schema'
-      ? '支持严格模式（json_schema），结构化输出最可靠'
-      : best === 'json_object'
-        ? '只支持 json_object：能保证是 JSON，但不保证字段，靠 zod 校验兜'
-        : best === 'text'
-          ? '两档 response_format 都被忽略，已降级为纯文本 + 提示词描述字段'
-          : '三档都拿不到合法 JSON';
+      const obj = parsed as Record<string, unknown> | null;
+      const isObj = Boolean(obj) && typeof obj === 'object';
+      // json_schema 档要比 json_object 档更严：字段名与类型都对上，才算
+      // "解码被 schema 约束"；只对上"是个对象"可能只是模型顺着习惯吐了 JSON。
+      const hit = m.mode === 'json_schema'
+        ? isObj && typeof obj?.a === 'string' && typeof obj?.b === 'number'
+        : isObj;
+      timeline.push(`${m.mode}=${hit ? 'ok' : `no(${text.slice(0, 16).replace(/\n/g, ' ')})`}`);
+      if (hit) { best = m.mode; break; }
+    }
+    // 前两档都没过 = response_format 被忽略。兜底档不需要再发一次请求去证明
+    // "纯文本能用" —— 上面两次调用本身就是纯文本往返，正文已经看到了。
     const cap: ModelCapability['responseFormat'] = best ?? 'text';
+    if (!best) timeline.push('text=fallback（两档 response_format 都被忽略）');
+
+    // 只有严格档算 pass：另外两档都要靠提示词与归一化兜，属于"能用但不最可靠"，
+    // 面板上给黄点比给绿点诚实（§8.10 的能力画像本来就是让用户知道降级了什么）。
+    const status: StepResult['status'] = cap === 'json_schema' ? 'pass' : 'warn';
+    const detail = cap === 'json_schema'
+      ? '支持严格模式（json_schema），结构化输出最可靠'
+      : cap === 'json_object'
+        ? '只支持 json_object：能保证是 JSON，但不保证字段，靠归一化兜'
+        : '两档 response_format 都被忽略，已降级为纯文本 + 提示词描述字段';
     measured.models[cfg.models.fast] = { ...(measured.models[cfg.models.fast] ?? {}), responseFormat: cap };
 
     steps.push({
       id: 'format', title: '结构化输出档位', status, detail,
-      hint: status === 'fail'
-        ? '这个模型连纯文本模式下都说不出 JSON。检查模型名是否指向了一个对话/补全模型，或换 strong 模型试试'
-        : status === 'warn'
+      hint: cap === 'text'
+        ? '不需要手动处理：客户端已按纯文本档工作（提示词写清字段 + 归一化补全）。'
+          + '代价是个别回答要点不齐时会多一次重试'
+        : cap === 'json_object'
           ? '不需要处理：客户端已按这个档位工作。但要知道它会多一次校验重试的概率'
           : undefined,
       raw: timeline.join(' → '),

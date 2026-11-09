@@ -143,6 +143,43 @@ if (mode === 'basics') {
   const row = h.db.prepare("SELECT status, last_error FROM jobs WHERE kind='no_such_handler'").get();
   h.close();
   console.log(JSON.stringify(row));
+} else if (mode === 'starvation') {
+  // ⑦ 队头阻塞：一种慢任务堆在前面时，后面别的 kind 能不能被认领。
+  //
+  // 真实库的形态：384 条 analyze（并发 2、每条几秒）排在 id 4662~5045，
+  // 21 条 fetch_feed 排在 5046 之后。claimBatch 是
+  // "ORDER BY priority DESC, id LIMIT 20" —— 每轮固定取到 20 条 analyze，
+  // fetch_feed 永远进不了这个窗口，于是订阅再也不抓、简报永远没有新条目。
+  //
+  // 这里用"慢 noop + 快 count"复现：noop 并发 1、每条 sleep 25ms，
+  // 60 条要 1.5 秒才排完；count 只有 5 条但 id 更大。
+  const baseNoop = Number(h.db.prepare(
+    "SELECT COUNT(*) c FROM jobs WHERE kind='noop' AND status='done'",
+  ).get().c);
+  const baseCount = Number(h.db.prepare(
+    "SELECT COUNT(*) c FROM jobs WHERE kind='count' AND status='done'",
+  ).get().c);
+  for (let i = 0; i < 60; i++) {
+    enqueue(h.db, { kind: 'noop', payload: { sleepMs: 25, echo: i } });
+  }
+  for (let i = 0; i < 5; i++) {
+    enqueue(h.db, { kind: 'count', payload: { key: 'starve-' + i } });
+  }
+  const runner = new JobRunner({ db: h.db, handlers: buildHandlers({ dataDir }), pollMs: 10 });
+  runner.start();
+  // 只等 1.2 秒：远不足以排完 60 条慢任务，所以"count 有没有跑过"
+  // 只取决于它能不能被认领，而不取决于前面排完了没有。
+  await new Promise((r) => setTimeout(r, 1200));
+  await runner.stop();
+  const done = (kind) => Number(h.db.prepare(
+    "SELECT COUNT(*) c FROM jobs WHERE kind=? AND status='done'",
+  ).get(kind).c);
+  const res = {
+    noopDone: done('noop') - baseNoop,
+    countDone: done('count') - baseCount,
+  };
+  h.close();
+  console.log(JSON.stringify(res));
 }
 `;
 
@@ -247,6 +284,16 @@ if (unknown) {
   check('未知 kind 的任务置为 dead 并记录原因', () => {
     return ok(unknown.status === 'dead' && String(unknown.last_error ?? '').includes('no_such_handler'),
       `status=${unknown.status} err=${unknown.last_error}`);
+  });
+}
+
+// ── ⑦ 队头阻塞（真实库踩到的：简报一直生成不出来）────────────
+const starve = await runProbe('starvation');
+if (starve) {
+  check('慢任务的队头不挡住后面的快任务', () => {
+    return ok(starve.countDone > 0,
+      `noop done=${starve.noopDone}/60（没排完是预期的），count done=${starve.countDone}/5`
+        + ' —— count 一条都没跑到，说明认领窗口被前面的 kind 占满了');
   });
 }
 

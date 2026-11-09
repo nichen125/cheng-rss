@@ -73,17 +73,68 @@ export function enqueue(db: DatabaseSync, opts: EnqueueOptions): number | null {
  *
  * BEGIN IMMEDIATE 立刻拿写锁，避免「先读后写」之间的竞态：
  * 两个 worker 同时读到同一批 pending，各自 UPDATE，就会重复执行。
+ *
+ * `capacity` 是**每个 kind 这一轮还能领几条**（并发上限 - 在飞数）。
+ * 不传时保持老行为：`ORDER BY priority DESC, id LIMIT ?` 一把捞。
+ *
+ * 为什么必须按 kind 分名额（PLAN §7.2 的教训）：老取法只看全局 id 顺序，
+ * 一种慢任务堆在前面就会把窗口占满。真实库上出现过 384 条 analyze
+ * （并发 2、每条几秒）排在 21 条 fetch_feed 前面，每轮固定取到 20 条
+ * analyze，fetch_feed 永远进不了这个窗口 —— 表现是订阅再也不抓、
+ * 简报一直"最近 24 小时没有新条目"，而队列统计里 pending 不为 0，
+ * 看起来只是"慢"，实际是饿死。按 kind 分配认领席位才是队列该有的形状。
  */
-export function claimBatch(db: DatabaseSync, workerId: string, limit: number): Job[] {
+export function claimBatch(
+  db: DatabaseSync,
+  workerId: string,
+  limit: number,
+  capacity?: Record<string, number>,
+): Job[] {
   db.exec('BEGIN IMMEDIATE');
   try {
     const now = Date.now();
-    const rows = db.prepare(`
-      SELECT * FROM jobs
-       WHERE status = 'pending' AND run_after <= ?
-       ORDER BY priority DESC, id
-       LIMIT ?
-    `).all(now, limit) as unknown as Job[];
+    let rows: Job[];
+
+    const kinds = capacity
+      ? Object.keys(capacity).filter((k) => (capacity[k] ?? 0) > 0)
+      : [];
+    if (capacity && kinds.length === 0) {
+      // 每种任务都满负荷，别白抢一轮
+      db.exec('COMMIT');
+      return [];
+    }
+
+    if (capacity) {
+      // 每个 kind 内按优先级 + id 排名，只取自己名额内的那些。
+      // 窗口函数在子查询里排名，外层再按 kind 的名额过滤 ——
+      // 名额是每 kind 不同的值，所以在 JS 里筛，SQL 只负责粗筛
+      // （rn <= 最大名额），避免把整张 pending 表拉回来。
+      const maxCap = Math.max(...kinds.map((k) => capacity[k] ?? 0));
+      const holes = kinds.map(() => '?').join(',');
+      const ranked = db.prepare(`
+        SELECT * FROM (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY kind ORDER BY priority DESC, id
+          ) AS rn
+            FROM jobs
+           WHERE status = 'pending' AND run_after <= ? AND kind IN (${holes})
+        )
+        WHERE rn <= ?
+        ORDER BY priority DESC, id
+      `).all(now, ...kinds, maxCap) as unknown as (Job & { rn: number })[];
+
+      rows = ranked
+        .filter((r) => r.rn <= (capacity[r.kind] ?? 0))
+        .slice(0, limit)
+        .map(({ rn: _rn, ...job }) => job as unknown as Job);
+    } else {
+      rows = db.prepare(`
+        SELECT * FROM jobs
+         WHERE status = 'pending' AND run_after <= ?
+         ORDER BY priority DESC, id
+         LIMIT ?
+      `).all(now, limit) as unknown as Job[];
+    }
 
     if (rows.length > 0) {
       const upd = db.prepare(

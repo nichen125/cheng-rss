@@ -96,24 +96,30 @@ export class JobRunner {
     this.running = true;
     let dispatched = 0;
     try {
-      // 各 kind 的剩余额度不同，这里取最大值认领，再按 kind 分别控制
-      const limit = 20;
-      const jobs = claimBatch(this.db, this.workerId, limit);
+      // 各 kind 的剩余额度：并发上限减在飞数。**必须按 kind 交给认领**，
+      // 否则一种慢任务堆在前面会把认领窗口（LIMIT 20）占满，后面的
+      // fetch_feed 永远轮不到 —— 真实库上就是这么饿死 21 个抓取任务、
+      // 让简报连续几天说"最近 24 小时没有新条目"的。
+      //
+      // 没注册 handler 的 kind 也要给名额，否则它们永远不会被认领、
+      // 也就不会走到下面"置 dead"的分支，会一直挂在 pending 里。
+      const kinds = (this.db.prepare(
+        "SELECT DISTINCT kind FROM jobs WHERE status='pending'",
+      ).all() as unknown as { kind: string }[]).map((r) => r.kind);
+
+      const capacity: Record<string, number> = {};
+      for (const kind of kinds) {
+        const cap = this.concurrency[kind] ?? this.defaultConcurrency;
+        capacity[kind] = cap - (this.inflight.get(kind) ?? 0);
+      }
+
+      // 上限按"所有 kind 都有空位"估：每 kind 最多领满自己的名额
+      const limit = Object.values(capacity).reduce((a, b) => a + Math.max(0, b), 0);
+      if (limit <= 0) return 0;
+
+      const jobs = claimBatch(this.db, this.workerId, limit, capacity);
 
       for (const job of jobs) {
-        const cap = this.concurrency[job.kind] ?? this.defaultConcurrency;
-        const cur = this.inflight.get(job.kind) ?? 0;
-
-        if (cur >= cap) {
-          // 超额：立刻退回 pending，下一轮再抢
-          // 不用 failJob —— 那不是失败，只是暂时没额度
-          this.db.prepare(
-            `UPDATE jobs SET status='pending', locked_by=NULL, locked_at=NULL,
-                             attempts=MAX(attempts-1, 0), updated_at=? WHERE id=?`,
-          ).run(Date.now(), job.id);
-          continue;
-        }
-
         const handler = this.handlers[job.kind];
         if (!handler) {
           if (!this.warnedKinds.has(job.kind)) {
@@ -129,7 +135,7 @@ export class JobRunner {
           continue;
         }
 
-        this.inflight.set(job.kind, cur + 1);
+        this.inflight.set(job.kind, (this.inflight.get(job.kind) ?? 0) + 1);
         dispatched++;
         this.dispatch(job, handler);
       }

@@ -107,9 +107,13 @@ const aiSrv = createServer((req, res) => {
 
     ai.okCalls++;
     if (ai.missingFor.some((t) => title.includes(t))) {
-      // 丢掉 sentiment / novelty —— 这是小模型最常见的漏字段方式
-      const { sentiment, novelty, ...rest } = full;
-      void sentiment; void novelty;
+      // 丢掉 summary —— 选它而不是 sentiment/novelty 的原因见 PLAN §8.10：
+      // 那几个字段**允许**归一化补出来（sentiment 缺→neutral、novelty 缺→importance、
+      // entities 缺→四个空桶），所以"少给了它们"不再等于"没完成任务"，用它们
+      // 做缺字段用例会被归一化兜住，测的就不再是失败路径。
+      // summary 无法推断：没有它这张卡片等于没写，必须失败并重试。
+      const { summary, ...rest } = full;
+      void summary;
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify(chatBody(JSON.stringify(rest))));
     }
@@ -470,7 +474,9 @@ await aiCtl({ missingFor: [missTitle.slice(0, 10)] });
   check('缺字段的条目 stage=failed', () => eq(row?.stage, 'failed'));
   check('stage_error 说得出是字段问题与哪个字段', () => {
     const msg = String(row?.stage_error ?? '');
-    return ok(/schema/.test(msg) && /(sentiment|novelty)/.test(msg), `stage_error=${msg.slice(0, 240)}`);
+    // 报错必须点出缺的那个字段；夹具丢的是 summary（见上，sentiment/novelty
+    // 会被归一化补出来，不能用来做失败用例）。
+    return ok(/schema/.test(msg) && /summary/.test(msg), `stage_error=${msg.slice(0, 240)}`);
   });
   check('失败条目没有半截分析落库', () => {
     const a = one('SELECT entry_id FROM entry_analysis WHERE entry_id = ?', missId);

@@ -37,10 +37,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 group('2.8 AI 配置页分层折叠');
 
-// 改前的页高基线：四张卡全展开 ≈ 1400px（1440×900 下要滚三屏）。
-// 断言用「收起后 < 改前」，把改前的数写成常量而不是"和当前 DOM 的某种
-// 计算比" —— 后者会跟着实现一起漂，等于没测。
-const HEIGHT_BEFORE = 1400;
+// 折叠后页高的上限（1440×900）。原本是「分层折叠改之前的页高」≈1400，
+// v2.7 把常显的 AI 自检卡加到设置页后实测 1580，旧基线必然被突破 ——
+// 卡片是产品要求常显的（PLAN §15.29），所以这里改成天花板而不是旧基线：
+// 1700 = 实测 1580 + 120 余量。断言用常量而不是"和当前 DOM 的某种计算比"，
+// 后者会跟着实现一起漂，等于没测；这个常量现在是「页高别再长 120px」的哨兵。
+const HEIGHT_CEILING = 1700;
 const HEIGHT_REDUCTION_MIN = 400;
 
 if (!existsSync(BIN)) {
@@ -265,9 +267,9 @@ if (up) {
         return ok(drop >= HEIGHT_REDUCTION_MIN,
           `展开 ${heights?.expanded} / 收起 ${heights?.collapsed} / 差 ${drop}`);
       });
-      check('⑧ 收起后的页高明显低于改前基线', () =>
-        ok(Number(heights?.collapsed ?? 0) < HEIGHT_BEFORE,
-          `收起后 ${heights?.collapsed}，改前约 ${HEIGHT_BEFORE}`));
+      check('⑧ 收起后的页高没有超过上限（页高哨兵）', () =>
+        ok(Number(heights?.collapsed ?? 0) < HEIGHT_CEILING,
+          `收起后 ${heights?.collapsed}，上限 ${HEIGHT_CEILING}`));
 
       cdp.close();
     }

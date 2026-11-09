@@ -373,6 +373,20 @@ export class AiClient {
     return true;
   }
 
+  /**
+   * 这次调用实际会怎么送指令 —— 给「测试连接」这类诊断端点看的。
+   *
+   * 为什么把它公开：用户点「测试连接」失败时，他看到的必须能解释**为什么**。
+   * "模型返回空内容"这句话在没有投递信息时是无法判断的 —— 究竟是 key 错、
+   * 网络错，还是网关把 system 丢了导致模型没收到指令？三者处置完全不同。
+   */
+  deliveryInfo(model: string): { delivery: DeliveryMode; reason: 'learned' | 'profile' | 'default' } {
+    if (this.mergedFor.has(this.formatKeyOf(model))) return { delivery: 'merged', reason: 'learned' };
+    const cap = capabilityFor(this.capabilities, this.config.baseURL, model);
+    if (cap.systemRole === 'dropped') return { delivery: 'merged', reason: 'profile' };
+    return { delivery: 'split', reason: 'default' };
+  }
+
   /** 只按网关+模型做 key（与 formatKey 同构，但不含 format 档位） */
   private formatKeyOf(model: string): string {
     return `${this.config.baseURL}|${model}`;
@@ -517,7 +531,7 @@ export class AiClient {
       }
 
       const choices = (json.choices ?? []) as {
-        message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown };
+        message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; reasoning_details?: unknown };
         finish_reason?: unknown;
       }[];
       const ch0 = choices[0];
@@ -530,12 +544,21 @@ export class AiClient {
       const reasoningTokens = u.completion_tokens_details?.reasoning_tokens ?? null;
       const hasText = typeof content === 'string' && content.trim() !== '';
 
-      // 推理模型（§8.6b）：token 先花在 `reasoning_content` 上，预算不够时
-      // `content` 是空串而 `finish_reason` 是 `length`。这与"模型无话可说"
-      // 是两件事，处置也相反 —— 前者加预算就能救，后者加多少都救不了。
+      // 推理模型（§8.6b）：token 先花在「思考」上，预算不够时 `content` 是空串。
+      // 这与"模型无话可说"是两件事，处置也相反 —— 前者加预算就能救，后者
+      // 加多少都救不了。
+      //
+      // 判据不能只看 `finish_reason === 'length'`：线上网关（2026-11-09 实测）
+      // 截断时**根本不发 finish_reason**，`message` 甚至连 reasoning 字段都没有，
+      // 唯一痕迹是 `completion_tokens` 正好等于请求的 max_tokens。
+      // 只认 finish_reason 的后果是这类截断被判成 `empty`（不可重试），
+      // 一次都不加预算、直接记一次失败 —— 库里 224/231 条 empty 的
+      // out_tokens 正好等于该 purpose 的 max_tokens，就是这么来的。
       const reasoningText = readReasoning(ch0?.message);
-      const truncatedByReasoning = !hasText && finish === 'length'
-        && (reasoningText !== '' || (reasoningTokens ?? 0) > 0);
+      const outTokens = u.completion_tokens ?? null;
+      const budgetSpent = opts.maxTokens != null && outTokens != null && outTokens >= opts.maxTokens;
+      const truncatedByReasoning = !hasText && (budgetSpent
+        || (finish === 'length' && (reasoningText !== '' || (reasoningTokens ?? 0) > 0)));
 
       const usage: AiUsageRecord = {
         purpose: opts.purpose, model, userId: opts.userId,
@@ -750,6 +773,17 @@ export class AiClient {
         if (parsed.ok) {
           return { ok: true, data: parsed.data, raw: res.raw, usage };
         }
+
+        // 有正文但被预算截断：JSON 不完整 / 字段被砍断，报的是 bad-json 或
+        // schema。**原样重发只会再截断一次** —— 必须先把预算翻倍，
+        // 才谈得上重试（§8.6b）。这条与下面的结构重试冲突时以它为先：
+        // 结构重试修的是"模型没按契约写"，而这里模型根本没写完。
+        if (res.truncated && opts.maxTokens && attempt < TRANSPORT_RETRIES) {
+          opts.maxTokens *= 2;
+          last = { ok: false, failure: parsed.failure, usage };
+          await this.sleep(this.backoffMs(attempt));
+          continue;
+        }
         // 结构错不在这里重试 —— 它要的是回灌 issues，而不是原样再问一遍
         return { ok: false, failure: parsed.failure, usage };
       }
@@ -824,6 +858,13 @@ export class AiClient {
     inTokens?: number | null;
     outTokens?: number | null;
     latencyMs: number;
+    /**
+     * 本次回复的 token 打满了请求的 max_tokens。
+     *
+     * 有正文时也照样标：JSON 被预算截断的表现是「正文非空、但括号没闭合」，
+     * 旧路径会把它报成 bad-json 并原样重发一次 —— 原样重发只会再截断一次。
+     */
+    truncated?: boolean;
     failure?: AiFailure;
     retryWithFormat?: FormatMode;
     retryAfterMs?: number;
@@ -905,7 +946,7 @@ export class AiClient {
     }
 
     const choices = (json.choices ?? []) as {
-      message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown };
+      message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; reasoning_details?: unknown };
       finish_reason?: unknown;
     }[];
     const content = choices[0]?.message?.content;
@@ -914,23 +955,32 @@ export class AiClient {
       completion_tokens_details?: { reasoning_tokens?: number };
     };
 
+    // 预算打满的判定（§8.6b），与 `chat()` 同一套：
+    //   · finish_reason=length + 有思考痕迹 —— 旧判据，保留；
+    //   · completion_tokens ≥ 请求的 max_tokens —— 线上网关截断时**不发**
+    //     finish_reason，只留下这个痕迹。缺了这一条，JSON 被截断会报成
+    //     bad-json/schema 并原样重发，而原样重发只会再截断一次
+    //     （库里 bad-json 里 194/243 条的 out_tokens 正好等于 max_tokens）。
+    const outTokens = usage.completion_tokens ?? null;
+    const budgetSpent = opts.maxTokens != null && outTokens != null && outTokens >= opts.maxTokens;
+    const finish = String(choices[0]?.finish_reason ?? '');
+    const reasoningText = readReasoning(choices[0]?.message);
+    const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? null;
+
     if (typeof content !== 'string' || content.trim() === '') {
       // 与 chat() 同一套判定（§8.6b）：思考被截断 ≠ 模型无话可说。
       // 这里也要分开，否则 JSON 路径会把"预算不够"报成"无话可说"，
       // 而调用方对两者的处置相反。
-      const finish = String(choices[0]?.finish_reason ?? '');
-      const reasoningText = readReasoning(choices[0]?.message);
-      const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? null;
-      const truncated = finish === 'length'
-        && (reasoningText !== '' || (reasoningTokens ?? 0) > 0);
+      const truncated = budgetSpent
+        || (finish === 'length' && (reasoningText !== '' || (reasoningTokens ?? 0) > 0));
       if (truncated) {
         return {
-          ok: false, latencyMs,
-          inTokens: usage.prompt_tokens ?? null, outTokens: usage.completion_tokens ?? null,
+          ok: false, latencyMs, truncated: true,
+          inTokens: usage.prompt_tokens ?? null, outTokens,
           failure: {
             kind: 'reasoning-only',
             message: `模型把 max_tokens 用在了思考上（reasoning_tokens=${
-              reasoningTokens ?? '?'}，finish_reason=length），正文为空`,
+              reasoningTokens ?? '?'}，finish_reason=${finish || '(未提供)'}），正文为空`,
             retryable: true,
           },
         };
@@ -938,15 +988,15 @@ export class AiClient {
       // 空内容不是网络问题，原样重发大概率还是空
       return {
         ok: false, latencyMs,
-        inTokens: usage.prompt_tokens ?? null, outTokens: usage.completion_tokens ?? null,
+        inTokens: usage.prompt_tokens ?? null, outTokens,
         failure: { kind: 'empty', message: '模型返回空内容', retryable: false },
       };
     }
 
     return {
-      ok: true, raw: content, latencyMs,
+      ok: true, raw: content, latencyMs, truncated: budgetSpent,
       inTokens: usage.prompt_tokens ?? null,
-      outTokens: usage.completion_tokens ?? null,
+      outTokens,
     };
   }
 
@@ -1402,15 +1452,32 @@ async function safeText(resp: Response): Promise<string> {
  * 三个名字都要认：
  *   · `reasoning_content` —— DeepSeek 系与多数 OpenAI 兼容实现
  *   · `reasoning`         —— OpenRouter / 部分网关
- *   · 它可能不存在（非推理模型），返回空串而不是 undefined，
- *     让调用方少一次判空
+ *   · `reasoning_details[].summary` —— 新版 OpenAI 兼容网关（本机这台就是）
+ *     它把思考拆成一组结构化片段，文本放在 `summary` 里。只认前两个名字时，
+ *     这类网关的思考内容**读不到**，于是"思考吃光预算"的判断少了一半证据。
+ *
+ * 它可能不存在（非推理模型），返回空串而不是 undefined，让调用方少一次判空。
  *
  * 这个字段**不参与业务**，只用来判断"模型是不是在思考" ——
  * 把思考内容写进摘要或简报是错的（它是过程，不是结论）。
  */
-function readReasoning(msg: { reasoning_content?: unknown; reasoning?: unknown } | undefined): string {
+function readReasoning(msg: {
+  reasoning_content?: unknown;
+  reasoning?: unknown;
+  reasoning_details?: unknown;
+} | undefined): string {
   for (const v of [msg?.reasoning_content, msg?.reasoning]) {
     if (typeof v === 'string' && v.trim() !== '') return v.trim();
+  }
+  const details = msg?.reasoning_details;
+  if (Array.isArray(details)) {
+    const parts: string[] = [];
+    for (const d of details) {
+      if (!d || typeof d !== 'object') continue;
+      const s = (d as { summary?: unknown }).summary;
+      if (typeof s === 'string' && s.trim() !== '') parts.push(s.trim());
+    }
+    if (parts.length > 0) return parts.join('\n');
   }
   return '';
 }

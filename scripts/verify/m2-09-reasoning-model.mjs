@@ -211,6 +211,77 @@ const mkClient = (baseURL) => new AiClient({
     eq(r.failure?.retryable, true));
 }
 
+// ── ⑩⑪ 网关不发 finish_reason 时也要认得出截断 ──────────────
+//
+// 线上实测（2026-11-09）：这个网关截断时**根本不发 finish_reason**
+// （choices[0].finish_reason 缺失），而 content 为空、completion_tokens
+// 正好等于 max_tokens。旧判定要求 `finish === 'length'`，于是这种截断
+// 落到 `empty`（retryable:false）—— 一次都不重试，直接记一次失败。
+//
+// 库里的证据：224/231 条 `empty` 的 out_tokens **正好等于**该 purpose 的
+// max_tokens（analyze 1200 命中 210 次、cluster 900 命中 9 次）。
+// 也就是说 97% 的"模型返回空内容"其实是"预算被思考吃光"。
+{
+  const r = await withMock(
+    (body) => ({
+      content: '',
+      // 刻意不带 reasoning 字段：真实截断时我看到的 message 连
+      // reasoning_details 都没有，只有 usage 里的 reasoning_tokens
+      finish: undefined,
+      outTokens: body.max_tokens,
+      reasoningTokens: body.max_tokens - 1,
+    }),
+    (base) => mkClient(base).chat({
+      system: '只回复 OK。', user: 'ping', model: 'm', purpose: 'test',
+      userId: 'u', maxTokens: 64, temperature: 0,
+    }),
+  );
+  check('⑩ finish_reason 缺失但 out_tokens 打满 → 判 reasoning-only（不是 empty）', () =>
+    eq(r.failure?.kind, 'reasoning-only'), r.failure?.kind);
+  check('⑩ 这种情况下也必须 retryable（否则一次都不重试）', () =>
+    eq(r.failure?.retryable, true));
+}
+
+{
+  // JSON 被预算截断：content 非空但 JSON 不完整，旧行为报 bad-json 并原样
+  // 重发一次（再截断一次）。真因是预算不够，所以必须**翻倍后重试**。
+  const seen = [];
+  const r = await withMock(
+    (body) => {
+      seen.push(body.max_tokens);
+      if (body.max_tokens < 2400) {
+        // 截断的样子：JSON 开了头就断，且 completion_tokens 正好打满
+        return {
+          content: '{"summary":"京东在双11推出无门槛红包，每天可领3次',
+          finish: 'stop',
+          outTokens: body.max_tokens,
+        };
+      }
+      return {
+        content: JSON.stringify({
+          summary: '京东推出双11红包，每天可领 3 次并可直接抵现，是常规促销力度。',
+          category: 'product',
+          key_points: ['每天可领 3 次', '可直接抵现'],
+          topics: ['电商'],
+          entities: { people: [], orgs: ['京东'], products: [], tech: [] },
+          importance: 40, novelty: 20, sentiment: 'neutral',
+        }),
+        finish: 'stop',
+        outTokens: 120,
+      };
+    },
+    (base) => mkClient(base).chatJson({
+      schema: EntryAnalysisSchema,
+      system: 'x', user: 'y', model: 'm', purpose: 'analyze',
+      userId: 'u', maxTokens: 1200, temperature: 0,
+    }),
+  );
+  check('⑪ JSON 被预算截断时翻倍预算重试（不是原样重发）', () =>
+    ok(seen.length >= 2 && seen[1] > seen[0], `实际序列 ${JSON.stringify(seen)}`));
+  check('⑪ 翻倍后拿到能解析的 JSON 就算成功', () =>
+    ok(r.ok === true, JSON.stringify(r.failure ?? { ok: r.ok })));
+}
+
 // ── ①② 测试连接端点本身 ───────────────────────────────────
 //
 // 这里**不能**自己传 maxTokens 再断言它等于 64 —— 那测的是我自己的参数，

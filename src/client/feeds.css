@@ -1764,15 +1764,21 @@
 }
 .tree-loose-row .tree-caret { width: 15px; }
 
-/* ── AI 自检与测速（§15.30，v2.7）─────────────────────────
+/* ── AI 自检与测速（§15.30，v2.7；表结构 v2.8）─────────────
    四色状态点是**语义色**而不是强调色：design-ui.md §2.1 允许饱和色表达
    AI 的判断。这里必须四色可分辨 —— 灰阶在"通过/降级"之间分不出来，
-   而这两种状态的处理方式完全不同（后者不用管，前者要修）。 */
+   而这两种状态的处理方式完全不同（后者不用管，前者要修）。
+
+   v2.8 把「耗时 / token」两列从表里拿掉、并入说明下方的元信息行。
+   原因是在 720px 宽的设置页里，两个固定列（各 84px）把说明列挤到
+   6~8 个汉字宽，"模型清单"逐字折行成三行 —— 而说明才是这张表的主体，
+   耗时只是佐证。测速表相反（时间就是被测对象），所以那边保留列。 */
 .selftest-table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 10px;
   font-size: 13px;
+  table-layout: fixed;
 }
 .selftest-table th {
   text-align: left;
@@ -1783,12 +1789,55 @@
   white-space: nowrap;
 }
 .selftest-table td {
-  padding: 8px;
+  padding: 9px 8px;
   border-bottom: 1px solid var(--line-soft, var(--line));
   vertical-align: top;
+  line-height: 1.55;
 }
-.selftest-table tr[data-status='fail'] { background: color-mix(in srgb, var(--err) 6%, transparent); }
-.selftest-table tr[data-status='warn'] { background: color-mix(in srgb, var(--warn) 7%, transparent); }
+
+/* 失败/降级行不再整行铺底色：整行染色会让八行表格看起来像四张便利贴，
+   而且说明文字压在粉底上对比度下降。改成左侧 2px 色条 + 极浅底色，
+   顺序仍然是"哪个要修"一眼可见，但不抢正文。 */
+.selftest-table tr[data-status='fail'] {
+  background: color-mix(in srgb, var(--err) 4%, transparent);
+  box-shadow: inset 2px 0 0 var(--err);
+}
+.selftest-table tr[data-status='warn'] {
+  background: color-mix(in srgb, var(--warn) 5%, transparent);
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+
+.selftest-title { color: var(--fg); }
+.selftest-note { color: var(--fg); }
+
+/* 耗时与 token：说明的佐证，弱化成一行小字 */
+.selftest-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 收起后的提示：默认只露一行"为什么 / 怎么办"，
+   展开才看长句。八步里五步都有 hint，全铺开时它比正文还长。 */
+.selftest-hint { margin-top: 4px; }
+.selftest-hint > summary {
+  cursor: pointer;
+  color: var(--worth);
+  font-size: 11.5px;
+  width: fit-content;
+}
+.selftest-hint > div {
+  margin-top: 4px;
+  padding: 6px 9px;
+  border-left: 2px solid var(--worth);
+  background: color-mix(in srgb, var(--warn) 6%, transparent);
+  border-radius: 0 5px 5px 0;
+  font-size: 12px;
+  color: var(--fg-soft, var(--fg));
+}
 
 .ai-dot {
   display: inline-block;
@@ -1803,6 +1852,37 @@
 .ai-dot-fail { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
 .ai-dot-skip { color: var(--fg-faint); background: color-mix(in srgb, var(--fg-faint) 12%, transparent); }
 
+/* 测速表是另一种东西：六列全是数字，时间本身就是被测对象，
+   所以它要自适应列宽（fixed 会把模型名截成省略号）。 */
+.selftest-bench { table-layout: auto; }
+.selftest-bench td { white-space: nowrap; }
+
+/* …但"成功率"格里的失败原因是一句话，不是数字。
+   继承 nowrap 会把整张表撑宽到要横向滚动，而那句错误正是唯一
+   需要读的文字。所以只在这一格恢复折行，并给一个上限宽度。 */
+.selftest-bench .hint {
+  white-space: normal;
+  max-width: 240px;
+  margin: 3px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* 失败重跑：按钮一行，边界说明另起一行小字。
+   与 .settings-actions 共存（它给的是按钮间距），这里只把方向改成纵向。 */
+.selftest-retry {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+}
+.selftest-retry-note {
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+  max-width: 56ch;
+}
+
 .selftest-raw { margin-top: 6px; }
 .selftest-raw summary { cursor: pointer; color: var(--fg-faint); font-size: 12px; }
 .selftest-raw pre {
@@ -1814,6 +1894,6 @@
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
-  background: var(--bg-soft, rgba(0, 0, 0, 0.03));
+  background: var(--bg-sunken);
   border-radius: 6px;
 }

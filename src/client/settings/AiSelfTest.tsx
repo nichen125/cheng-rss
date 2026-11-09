@@ -236,11 +236,9 @@ export function AiSelfTest() {
         <table className="selftest-table" data-testid="selftest-table">
           <thead>
             <tr>
-              <th style={{ width: 44 }}>状态</th>
-              <th>步骤</th>
+              <th style={{ width: 62 }}>状态</th>
+              <th style={{ width: 108 }}>步骤</th>
               <th>说明</th>
-              <th style={{ width: 84 }}>耗时</th>
-              <th style={{ width: 84 }}>token</th>
             </tr>
           </thead>
           <tbody>
@@ -251,10 +249,30 @@ export function AiSelfTest() {
                     {STATUS_LABEL[s.status]}
                   </span>
                 </td>
-                <td>{s.title}</td>
-                <td>
+                <td className="selftest-title">{s.title}</td>
+                <td className="selftest-note">
                   {s.detail}
-                  {s.hint && <div className="hint warn">{s.hint}</div>}
+                  {/* 耗时与 token 挪到说明下面当元信息。
+                      它们原本各占一列，把「说明」挤成 6~8 个汉字的窄条
+                      （"模型清 单"逐字折行）—— 而这张表要读的恰恰是说明，
+                      耗时只是佐证。测速表里时间才是主角，那边保留列。 */}
+                  {(s.metrics?.latencyMs != null || s.metrics?.outTokens != null) && (
+                    <div className="selftest-meta">
+                      {s.metrics?.latencyMs != null && <span>{ms(s.metrics.latencyMs)}</span>}
+                      {s.metrics?.outTokens != null && (
+                        <span>{tok(s.metrics.inTokens)}/{tok(s.metrics.outTokens)} token</span>
+                      )}
+                    </div>
+                  )}
+                  {/* 提示默认收起：八步里通常有五步带 hint，全铺开时它比正文
+                      还长，扫读的人分不清"哪句是结果、哪句是建议"。收起后
+                      每行只剩结论，需要处置时再展开。 */}
+                  {s.hint && (
+                    <details className="selftest-hint">
+                      <summary>为什么 / 怎么办</summary>
+                      <div>{s.hint}</div>
+                    </details>
+                  )}
                   {s.raw && (
                     <details className="selftest-raw">
                       <summary>上游原始回复</summary>
@@ -262,8 +280,6 @@ export function AiSelfTest() {
                     </details>
                   )}
                 </td>
-                <td>{ms(s.metrics?.latencyMs)}</td>
-                <td>{tok(s.metrics?.inTokens)}/{tok(s.metrics?.outTokens)}</td>
               </tr>
             ))}
           </tbody>
@@ -274,7 +290,7 @@ export function AiSelfTest() {
       {bench && bench.length > 0 && (
         <>
           <h4 style={{ margin: '18px 0 6px' }}>模型速度</h4>
-          <table className="selftest-table" data-testid="bench-table">
+          <table className="selftest-table selftest-bench" data-testid="bench-table">
             <thead>
               <tr>
                 <th>模型</th>
@@ -333,12 +349,15 @@ export function AiSelfTest() {
         </div>
       )}
 
-      {/* 积压重跑：修好投递方式不会让那些判死的条目自己消失 */}
-      <div className="settings-actions" style={{ marginTop: 14 }}>
+      {/* 积压重跑：修好投递方式不会让那些判死的条目自己消失。
+          说明从"铺一行长句在按钮旁边"改成按钮下方的小字：原来那句
+          与按钮基线对齐、宽到 400px 才折行，读起来像按钮的副标题，
+          而它其实是"这颗按钮会动哪些东西"的边界说明。 */}
+      <div className="settings-actions selftest-retry">
         <button className="btn" onClick={() => void retry()} disabled={retrying || running}>
           {retrying ? '复位中…' : '重跑 AI 失败条目'}
         </button>
-        <span className="muted">
+        <span className="selftest-retry-note">
           只复位与 AI 有关的失败（schema / bad-json / empty / reasoning-only /
           upstream-quota / timeout / network / http-*），不动抓取失败与提取质量不足。
           会按队列慢慢跑，随时可在预算里叫停。

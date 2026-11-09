@@ -30,6 +30,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { IconSparkle, IconRefresh } from '../icons.tsx';
 import { api, ApiFailure } from '../api.ts';
+import { AiSelfTest } from './AiSelfTest.tsx';
 
 interface AiStats {
   analyzed: number;
@@ -391,6 +392,12 @@ export function AiSection() {
           </p>
         )}
       </section>
+
+      {/* ── 自检与测速（§15.30，v2.7）──
+          常显不折叠：它是"为什么不好用"的答案，藏起来等于没做。
+          位置在 Key 卡之后（要先有 key 才有得测）、预算卡之前
+          （预算是高频写操作，不该被一整块诊断表压到下面）。 */}
+      <AiSelfTest />
 
       {/* ── ② 每日预算（常显，§15.29）──
           它原本混在「模型连接」卡里，跟着地址与模型名一起被折叠。

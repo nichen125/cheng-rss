@@ -561,6 +561,63 @@ export const api = {
     hint?: string;
   }>('/settings/ai/test', { method: 'POST', body: '{}' }),
 
+  // ── AI 自检与测速（v2.7，§8.10 / §8.11 / §15.30）─────────
+  //
+  // 与上面的 testAiKey 分工：那颗按钮 2 秒只验"key 能不能过鉴权"；
+  // 自检跑八步 10~60 秒，回答"这条链上每一步通不通、不通该怎么办"。
+  // 线上真实故障是"key 通、但每一篇分析都失败" —— 前者对它一无所知。
+  runAiSelfTest: () => request<{
+    id: string;
+    verdict: string;
+    steps: {
+      id: string; title: string; status: 'pass' | 'warn' | 'fail' | 'skip';
+      detail: string; hint?: string; raw?: string;
+      metrics?: { latencyMs?: number | null; inTokens?: number | null; outTokens?: number | null; costUsd?: number | null };
+    }[];
+    capabilities: unknown;
+    startedAt: number;
+    finishedAt: number;
+    costUsd: number;
+  }>('/settings/ai/selftest', { method: 'POST', body: '{}' }),
+
+  /** 最近一次自检。首屏渲染用 —— 刷新后结果还在，是"便于查看"的最低要求 */
+  getAiSelfTestLatest: () => request<{
+    id: string | null;
+    verdict: string | null;
+    steps: {
+      id: string; title: string; status: 'pass' | 'warn' | 'fail' | 'skip';
+      detail: string; hint?: string; raw?: string;
+      metrics?: { latencyMs?: number | null; inTokens?: number | null; outTokens?: number | null; costUsd?: number | null };
+    }[];
+    startedAt?: number;
+    finishedAt?: number;
+    costUsd?: number;
+  }>('/settings/ai/selftest/latest'),
+
+  /** 测速。缺省测 fast + strong，每个 3 次报中位数 */
+  benchAiModels: (models?: string[]) => request<{
+    results: {
+      model: string;
+      okCount: number;
+      runs: {
+        ok: boolean; streamed: boolean;
+        ttftMs: number | null; firstReasoningMs: number | null; firstContentMs: number | null;
+        totalMs: number; outTokens: number | null; tokensPerSec: number | null; error?: string;
+      }[];
+      median: {
+        ok: boolean;
+        ttftMs: number | null; firstReasoningMs: number | null; firstContentMs: number | null;
+        totalMs: number; outTokens: number | null; tokensPerSec: number | null;
+        range: { ttftMs: [number, number] | null; totalMs: [number, number] | null };
+      };
+    }[];
+  }>('/settings/ai/bench', { method: 'POST', body: JSON.stringify({ models }) }),
+
+  /** 复位 AI 侧失败并重新入队（§8.10）。N 与入队用同一判据，避免"说 N 条、入队 0 条" */
+  retryFailedAnalyze: () => request<{
+    reset: number; clearedDeadJobs: number; queued: number; remaining: number;
+  }>('/settings/ai/retry-failed', { method: 'POST', body: '{}' }),
+
   // ── 单篇总结（2.7，§8.9）────────────────────────────────
   /** 读当前提示词下的缓存。`summary:null` = 还没总结过 */
   getEntrySummary: (id: string) => request<{

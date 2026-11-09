@@ -34,6 +34,7 @@ import { createServer } from 'node:http';
 import { group, check, eq, ok, gt, summary } from './harness.mjs';
 import { killTree } from '../lib/proc.mjs';
 import { openSqlite } from '../lib/sqlite.mjs';
+import { launchBrowser, connectCdp, findBrowser } from '../lib/cdp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const NODE = process.execPath;
@@ -296,6 +297,196 @@ if (appA.up && appB.up) {
       `analyze=${a.status}:${a.detail} summary=${s.status}:${s.detail}`,
     );
   });
+
+  // ── ⑨ 积压重跑：只复位 AI 侧失败 + 清 dead 任务（判据 10/11）──
+  //
+  // 造四条：三条 AI 侧失败（其中一条带 dead 的 analyze 任务）+ 一条抓取失败。
+  // 复位后应当只动前三条，且带 dead 任务那条**真的能被入队** ——
+  // 不清 dead 的话 ORPHAN_ANALYZE_WHERE 会把它排除，按钮说 N 条而实际入队 0 条。
+  {
+    const db = openSqlite(join(dirA, 'data', 'app.db'));
+    const now = Date.now();
+    const mk = (id, err, guid) => {
+      db.prepare(`
+        INSERT INTO entries (id, user_id, guid, url, url_norm, title, published_at, fetched_at, stage, stage_error)
+        VALUES (?,?,?,?,?,?,?,?, 'failed', ?)
+      `).run(id, uid, guid, `https://e.com/${guid}`, `https://e.com/${guid}`, `T ${guid}`, now, now, err);
+    };
+    mk('e_rf_schema', 'schema: 字段不合规 —— entities: Required', 'r1');
+    mk('e_rf_empty', 'empty: 模型返回空内容', 'r2');
+    mk('e_rf_dead', 'http-503: all accounts are temporarily unavailable', 'r3');
+    mk('e_rf_fetch', 'fetch-failed: 原文网络错误: fetch failed', 'r4');
+
+    // 给第三条造一条 dead 的 analyze 任务（模拟"重试到上限"）。
+    // jobs 没有 user_id 列 —— 归属由 payload.entryId 表达
+    db.prepare(`
+      INSERT INTO jobs (kind, payload, status, dedupe_key, attempts, max_attempts, created_at, updated_at)
+      VALUES ('analyze', ?, 'dead', ?, 3, 3, ?, ?)
+    `).run(JSON.stringify({ entryId: 'e_rf_dead' }), 'analyze:e_rf_dead', now, now);
+    db.close();
+
+    const r = await appA.req('/settings/ai/retry-failed', { method: 'POST' });
+    const res = r.json ?? {};
+
+    const after = (() => {
+      const d = openSqlite(join(dirA, 'data', 'app.db'));
+      const rows = d.prepare(
+        "SELECT id, stage, stage_error FROM entries WHERE id LIKE 'e_rf_%'",
+      ).all();
+      const jobs = d.prepare("SELECT status FROM jobs WHERE dedupe_key = 'analyze:e_rf_dead'").all();
+      d.close();
+      return {
+        byId: Object.fromEntries(rows.map((x) => [x.id, x])),
+        deadJobLeft: jobs.length,
+      };
+    })();
+
+    check('⑨ 复位只动 AI 侧失败：三条变 extracted，fetch-failed 不动', () => ok(
+      after.byId.e_rf_schema?.stage === 'extracted' && after.byId.e_rf_schema?.stage_error === null
+      && after.byId.e_rf_empty?.stage === 'extracted'
+      && after.byId.e_rf_dead?.stage === 'extracted'
+      && after.byId.e_rf_fetch?.stage === 'failed',
+      JSON.stringify(after.byId),
+    ));
+
+    // 判据是"清掉了那条 dead + 它真的被重新入队"，**不是**"跑完之后库里没有 dead"。
+    // 后者不成立也不该成立：服务端的 job runner 会立刻把复位后的条目跑起来，
+    // 而这个夹具条目没有正文，于是它又失败、又重试到 dead —— 那是正确行为。
+    // 第一版断言写成 `deadJobLeft === 0` 就红在这里，而实现是对的（实测 cleared=1）。
+    check('⑨ 清掉了 dead 的 analyze 任务，于是那一条真的能入队', () => ok(
+      Number(res.clearedDeadJobs) === 1 && Number(res.reset) >= 3 && Number(res.queued) > 0,
+      `reset=${res.reset} cleared=${res.clearedDeadJobs} queued=${res.queued} `
+      + `remaining=${res.remaining} body=${r.text.slice(0, 200)}`,
+    ));
+  }
+
+  // ── ⑩ 面板真的渲染了（浏览器断言，无 Chromium 则 SKIP）──
+  //
+  // 前面九条验的是"后端说得出八步"，这一条验的是"用户看得见"。两者缺一不可：
+  // 断言 /settings/ai/selftest 返回八步，挡不住"面板根本没挂上去"。
+  const browser = findBrowser();
+  if (!browser) {
+    console.log('  \u001b[33mSKIP\u001b[0m  本机没有 Chromium 系浏览器，跳过面板断言');
+  } else {
+    // 用 A 实例（它有完整画像与条目）起浏览器，注入 cookie 后看面板
+    const cookie = await (async () => {
+      const lr = await fetch(`${appA.apiBase}/api/v1/auth/login`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'ai@test.local', password: 'aipass12345678' }),
+      });
+      return (lr.headers.get('set-cookie') ?? '').split(';')[0];
+    })();
+
+    const br = await launchBrowser({
+      profile: join(dirA, 'profile'), width: 1440, height: 900, url: appA.apiBase,
+    });
+    try {
+      if (!br.wsUrl) {
+        check('⑩ 浏览器调试端口可用', () => ok(false, 'CDP 没起来'));
+      } else {
+        const cdp = await connectCdp(br.wsUrl);
+        await cdp.send('Network.enable');
+        await cdp.send('Network.setCookie', {
+          name: cookie.split('=')[0], value: cookie.split('=').slice(1).join('='), url: appA.apiBase,
+        });
+        await cdp.send('Page.navigate', { url: appA.apiBase });
+        await sleep(2500);
+
+        const opened = await cdp.evaluate(`(async () => {
+          const btn = document.querySelector('.side-settings, button[title*="配置"], button[aria-label*="配置"]');
+          if (!btn) return 'no-btn';
+          btn.click();
+          await new Promise(r => setTimeout(r, 700));
+          const nav = [...document.querySelectorAll('.settings-nav-item')]
+            .find(x => x.textContent.includes('AI 分析'));
+          if (!nav) return 'no-nav';
+          nav.click();
+          await new Promise(r => setTimeout(r, 1200));
+          return 'ok';
+        })()`);
+        check('⑩ 能打开配置并切到「AI 分析」', () => ok(opened === 'ok', String(opened)));
+
+        if (opened === 'ok') {
+          // 刷新后仍在：这一步**先重新导航再读**，否则测的是内存状态而不是 latest。
+          //
+          // 用 `Page.navigate` 而不是在 evaluate 里 `location.reload()`：
+          // 后者会在求值过程中销毁执行上下文，CDP 随即报
+          // "Inspected target navigated or closed"，断言连跑都跑不到（实测踩过）。
+          await cdp.send('Page.navigate', { url: appA.apiBase });
+          await sleep(2500);
+          const persisted = await cdp.evaluate(`(async () => {
+            const btn = document.querySelector('.side-settings, button[title*="配置"], button[aria-label*="配置"]');
+            if (!btn) return { ok: false, why: 'no-btn' };
+            btn.click();
+            await new Promise(r => setTimeout(r, 700));
+            const nav = [...document.querySelectorAll('.settings-nav-item')]
+              .find(x => x.textContent.includes('AI 分析'));
+            if (!nav) return { ok: false, why: 'no-nav' };
+            nav.click();
+            await new Promise(r => setTimeout(r, 1200));
+            const card = document.getElementById('ai-selftest-card');
+            const rows = [...(card?.querySelectorAll('tr[data-step]') ?? [])];
+            return {
+              ok: Boolean(card),
+              visible: card ? card.checkVisibility() : false,
+              rows: rows.length,
+              statuses: rows.map(r => r.getAttribute('data-status')),
+              verdict: card?.querySelector('[data-testid="selftest-verdict"]')?.textContent ?? '',
+            };
+          })()`);
+
+          check('⑩ 自检卡片默认可见（不在折叠里）', () => ok(
+            persisted.ok === true && persisted.visible === true,
+            JSON.stringify(persisted),
+          ));
+
+          check('⑩ 刷新后仍有 8 行（读的是 latest 而不是内存）', () => ok(
+            persisted.rows === 8, `rows=${persisted.rows} statuses=${JSON.stringify(persisted.statuses)}`,
+          ));
+
+          check('⑩ 状态点随 status 变（至少一行 fail）', () => ok(
+            (persisted.statuses ?? []).includes('fail')
+            && new Set(persisted.statuses ?? []).size >= 2,
+            JSON.stringify(persisted.statuses),
+          ));
+
+          const copy = await cdp.evaluate(`(async () => {
+            window.__copied = null;
+            try {
+              Object.defineProperty(navigator, 'clipboard', {
+                value: { writeText: async (t) => { window.__copied = t; } }, configurable: true,
+              });
+            } catch { /* ignore */ }
+            const btns = [...document.querySelectorAll('#ai-selftest-card button')];
+            const b = btns.find(x => x.textContent.includes('复制报告'));
+            if (!b) return { ok: false, why: 'no-btn' };
+            b.click();
+            await new Promise(r => setTimeout(r, 500));
+            return { ok: true, text: window.__copied ?? '' };
+          })()`);
+
+          check('⑩ 复制报告产出非空 Markdown（含 ##）', () => ok(
+            copy.ok === true && typeof copy.text === 'string' && copy.text.includes('##') && copy.text.length > 40,
+            JSON.stringify(copy).slice(0, 200),
+          ));
+
+          // 测速表：没有上游 SSE 的话至少验"按钮在、点了不崩"
+          const benchUi = await cdp.evaluate(`(() => {
+            const btns = [...document.querySelectorAll('#ai-selftest-card button')];
+            return btns.map(b => b.textContent.trim());
+          })()`);
+          check('⑩ 三颗按钮都在（开始自检 / 测试模型速度 / 复制报告）', () => ok(
+            (benchUi ?? []).some((t) => t.includes('开始自检'))
+            && (benchUi ?? []).some((t) => t.includes('测试模型速度'))
+            && (benchUi ?? []).some((t) => t.includes('复制报告')),
+            JSON.stringify(benchUi),
+          ));
+        }
+      }
+    } finally {
+      try { br.close(); } catch { /* ignore */ }
+    }
+  }
 }
 
 // 先清理再总结：理由见 teardown 的定义处

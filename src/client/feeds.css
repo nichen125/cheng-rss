@@ -1660,3 +1660,57 @@
   margin-top: 2px;
 }
 .tree-loose-row .tree-caret { width: 15px; }
+
+/* ── AI 自检与测速（§15.30，v2.7）─────────────────────────
+   四色状态点是**语义色**而不是强调色：design-ui.md §2.1 允许饱和色表达
+   AI 的判断。这里必须四色可分辨 —— 灰阶在"通过/降级"之间分不出来，
+   而这两种状态的处理方式完全不同（后者不用管，前者要修）。 */
+.selftest-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 13px;
+}
+.selftest-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--fg-faint);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.selftest-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line-soft, var(--line));
+  vertical-align: top;
+}
+.selftest-table tr[data-status='fail'] { background: color-mix(in srgb, var(--err) 6%, transparent); }
+.selftest-table tr[data-status='warn'] { background: color-mix(in srgb, var(--warn) 7%, transparent); }
+
+.ai-dot {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.ai-dot-pass { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.ai-dot-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.ai-dot-fail { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
+.ai-dot-skip { color: var(--fg-faint); background: color-mix(in srgb, var(--fg-faint) 12%, transparent); }
+
+.selftest-raw { margin-top: 6px; }
+.selftest-raw summary { cursor: pointer; color: var(--fg-faint); font-size: 12px; }
+.selftest-raw pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 160px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--bg-soft, rgba(0, 0, 0, 0.03));
+  border-radius: 6px;
+}

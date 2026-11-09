@@ -126,6 +126,56 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
     });
   });
 
+  /**
+   * 跑一次 AI 自检（v2.7，§8.10 / §15.30）。
+   *
+   * 同步执行：用户点了就在等，8 步 10~60 秒。与 `POST /entries/:id/analyze`
+   * 同理由 —— 排队的轮询体验比"等 30 秒"更差。
+   *
+   * 会真的写库：`ai_selftest_runs`、`ai_usage`，以及第 7/8 步真的分析并总结
+   * 一篇条目。这不是污染 —— 自检要回答的正是"我的库现在能不能出结果"。
+   */
+  r.post('/settings/ai/selftest', async (c) => {
+    const uid = requireUserId(c);
+    const { aiForUser, runtimeAiBase } = await import('../ai/service.ts');
+    const { runSelfTest } = await import('../ai/selftest.ts');
+    const base = runtimeAiBase(ctx.cfg);
+    const { client } = aiForUser(ctx.dbh.db, uid, base);
+    const report = await runSelfTest({ db: ctx.dbh.db, userId: uid, base, client });
+    return c.json(report);
+  });
+
+  /**
+   * 最近一次自检。首屏渲染用 —— 刷新后结果还在，是"便于查看"的最低要求。
+   *
+   * 路由顺序：这条必须注册在**任何** `/settings/ai/selftest/:x` 之前。
+   * 本项目在 `/digests/status` 与 `/entries/:id` 上各踩过一次同款坑
+   * （§9.5 / §7.5）：反过来的 404 措辞与"还没有结果"极像，看起来不像 bug。
+   */
+  r.get('/settings/ai/selftest/latest', async (c) => {
+    const uid = requireUserId(c);
+    const { readLatestRun } = await import('../ai/selftest.ts');
+    const run = readLatestRun(ctx.dbh.db, uid);
+    return c.json(run ?? { id: null, verdict: null, steps: [] });
+  });
+
+  /**
+   * 积压重跑（v2.7，§8.10）。只复位 **AI 侧**的失败，不动与 AI 无关的那些。
+   *
+   * 为什么必须有这个入口：修好投递方式不会让 795 条积压自己消失。
+   * 判据与入队用同一个函数（`countOrphanAnalyze`），否则按钮说 N 条而实际
+   * 入队 0 条 —— 而用户只会看那一个数字。
+   */
+  r.post('/settings/ai/retry-failed', async (c) => {
+    const uid = requireUserId(c);
+    const { resetAiFailures } = await import('../ai/backfill.ts');
+    const { countOrphanAnalyze, enqueueOrphanAnalyze } = await import('../ai/backfill.ts');
+    const r = resetAiFailures(ctx.dbh.db, uid);
+    const remaining = countOrphanAnalyze(ctx.dbh.db);
+    const queued = enqueueOrphanAnalyze(ctx.dbh.db);
+    return c.json({ ...r, queued, remaining });
+  });
+
   r.patch('/settings/ai', async (c) => {
     const uid = requireUserId(c);
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;

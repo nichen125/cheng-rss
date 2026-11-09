@@ -81,3 +81,63 @@ export function enqueueOrphanAnalyze(db: DatabaseSync, limit = ANALYZE_BACKFILL_
   }
   return queued;
 }
+
+/**
+ * 复位「AI 侧」的失败条目，让它们重新可被 backfill 认领（v2.7，§8.10）。
+ *
+ * 起因：v2.7 修好了投递方式与降级链，但那些已经判死（`stage='failed'`）的
+ * 315 条不会自己消失 —— 而 `ORPHAN_ANALYZE_WHERE` 明确排除 `failed`。
+ * 所以修完代码若不复位，用户会看到"修好了但一条都没开始跑"。
+ *
+ * ## 只复位 AI 侧的
+ *
+ *   schema / bad-json / empty / reasoning-only / http-*  → 复位
+ *   fetch-failed（正文抓取失败）、no-improvement（提取质量不足）→ **不动**
+ *
+ * 后者与模型无关，复位只会把抓取失败的 URL 再抓一遍、把本来就太短的正文
+ * 再解析一遍，白花时间。
+ *
+ * ## 顺手清 dead 任务
+ *
+ * `ORPHAN_ANALYZE_WHERE` 同样排除 `status='dead'` 的 analyze 任务（那是
+ * 重试到上限的）。`http-503` 这种可重试的失败会一路重试到 dead —— 于是
+ * "复位了 stage 但入队 0 条"，按钮说 N 条而实际什么也没发生。
+ * 而这批数据恰恰是本期最需要修的那批。
+ */
+export function resetAiFailures(db: DatabaseSync, userId: string): {
+  reset: number; clearedDeadJobs: number;
+} {
+  const AI_FAILURE_PREFIXES = ['schema:', 'bad-json:', 'empty:', 'reasoning-only:', 'http-'];
+  const where = AI_FAILURE_PREFIXES.map(() => 'stage_error LIKE ?').join(' OR ');
+
+  // 先取出要复位的 id：清 dead 任务需要按 id 精确删，不能用同一条件再删一次
+  // （那时的 stage 已经变了，条件不再成立）
+  const ids = (db.prepare(`
+    SELECT id FROM entries
+     WHERE user_id = ? AND stage = 'failed' AND (${where})
+  `).all(userId, ...AI_FAILURE_PREFIXES.map((p) => `${p}%`)) as { id: string }[]).map((r) => r.id);
+
+  if (ids.length === 0) return { reset: 0, clearedDeadJobs: 0 };
+
+  let reset = 0;
+  let clearedDeadJobs = 0;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const upd = db.prepare(`
+      UPDATE entries SET stage = 'extracted', stage_error = NULL
+       WHERE id = ? AND stage = 'failed'
+    `);
+    for (const id of ids) reset += Number(upd.run(id).changes ?? 0);
+
+    const del = db.prepare(`
+      DELETE FROM jobs WHERE kind = 'analyze' AND status = 'dead' AND dedupe_key = ?
+    `);
+    for (const id of ids) clearedDeadJobs += Number(del.run(`analyze:${id}`).changes ?? 0);
+
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  return { reset, clearedDeadJobs };
+}

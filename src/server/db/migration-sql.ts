@@ -20,6 +20,7 @@ declare const __SQL_0005_DIGEST_CITES__: string | undefined;
 declare const __SQL_0006_SUMMARIES__: string | undefined;
 declare const __SQL_0007_FEED_SORT__: string | undefined;
 declare const __SQL_0008_DIGEST_DAY_KEY_BACKFILL__: string | undefined;
+declare const __SQL_0009_AI_SELFTEST__: string | undefined;
 
 /**
  * 按文件名查内嵌 SQL。
@@ -46,6 +47,8 @@ function bundledSqlFor(name: string): string | null {
     case '0008_digest_day_key_backfill.sql':
       return typeof __SQL_0008_DIGEST_DAY_KEY_BACKFILL__ === 'string'
         ? __SQL_0008_DIGEST_DAY_KEY_BACKFILL__ : null;
+    case '0009_ai_selftest.sql':
+      return typeof __SQL_0009_AI_SELFTEST__ === 'string' ? __SQL_0009_AI_SELFTEST__ : null;
     default:
       return null;
   }

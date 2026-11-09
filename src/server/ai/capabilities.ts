@@ -95,15 +95,22 @@ function normalizeBase(u: string): string {
 }
 
 /**
- * 读取某用户最近一次自检的画像。
+ * 读取某用户最近一次**真正测到能力**的自检画像。
+ *
+ * `capabilities IS NOT NULL` 这个条件是关键：没 key 的那次自检只跑完第一步，
+ * 它落库的 capabilities 是 NULL。若不加这个条件，读到的就是那行 NULL，
+ * 于是"昨天测出的 dropped"被一份半截结果盖掉，用户看到"今天又不行了"
+ * 而实际上什么都没变。NULL 在这里的语义是"这次没测"，不是"测出来是未知"。
  *
  * 没有行、JSON 坏了、结构不对都返回 null —— 上层据此走"未知即自愈"。
  * 这个函数刻意不抛：画像坏了不该让整条分析链路起不来。
  */
 export function readCapabilities(db: DatabaseSync, userId: string): AiCapabilities | null {
-  const row = db.prepare(
-    'SELECT capabilities FROM ai_selftest_runs WHERE user_id = ? ORDER BY started_at DESC LIMIT 1',
-  ).get(userId) as { capabilities: string | null } | undefined;
+  const row = db.prepare(`
+    SELECT capabilities FROM ai_selftest_runs
+     WHERE user_id = ? AND capabilities IS NOT NULL
+     ORDER BY started_at DESC LIMIT 1
+  `).get(userId) as { capabilities: string | null } | undefined;
   if (!row?.capabilities) return null;
   try {
     const v = JSON.parse(row.capabilities) as AiCapabilities;

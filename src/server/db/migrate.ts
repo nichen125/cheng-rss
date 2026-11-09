@@ -20,6 +20,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 6, name: 'summaries', file: '0006_summaries.sql' },
   { version: 7, name: 'feed_sort', file: '0007_feed_sort.sql' },
   { version: 8, name: 'digest_day_key_backfill', file: '0008_digest_day_key_backfill.sql' },
+  { version: 9, name: 'ai_selftest', file: '0009_ai_selftest.sql' },
 ];
 
 export const CURRENT_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

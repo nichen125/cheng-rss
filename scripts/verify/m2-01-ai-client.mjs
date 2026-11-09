@@ -301,6 +301,34 @@ await script([
   ));
 }
 
+// 额度/账号用尽：中转网关常把它伪装成 429/503，正文里写着 no available accounts。
+// 认不出来就会和"上游真的坏了"混成一类，用户既看不出该充值，也无法只挑这一批重跑。
+//
+// 注意要排满 3 个响应：5xx 是**可重试**的，客户端会重试两次；只排一个的话
+// 后两次会落到 mock 的默认 500，断言的 kind 变成 http-500（第一次就这么红的）。
+const quota503 = { status: 503, body: { error: { message: 'no available accounts, please try later' } } };
+await script([quota503, quota503, quota503]);
+{
+  const { client } = mkClient();
+  const r = await client.chatJson(CHAT_OPTS);
+  check('503 正文说 no available accounts → 归成 upstream-quota（不是 http-503）', () => ok(
+    r.ok === false && r.failure.kind === 'upstream-quota',
+    `kind=${r.failure?.kind}`,
+  ));
+}
+
+// 反过来说：503 正文没有额度字样，仍然是 http-503 —— 分类不能把两者混了
+const plain503 = { status: 503, body: { error: { message: 'upstream connect error or disconnect' } } };
+await script([plain503, plain503, plain503]);
+{
+  const { client } = mkClient();
+  const r = await client.chatJson(CHAT_OPTS);
+  check('503 正文与额度无关时仍是 http-503（分类不吞掉普通 5xx）', () => ok(
+    r.ok === false && r.failure.kind === 'http-503',
+    `kind=${r.failure?.kind}`,
+  ));
+}
+
 // ── ⑤ 传输层重试边界 ────────────────────────────────────────
 group('2.1 AI 客户端 · 传输层重试');
 

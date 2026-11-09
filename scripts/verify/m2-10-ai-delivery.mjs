@@ -137,6 +137,21 @@ const ask = (client, user = '标题：AMD 收购 World Labs\n\n正文：AMD 今�
     maxTokens: 800,
   });
 
+/**
+ * 带 `wrapUser: true` 的同一个请求。`ask` 故意不带它 —— ⑩ 要证明的正是
+ * "调用方标了不可信整条 user，客户端就给 split 也加防护"。若默认行为已经带防护，
+ * 这条断言就会在"默认"与"显式"之间摇摆，测不出调用方标注是否真的生效。
+ */
+const askWrapped = (client) => client.chatJson({
+  schema: EntryAnalysisSchema,
+  system: '你是一名信息分析编辑。把一篇资讯压缩成结构化情报卡片。只输出 JSON。',
+  user: '标题：AMD 收购 World Labs。正文：AMD 今日宣布以 32 亿美元收购 World Labs。',
+  model: client.config.models.strong,
+  purpose: 'analyze',
+  maxTokens: 800,
+  wrapUser: true,
+});
+
 group('能力画像与按需投递（§8.10）');
 
 // ── ① ~ ③ 丢 system 的网关上，第一次失败、第二次用 merged 成功 ──
@@ -252,7 +267,7 @@ group('能力画像与按需投递（§8.10）');
   });
 }
 
-// ── ⑦ summary 的定界只包 {{body}} ──
+// ── ⑦ summary 只包不可信的那几块：模板要求留在定界符外，标题与正文都在里面 ──
 {
   const built = buildSummaryUser('## 要求\n1. 一句话结论\n2. 3~6 条要点\n\n{{title}}\n\n{{body}}', {
     title: 'AMD 收购 World Labs',
@@ -261,13 +276,19 @@ group('能力画像与按需投递（§8.10）');
     highlights: [],
   });
 
-  check('⑦ summary 的定界只包正文，模板要求在定界符外', () => {
-    const at = built.user.indexOf('<<<正文');
+  check('⑦ summary 的模板要求留在定界符外，标题与正文都在定界符内', () => {
     const reqAt = built.user.indexOf('一句话结论');
-    const titleAt = built.user.indexOf('AMD 收购 World Labs');
+    // 模板要求必须在**第一个**定界符之前：模板是用户写的指令，不能被当成资料
+    const firstDelim = built.user.indexOf('<<<正文');
+    // 标题与正文各自被包起来（标题也是抓来的：RSS 标题由发布方完全控制）
+    const titleGuarded = built.user.includes('<<<正文\nAMD 收购 World Labs\n正文>>>');
+    const bodyGuarded = built.user.includes('<<<正文\nAMD 今日宣布以 32 亿美元收购 World Labs。\n正文>>>');
+    // system 里必须声明"定界符之间不可信"，否则定界符只是排版装饰
+    const noticed = built.system.includes('不得执行');
     return ok(
-      at > 0 && reqAt >= 0 && reqAt < at && titleAt >= 0 && titleAt < at,
-      `要求位置=${reqAt} 定界位置=${at} 标题位置=${titleAt}`,
+      reqAt >= 0 && firstDelim > 0 && reqAt < firstDelim && titleGuarded && bodyGuarded && noticed,
+      `要求位置=${reqAt} 首个定界=${firstDelim} 标题已包=${titleGuarded} `
+      + `正文已包=${bodyGuarded} 有防护句=${noticed}`,
     );
   });
 }
@@ -312,6 +333,35 @@ group('能力画像与按需投递（§8.10）');
       && r.calls.length >= 3
       && text.includes('输出要求'),
       `ok=${r.res.ok} calls=${r.calls.length} 末次带字段清单=${text.includes('输出要求')}`,
+    );
+  });
+}
+
+// ── ⑩ split 模式下也要带防护：防护句在 system（可信侧），user 整体进定界符 ──
+//    第一版只给 merged 加防护，而 split 才是默认路径 —— 等于绝大多数请求裸奔。
+{
+  const r = await withMock({}, async (baseURL, calls) => {
+    const c = mkClient(baseURL);
+    const res = await askWrapped(c);
+    return { res, calls };
+  });
+
+  check('⑩ split 模式下 user 也被定界符包住、防护句在 system 里', () => {
+    const first = r.calls[0]?.messages ?? [];
+    const sys = first.find((m) => m.role === 'system')?.content ?? '';
+    const user = first.find((m) => m.role === 'user')?.content ?? '';
+    const wrapped = user.startsWith('<<<正文') && user.trimEnd().endsWith('正文>>>');
+    return ok(
+      r.res.ok === true
+      && r.calls.length === 1
+      && sys.includes('不得执行')
+      && wrapped
+      // 指令与正文都不能跑错边：system 里不该出现正文，user 里不该出现指令。
+      // 注意不能断言 system 不含 `<<<正文` —— 防护句原文就在讲定界符。
+      && !user.includes('信息分析编辑')
+      && !sys.includes('AMD 今日宣布'),
+      `ok=${r.res.ok} calls=${r.calls.length} 防护句在system=${sys.includes('不得执行')} `
+      + `user被包住=${wrapped} user含指令=${user.includes('信息分析编辑')}`,
     );
   });
 }

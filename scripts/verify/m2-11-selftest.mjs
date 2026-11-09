@@ -169,9 +169,13 @@ async function seedEntry(dataDir, userId) {
 
 const dirA = mkdtempSync(join(tmpdir(), 'cheng-rss-m211a-'));
 const dirB = mkdtempSync(join(tmpdir(), 'cheng-rss-m211b-'));
+const dirC = mkdtempSync(join(tmpdir(), 'cheng-rss-m211c-'));
 const up1 = await startUpstream();
 const appA = await startApp({ dataDir: join(dirA, 'data'), port: 43600, aiBase: up1.base });
 const appB = await startApp({ dataDir: join(dirB, 'data'), port: 43601, aiBase: up1.base });
+// 第三个实例专门测预算闸门：需要"这一次自检之内就已经超月额度"的库，
+// 和前两个实例的状态互不干扰
+const appC = await startApp({ dataDir: join(dirC, 'data'), port: 43602, aiBase: up1.base });
 
 // 清理必须**在 summary 之前主动调用**，不能只挂在 process.on('exit')：
 // mock 上游与两个被 spawn 的服务自己会让事件循环保持存活，于是进程永不退出、
@@ -179,17 +183,19 @@ const appB = await startApp({ dataDir: join(dirB, 'data'), port: 43601, aiBase: 
 function teardown() {
   killTree(appA.proc.pid);
   killTree(appB.proc.pid);
+  killTree(appC.proc.pid);
   up1.close();
-  for (const d of [dirA, dirB]) {
+  for (const d of [dirA, dirB, dirC]) {
     try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 }
 
-check('服务就绪（A：造了条目的库 / B：空库）', () => ok(
-  appA.up && appB.up, `A=${appA.up} B=${appB.up} ${appA.err.slice(0, 200)} ${appB.err.slice(0, 200)}`,
+check('服务就绪（A：造了条目的库 / B：空库 / C：超预算）', () => ok(
+  appA.up && appB.up && appC.up,
+  `A=${appA.up} B=${appB.up} C=${appC.up} ${appA.err.slice(0, 200)} ${appC.err.slice(0, 200)}`,
 ));
 
-if (appA.up && appB.up) {
+if (appA.up && appB.up && appC.up) {
   // 先写入 key（自检要用），再造条目
   await appA.req('/settings/ai/key', { method: 'PATCH', body: JSON.stringify({ apiKey: 'sk-selftest-123456' }) });
 
@@ -310,6 +316,46 @@ if (appA.up && appB.up) {
     );
   });
 
+  // ── ⑥b 预算已停：一步都不许发（判据 §5.5）──
+  //
+  // 第 2~6 步是裸 fetch（自检要测量、不能借道客户端的降级），于是它们
+  // 天然绕过 AiClient 的预算闸门。用户点一次自检就能在"已经停止"的账户上
+  // 再花五个请求的钱 —— 这条断言守的就是那个洞。
+  //
+  // 判据是"上游一个请求都没收到"，不是"结果是 skip"：后者可以被实现成
+  // "先发完再标 skip"，那跟没做闸门是一样的。
+  {
+    const db = openSqlite(join(dirC, 'data', 'app.db'));
+    const uidC = db.prepare('SELECT id FROM users LIMIT 1').get().id;
+    db.prepare(`
+      INSERT INTO ai_usage (user_id, purpose, model, in_tokens, out_tokens, cost_usd,
+                            latency_ms, ok, error, created_at)
+      VALUES (?, 'analyze', 'deepseek-flash', 100, 50, 0.01, 800, 1, NULL, ?)
+    `).run(uidC, Date.now());
+    db.close();
+
+    await appC.req('/settings/ai/key', { method: 'PATCH', body: JSON.stringify({ apiKey: 'sk-selftest-123456' }) });
+    // 月上限压到 0.001，而上一步刚花了 0.01 → level 必然是 stop
+    await appC.req('/settings/ai', {
+      method: 'PATCH',
+      body: JSON.stringify({ budget: { dailyUsd: 100, monthlyUsd: 0.001 } }),
+    });
+
+    const before = up1.calls.length;
+    const gated = await appC.req('/settings/ai/selftest', { method: 'POST' });
+    const sent = up1.calls.length - before;
+    const gs = gated.json?.steps ?? [];
+    const rest = gs.filter((s) => s.id !== 'key');
+
+    check('⑨ 预算已停时自检一步都不发：key 之外的七步全 skip 且上游零请求', () => ok(
+      gs.length === 8
+      && rest.length === 7
+      && rest.every((s) => s.status === 'skip' && /预算已停/.test(String(s.detail ?? '')))
+      && sent === 0,
+      `sent=${sent} steps=${gs.map((s) => `${s.id}:${s.status}`).join(' ')}`,
+    ));
+  }
+
   // ── ⑨ 积压重跑：只复位 AI 侧失败 + 清 dead 任务（判据 10/11）──
   //
   // 造四条：三条 AI 侧失败（其中一条带 dead 的 analyze 任务）+ 一条抓取失败。
@@ -328,6 +374,11 @@ if (appA.up && appB.up) {
     mk('e_rf_empty', 'empty: 模型返回空内容', 'r2');
     mk('e_rf_dead', 'http-503: all accounts are temporarily unavailable', 'r3');
     mk('e_rf_fetch', 'fetch-failed: 原文网络错误: fetch failed', 'r4');
+    // v2.7 补上的两类前缀。它们是评审指出来的漏项：timeout / network 同样是
+    // "这个网关当时不行"，upstream-quota 是"额度用尽了" —— 三者都该重跑。
+    // 不写这两条夹具，前缀表少写了也测不出来。
+    mk('e_rf_quota', 'upstream-quota: HTTP 503: no available accounts', 'r5');
+    mk('e_rf_timeout', 'timeout: 请求超过 60000ms 未返回', 'r6');
 
     // 给第三条造一条 dead 的 analyze 任务（模拟"重试到上限"）。
     // jobs 没有 user_id 列 —— 归属由 payload.entryId 表达
@@ -353,10 +404,12 @@ if (appA.up && appB.up) {
       };
     })();
 
-    check('⑨ 复位只动 AI 侧失败：三条变 extracted，fetch-failed 不动', () => ok(
+    check('⑨ 复位只动 AI 侧失败：AI 侧全部变 extracted，fetch-failed 不动', () => ok(
       after.byId.e_rf_schema?.stage === 'extracted' && after.byId.e_rf_schema?.stage_error === null
       && after.byId.e_rf_empty?.stage === 'extracted'
       && after.byId.e_rf_dead?.stage === 'extracted'
+      && after.byId.e_rf_quota?.stage === 'extracted'
+      && after.byId.e_rf_timeout?.stage === 'extracted'
       && after.byId.e_rf_fetch?.stage === 'failed',
       JSON.stringify(after.byId),
     ));
@@ -462,6 +515,25 @@ if (appA.up && appB.up) {
             JSON.stringify(persisted.statuses),
           ));
 
+          // 结论条的颜色必须与步骤状态**一致**：只要有降级就涂绿，
+          // 用户会以为"没问题" —— 而他来跑自检就是为了看见降级。
+          // 这里不硬编码某一个颜色，而是按 DOM 里的 data-status 推期望值，
+          // 否则换一组夹具就会假红。
+          const levelUi = await cdp.evaluate(`(() => {
+            const card = document.getElementById('ai-selftest-card');
+            const lv = card?.querySelector('.ai-level');
+            const sts = [...(card?.querySelectorAll('tr[data-step]') ?? [])]
+              .map(r => r.getAttribute('data-status'));
+            return { cls: lv ? lv.className : '', statuses: sts };
+          })()`);
+          check('⑩ 结论条配色与步骤状态一致（有 fail 红 / 只有降级黄 / 全绿才绿）', () => {
+            const sts = levelUi?.statuses ?? [];
+            const want = sts.includes('fail') ? 'ai-level-stop'
+              : sts.some((s) => s === 'warn' || s === 'skip') ? 'ai-level-warn'
+                : 'ai-level-ok';
+            return ok(String(levelUi?.cls ?? '').includes(want), `cls=${levelUi?.cls} 期望含 ${want}`);
+          });
+
           const copy = await cdp.evaluate(`(async () => {
             window.__copied = null;
             try {
@@ -493,6 +565,56 @@ if (appA.up && appB.up) {
             && (benchUi ?? []).some((t) => t.includes('复制报告')),
             JSON.stringify(benchUi),
           ));
+
+          // 测速表：只验"按钮在"是假的 —— 需求原话的一半是"测速结果便于查看"，
+          // 而路由回的是 { results }、UI 若读成 { rows } 会静默渲染出空表，
+          // 看起来就像"没有数据"。所以真点一次，验表格有行。
+          // 这个 mock 不认 stream（回普通 JSON），正好顺带验
+          // "网关不支持流式时首字列显示 —、而不是拿总耗时冒充"。
+          const benchFlow = await cdp.evaluate(`(async () => {
+            const card = document.getElementById('ai-selftest-card');
+            const b = [...card.querySelectorAll('button')]
+              .find(x => x.textContent.includes('测试模型速度'));
+            if (!b) return { ok: false, why: 'no-btn' };
+            b.click();
+            for (let i = 0; i < 150; i++) {
+              const t = card.querySelector('[data-testid="bench-table"]');
+              if (t) {
+                const rows = [...t.querySelectorAll('tbody tr')];
+                return {
+                  ok: true,
+                  rows: rows.length,
+                  cells: rows[0] ? [...rows[0].querySelectorAll('td')].map(td => td.textContent.trim()) : [],
+                  text: t.textContent,
+                };
+              }
+              await new Promise(r => setTimeout(r, 200));
+            }
+            return { ok: false, why: 'timeout' };
+          })()`);
+
+          check('⑪ 点「测试模型速度」后表格真的出现行（不是空表）', () => ok(
+            benchFlow.ok === true && benchFlow.rows >= 1,
+            JSON.stringify(benchFlow).slice(0, 300),
+          ));
+
+          check('⑪ 上游不认 stream 时首字列写 —（不拿总耗时冒充 TTFT）', () => ok(
+            benchFlow.ok === true && String(benchFlow.text ?? '').includes('—'),
+            JSON.stringify(benchFlow.cells ?? []),
+          ));
+
+          // 成功率列：1/3 成功与 3/3 成功都会出中位数，不显示就是骗人。
+          // 同时验"总耗时没被测到时写 —"——全失败时 median.totalMs 是 0，
+          // 渲染成「0 ms」会看起来像"快得不可思议"。
+          check('⑪ 测速表带成功率列，且没测到的总耗时写 —（不写 0 ms）', () => {
+            const cells = benchFlow.cells ?? [];
+            const rate = cells.find((c) => /\d+\/\d+ 次成功/.test(String(c)));
+            const dashCells = cells.filter((c) => String(c).trim() === '—').length;
+            return ok(
+              Boolean(rate) && dashCells >= 1,
+              `cells=${JSON.stringify(cells)}`,
+            );
+          });
         }
       }
     } finally {

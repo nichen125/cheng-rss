@@ -83,8 +83,14 @@ const aiSrv = createServer((req, res) => {
     }
 
     if (purpose === 'summary') {
-      // 把 user 里"标题："那一行抠出来回显，便于断言"这条总结对应哪一篇"
-      const t = /标题：(.+)/.exec(user)?.[1] ?? '(无标题)';
+      // 把 user 里"标题："那一行抠出来回显，便于断言"这条总结对应哪一篇"。
+      //
+      // v2.7 起标题被包进了不可信定界符（`标题：<<<正文\n<标题>\n正文>>>`，
+      // 因为 RSS 标题由发布方完全可控），所以这里要穿过定界符再取 ——
+      // 直接 `/标题：(.+)/` 只会拿到定界符本身。
+      const t = /标题：\s*<<<正文\s*\n([\s\S]*?)\n\s*正文>>>/.exec(user)?.[1]
+        ?? /标题：(.+)/.exec(user)?.[1]
+        ?? '(无标题)';
       res.writeHead(200);
       return res.end(JSON.stringify(chatBody(
         `## 结论\n${t} 讲的是存储层数与容量。\n\n## 要点\n- 232 层堆叠\n- 单颗 1Tb\n\n---\n\n收尾一句。`,
@@ -317,8 +323,13 @@ db.close();
   const st = await aiState();
   const u = String(st.log?.[0]?.user ?? '');
 
-  check('④ 模板里的 {{title}} 被替换成真实标题', () => {
-    return ok(u.includes('标题：存储行业的长文'), u.slice(0, 200));
+  check('④ 模板里的 {{title}} 被替换成真实标题（且在定界符内）', () => {
+    // v2.7 起标题与正文都包进 `<<<正文 … 正文>>>`：RSS 标题由发布方完全可控，
+    // 原样进指令区等于把"忽略以上要求"直接递给模型。
+    return ok(
+      u.includes('标题：<<<正文\n存储行业的长文\n正文>>>'),
+      u.slice(0, 200),
+    );
   });
   check('④ 正文确实被喂进去了（含正文里的字样）', () => {
     return ok(u.includes('存储行业的技术演进'), `user 长度=${u.length}`);

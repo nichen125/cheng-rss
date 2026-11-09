@@ -613,16 +613,36 @@ function finish(
   return report;
 }
 
-function buildVerdict(steps: StepResult[], caps: AiCapabilities | null): string {
+/**
+ * 一句话结论。导出是为了能被 m2-11 直接断言：这句是**用户唯一必读的一行**，
+ * 它说错（例如在 summary 实际失败时说"仍能出结果"）比少说一句更糟。
+ */
+export function buildVerdict(steps: StepResult[], caps: AiCapabilities | null): string {
   const byId = Object.fromEntries(steps.map((s) => [s.id, s]));
   const fails = steps.filter((s) => s.status === 'fail');
   const warns = steps.filter((s) => s.status === 'warn');
   const dropped = Object.values(caps?.models ?? {}).some((m) => m.systemRole === 'dropped');
 
   if (byId.key?.status === 'fail') return '没有可用的 API key，自检没跑起来';
+
   if (byId.system?.status === 'fail' && dropped) {
-    return '网关丢弃 system 消息 —— 已自动改为单条投递，分析与简报仍能出结果，但提示词里的角色设定不会生效';
+    // 这句曾经直接写"分析与简报仍能出结果"，但那是**假设**：
+    // 实测这台网关丢掉 system 之后，analyze 能过、summary 仍然 empty
+    // （合并投递 + 思考吃掉预算）。结论如果比事实乐观，用户会照着它
+    // 以为一切正常 —— 所以按真实步骤状态说话。
+    const analyzeOk = byId.analyze?.status === 'pass';
+    const summaryOk = byId.summary?.status === 'pass';
+    const tail = '提示词里的角色设定（system）不会生效';
+    if (analyzeOk && summaryOk) {
+      return `网关丢弃 system 消息 —— 已自动改为单条投递，分析与简报仍能出结果，但${tail}`;
+    }
+    const broken = [
+      analyzeOk ? null : '分析',
+      summaryOk ? null : '总结',
+    ].filter(Boolean).join('与');
+    return `网关丢弃 system 消息 —— 已自动改为单条投递，但${broken}这一步仍然失败；${tail}`;
   }
+
   if (byId.analyze?.status === 'pass' && byId.summary?.status === 'pass' && fails.length === 0) {
     return warns.length > 0
       ? `链路可用，但有 ${warns.length} 项降级（${warns.map((w) => w.title).join('、')}）`

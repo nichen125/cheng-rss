@@ -9,6 +9,8 @@
 //   ⑤ 没 key 时 key 步 fail、其余 skip，且**上一次的 dropped 画像不被抹掉**
 //   ⑥ 库里没有可用条目时 analyze/summary 两步 skip 并说明原因
 //   ⑦ 自检产生 purpose 含 selftest 的 ai_usage 行
+//   ⑧ 自检八步在界面上真的渲染（表格行 / 结论条 / 按钮 / 测速 / 复制）
+//   ⑨ 结论句不得比事实乐观：system 被丢弃且 summary 失败时不许说"仍能出结果"
 //
 // ## 这个脚本守的是什么
 //
@@ -621,6 +623,40 @@ if (appA.up && appB.up && appC.up) {
       try { br.close(); } catch { /* ignore */ }
     }
   }
+}
+
+// ── ⑫ 结论句不能说比事实乐观的话 ──
+//
+// 线上实测：这台网关丢掉 system 后，analyze 能过、summary 仍然 empty
+// （合并投递 + 思考吃满预算）。旧结论句在这种情况下写的是
+// "分析与简报仍能出结果" —— 一句断言式的乐观，用户照着它就不会去查
+// 简报为什么一直是空的。所以结论必须按**真实步骤状态**分叉。
+{
+  const { buildVerdict } = await import('../../src/server/ai/selftest.ts');
+  const caps = { models: { m: { systemRole: 'dropped' } } };
+  const step = (id, status, title = id) => ({ id, title, status, detail: 'x' });
+  const dropped = (analyze, summary) => buildVerdict(
+    [
+      step('key', 'pass'),
+      step('system', 'fail', 'system 角色是否生效'),
+      step('analyze', analyze, '真实分析一篇'),
+      step('summary', summary, '真实总结一篇'),
+    ],
+    caps,
+  );
+
+  check('⑫ system 被丢弃且 summary 也失败时，结论不写"仍能出结果"', () => {
+    const v = dropped('pass', 'fail');
+    return ok(
+      !v.includes('仍能出结果') && /总结/.test(v),
+      `verdict=${v}`,
+    );
+  });
+
+  check('⑫ system 被丢弃但分析/总结都过时，才说"仍能出结果"', () => {
+    const v = dropped('pass', 'pass');
+    return ok(v.includes('仍能出结果'), `verdict=${v}`);
+  });
 }
 
 // 先清理再总结：理由见 teardown 的定义处

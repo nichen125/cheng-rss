@@ -186,8 +186,19 @@ export function DigestPage(props: DigestPageProps) {
       <section className="digest-reader">
         {!openId && (
           <div className="reader-placeholder">
-            <h2>选一份简报</h2>
-            <p>左栏选日期。没有简报时点「现在生成」。</p>
+            {items.length === 0 ? (
+              <>
+                {/* 没有任何简报时，左栏根本没有日期可选，"左栏选日期"
+                    是把用户指向一个不存在的东西。这里直接讲下一步动作。 */}
+                <h2>还没有可读的简报</h2>
+                <p>点左上角「现在生成」，或在配置里确认自动生成时间。</p>
+              </>
+            ) : (
+              <>
+                <h2>选一份简报</h2>
+                <p>左栏选日期。</p>
+              </>
+            )}
           </div>
         )}
         {openId && detailLoading && <div className="reader-loading"><span className="spinner" /></div>}
@@ -236,37 +247,42 @@ export function DigestPage(props: DigestPageProps) {
             {/* 事件卡片：每个引用事件一条，含一致/分歧 */}
             {(detail.clusters ?? []).length > 0 && (
               <section className="digest-clusters">
-                <h2 className="digest-section-head">今日事件</h2>
+                <h2 className="digest-section-head">
+                  今日事件
+                  <span className="digest-section-count">{detail.clusters.length}</span>
+                </h2>
                 {(detail.clusters ?? []).map((c) => (
                   <div className="digest-cluster" key={c.id} data-missing={c.missing ? '1' : '0'}>
-                    <div className="digest-cluster-head">
-                      <span className="digest-cluster-index">[{c.index}]</span>
+                    {/* 序号独立成一列：它与正文里的 [n] 是同一条竖线，
+                        点正文脚注时眼睛能直接落回这里 */}
+                    <span className="digest-cluster-index">[{c.index}]</span>
+                    <div className="digest-cluster-body">
                       <h3 className="digest-cluster-title">{c.title}</h3>
-                      <span className="digest-cluster-meta">
+                      <div className="digest-cluster-meta">
                         {c.entry_count ?? '?'} 篇 · {c.source_count ?? '?'} 个来源
-                      </span>
+                      </div>
+                      {c.summary && <p className="digest-cluster-summary">{c.summary}</p>}
+                      {c.consensus.length > 0 && (
+                        <div className="digest-consensus">
+                          <span className="digest-tag">一致</span>
+                          {c.consensus.join('；')}
+                        </div>
+                      )}
+                      {c.conflicts.map((cf, i) => (
+                        <div className="digest-conflict" key={i}>
+                          <span className="digest-tag">分歧</span>
+                          {cf.claim}
+                          {cf.sources.length > 0 && (
+                            <span className="digest-conflict-src">（{cf.sources.join(' vs ')}）</span>
+                          )}
+                        </div>
+                      ))}
+                      {c.missing && (
+                        <div className="digest-cluster-gone">
+                          这件事的详细数据已被清理（简报保留当时的引用）
+                        </div>
+                      )}
                     </div>
-                    {c.summary && <p className="digest-cluster-summary">{c.summary}</p>}
-                    {c.consensus.length > 0 && (
-                      <div className="digest-consensus">
-                        <span className="digest-tag">一致</span>
-                        {c.consensus.join('；')}
-                      </div>
-                    )}
-                    {c.conflicts.map((cf, i) => (
-                      <div className="digest-conflict" key={i}>
-                        <span className="digest-tag">分歧</span>
-                        {cf.claim}
-                        {cf.sources.length > 0 && (
-                          <span className="digest-conflict-src">（{cf.sources.join(' vs ')}）</span>
-                        )}
-                      </div>
-                    ))}
-                    {c.missing && (
-                      <div className="digest-cluster-gone">
-                        这件事的详细数据已被清理（简报保留当时的引用）
-                      </div>
-                    )}
                   </div>
                 ))}
               </section>
@@ -277,14 +293,29 @@ export function DigestPage(props: DigestPageProps) {
               <section className="digest-wr-section">
                 <h2 className="digest-section-head">值得一读</h2>
                 <ul className="digest-wr">
-                  {(detail.worthReading ?? []).map((w) => (
-                    <li key={w.id}>
-                      {w.title}
-                      {w.entryCount !== null && (
-                        <span className="muted"> · {w.entryCount} 篇</span>
-                      )}
-                    </li>
-                  ))}
+                  {(detail.worthReading ?? []).map((w) => {
+                    // 这件事如果也在正文引用里，就给一个与正文同款的 [n] ——
+                    // 用户读完正文想回头找它时，不用滚回去数脚注。
+                    const same = (detail.clusters ?? []).find((c) => c.id === w.id);
+                    return (
+                      <li key={w.id}>
+                        <span className="digest-wr-title">{w.title}</span>
+                        {same && (
+                          <button
+                            className={`digest-cite${activeCite === same.index ? ' active' : ''}`}
+                            onClick={() => setActiveCite(activeCite === same.index ? null : same.index)}
+                            title="看这件事的细节"
+                          >
+                            {same.index}
+                          </button>
+                        )}
+                        <span className="digest-wr-meta">
+                          {w.entryCount !== null ? `${w.entryCount} 篇` : ''}
+                          {w.heat !== null && w.heat !== undefined ? ` · 热度 ${w.heat}` : ''}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             )}

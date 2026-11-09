@@ -1518,34 +1518,53 @@
   border-top: 1px solid var(--paper-line);
 }
 
+/* 区块小标题。曾经写了 text-transform: uppercase + letter-spacing ——
+ * 那是英文排版的习惯，中文既不会变大写，字距一拉开反而像"标题坏了"。
+ * 现在只用字号/颜色/一个小数字说"这里有 N 条"。 */
 .digest-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 14px;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.digest-section-count {
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-hover);
   color: var(--fg-faint);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
 }
 
+/* 一个事件 = 序号栏 + 正文栏。
+ *
+ * v2.8 之前 meta（"3 篇 · 2 个来源"）用 margin-left:auto 甩到最右，
+ * 标题一短，中间就空出一大片，看起来像表格没对齐；卡片之间只有
+ * 10px 间距，没有分界。现在序号独占一列（与正文的 [n] 同一条竖线），
+ * meta 落到标题下面一行小字，卡片之间用一道极浅的线分开。 */
 .digest-cluster {
-  padding: 12px 0 12px 12px;
-  border-left: 2px solid var(--border);
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 0 10px;
+  padding: 12px 0;
 }
-.digest-cluster + .digest-cluster { margin-top: 10px; }
+.digest-cluster + .digest-cluster { border-top: 1px solid var(--paper-line); }
 .digest-cluster[data-missing='1'] { opacity: 0.62; }
 
-.digest-cluster-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .digest-cluster-index {
+  padding-top: 1px;
   font-size: 11.5px;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
+
+.digest-cluster-body { min-width: 0; }
 
 .digest-cluster-title {
   margin: 0;
@@ -1555,10 +1574,10 @@
 }
 
 .digest-cluster-meta {
+  margin-top: 2px;
   font-size: 11.5px;
   color: var(--fg-faint);
-  margin-left: auto;
-  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .digest-cluster-summary {
@@ -1604,18 +1623,34 @@
   color: var(--fg-faint);
 }
 
+/* 「值得一读」：这三两件事是"低热度但值得看"，与上面的事件区不是一类东西，
+ * 所以不再复用圆点列表（那会看起来像又一张事件表）。改成编号小卡：
+ * 一条一行、标题为主、篇数/热度退到后面；如果它也在正文引用里，
+ * 就给一个可点的 [n] 与正文对齐。 */
 .digest-wr-section {
   margin-top: 28px;
   padding-top: 20px;
   border-top: 1px solid var(--paper-line);
 }
-.digest-wr { margin: 0; padding-left: 20px; }
+.digest-wr { list-style: none; margin: 0; padding: 0; }
 .digest-wr li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
   font-size: 13.5px;
-  line-height: 1.7;
-  margin-bottom: 5px;
+  line-height: 1.65;
 }
-.digest-wr .muted { color: var(--fg-faint); font-size: 12px; }
+.digest-wr li + li { margin-top: 6px; }
+.digest-wr-title { flex: 1; min-width: 0; }
+.digest-wr-meta {
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 
 .digest-foot {
   display: flex;

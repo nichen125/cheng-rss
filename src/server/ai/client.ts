@@ -1035,6 +1035,171 @@ export class AiClient {
     this.record(usage);
     return { ok: true, vec: Float32Array.from(arr), dim: arr.length, usage };
   }
+
+  // ── 测速（§8.11）──────────────────────────────────────────
+  //
+  // **只测速，不接业务。** 实测同一请求在流式下会把推理文本混进 `content`，
+  // 接进 analyze / summary 会让"模型没按契约回答"更难发现 —— 而那正是
+  // §8.10 刚花力气修的东西。这里只取时间戳与 token 计数，不解析结构。
+
+  /**
+   * 测一次：连通性 + 首字 + 总耗时 + 输出速度。
+   *
+   * 首字分两个数（`firstReasoningMs` / `firstContentMs`）：推理模型的
+   * `reasoning_content` 可能比 `content` 早一秒以上（实测 2.30s vs 3.53s）。
+   * 只报一个数字，用户会把"它在思考"读成"这模型很慢"，从而换掉一个其实没问题的模型。
+   */
+  async probeSpeed(opts: { model: string; prompt: string; maxTokens?: number }): Promise<BenchRun> {
+    const model = opts.model;
+    if (!this.hasKey()) {
+      return {
+        ok: false, streamed: false, ttftMs: null, firstReasoningMs: null,
+        firstContentMs: null, totalMs: 0, outTokens: null, tokensPerSec: null,
+        error: `没有配置 API key：环境变量 ${this.config.apiKeyEnv} 为空`,
+      };
+    }
+
+    const url = `${this.config.baseURL.replace(/\/+$/, '')}/chat/completions`;
+    const t0 = this.now();
+    let resp: Response;
+    try {
+      resp = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: opts.prompt }],
+          temperature: 0,
+          max_tokens: opts.maxTokens ?? 256,
+          stream: true,
+        }),
+        signal: AbortSignal.timeout(this.config.timeoutMs),
+      });
+    } catch (e) {
+      const name = (e as Error)?.name ?? '';
+      return {
+        ok: false, streamed: false, ttftMs: null, firstReasoningMs: null,
+        firstContentMs: null, totalMs: this.now() - t0, outTokens: null, tokensPerSec: null,
+        error: /abort|timeout/i.test(name) ? `超过 ${this.config.timeoutMs}ms 未返回` : (e as Error)?.message,
+      };
+    }
+
+    const isSse = /text\/event-stream/i.test(resp.headers.get('content-type') ?? '');
+
+    // 上游不认 stream（回普通 JSON）时如实说"没测到首字"。
+    // **不许拿总耗时冒充 TTFT** —— 那会让唯一的判据变成假的。
+    if (!isSse) {
+      const text = await safeText(resp);
+      const totalMs = this.now() - t0;
+      let outTokens: number | null = null;
+      try {
+        const j = JSON.parse(text) as { usage?: { completion_tokens?: number } };
+        outTokens = j.usage?.completion_tokens ?? null;
+      } catch { /* 非 JSON 也照样报总耗时 */ }
+      if (!resp.ok) {
+        return {
+          ok: false, streamed: false, ttftMs: null, firstReasoningMs: null,
+          firstContentMs: null, totalMs, outTokens, tokensPerSec: null,
+          error: `HTTP ${resp.status}: ${text.slice(0, 200)}`,
+        };
+      }
+      return {
+        ok: totalMs > 0, streamed: false, ttftMs: null, firstReasoningMs: null,
+        firstContentMs: null, totalMs, outTokens,
+        // 没有正文首字时间，就无法把"生成"与"等待"分开，速度不可算
+        tokensPerSec: null,
+      };
+    }
+
+    if (!resp.ok) {
+      const text = await safeText(resp);
+      return {
+        ok: false, streamed: true, ttftMs: null, firstReasoningMs: null,
+        firstContentMs: null, totalMs: this.now() - t0, outTokens: null, tokensPerSec: null,
+        error: `HTTP ${resp.status}: ${text.slice(0, 200)}`,
+      };
+    }
+
+    // 手解 SSE。不引库：这个格式只有 `data: <json>` 与 `data: [DONE]` 两种行。
+    let ttftMs: number | null = null;
+    let firstReasoningMs: number | null = null;
+    let firstContentMs: number | null = null;
+    let outTokens: number | null = null;
+    let buf = '';
+    const decoder = new TextDecoder();
+
+    try {
+      for await (const chunk of resp.body as unknown as AsyncIterable<Uint8Array>) {
+        if (ttftMs === null) ttftMs = this.now() - t0;
+        buf += decoder.decode(chunk, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (payload === '[DONE]' || payload === '') continue;
+          let j: Record<string, unknown>;
+          try { j = JSON.parse(payload) as Record<string, unknown>; } catch { continue; }
+
+          const u = j.usage as { completion_tokens?: number } | undefined;
+          if (u?.completion_tokens != null) outTokens = u.completion_tokens;
+
+          const choices = (j.choices ?? []) as {
+            delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown };
+          }[];
+          const delta = choices[0]?.delta;
+          if (!delta) continue;
+
+          const reasoning = readReasoning(delta);
+          if (reasoning !== '' && firstReasoningMs === null) firstReasoningMs = this.now() - t0;
+          if (typeof delta.content === 'string' && delta.content !== '') {
+            if (firstContentMs === null) firstContentMs = this.now() - t0;
+          }
+        }
+      }
+    } catch (e) {
+      return {
+        ok: false, streamed: true, ttftMs, firstReasoningMs, firstContentMs,
+        totalMs: this.now() - t0, outTokens, tokensPerSec: null,
+        error: `读取流时中断：${(e as Error)?.message ?? ''}`,
+      };
+    }
+
+    const totalMs = this.now() - t0;
+    // 速度用**生成阶段**（总耗时减去首个正文字的时间）而不是整个请求：
+    // 排队与首字等待不该记在"生成速度"上，否则慢的网关会显得"模型也慢"。
+    // 分子取 usage.completion_tokens 而**不从 content 长度推** —— 实测这台
+    // 网关会把推理文本混进 content，按字符数算会得出一个偏高的假速度。
+    const genMs = firstContentMs !== null ? totalMs - firstContentMs : 0;
+    const tokensPerSec = outTokens !== null && genMs > 0
+      ? Math.round((outTokens / (genMs / 1000)) * 10) / 10
+      : null;
+
+    return {
+      ok: firstContentMs !== null || outTokens !== null,
+      streamed: true, ttftMs, firstReasoningMs, firstContentMs,
+      totalMs, outTokens, tokensPerSec,
+    };
+  }
+}
+
+/** 一次测速的结果（§8.11）。数值用 null 表示"没测到"，不用 undefined */
+export interface BenchRun {
+  ok: boolean;
+  /** 上游是否真的给了 SSE。false 时 ttft 必为 null */
+  streamed: boolean;
+  /** 首字节：第一个 SSE 块到达的时间（含空块） */
+  ttftMs: number | null;
+  /** 首个 reasoning_content 的时间。推理模型通常早于正文 */
+  firstReasoningMs: number | null;
+  /** 首个 content 的时间 —— 用户真正看到的"打字机开始动" */
+  firstContentMs: number | null;
+  totalMs: number;
+  outTokens: number | null;
+  /** 输出速度：usage.completion_tokens / 生成阶段耗时 */
+  tokensPerSec: number | null;
+  error?: string;
 }
 
 function nextFormat(mode: FormatMode): FormatMode | undefined {

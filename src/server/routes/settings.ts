@@ -176,6 +176,35 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
     return c.json({ ...r, queued, remaining });
   });
 
+  /**
+   * 模型测速（v2.7，§8.11）。
+   *
+   * 缺省测配置里的 fast 与 strong（去重）。每个模型跑 3 次报中位数 ——
+   * 只跑一次等于报随机数（同一请求实测 2.5~5.8s）。
+   *
+   * **不落库**：速度是"当时"的属性，历史没有消费方（用户换模型/换网络之后
+   * 旧数字只会误导）。面板保留本次结果并可复制，刷新即丢，这是刻意的。
+   */
+  r.post('/settings/ai/bench', async (c) => {
+    const uid = requireUserId(c);
+    const body = await c.req.json().catch(() => ({})) as { models?: unknown };
+    const { aiForUser, runtimeAiBase } = await import('../ai/service.ts');
+    const { benchModels, BENCH_RUNS } = await import('../ai/bench.ts');
+    const { client } = aiForUser(ctx.dbh.db, uid, runtimeAiBase(ctx.cfg));
+
+    const asked = Array.isArray(body.models)
+      ? body.models.filter((m): m is string => typeof m === 'string' && m.trim() !== '')
+      : [];
+    const models = [...new Set(asked.length > 0
+      ? asked
+      : [client.config.models.fast, client.config.models.strong])];
+
+    if (models.length === 0) throw badRequest('没有可测的模型：配置里的 fast 与 strong 都是空的');
+
+    const results = await benchModels({ client, models, runs: BENCH_RUNS });
+    return c.json({ results });
+  });
+
   r.patch('/settings/ai', async (c) => {
     const uid = requireUserId(c);
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;

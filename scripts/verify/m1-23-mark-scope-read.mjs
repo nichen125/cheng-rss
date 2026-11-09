@@ -301,9 +301,19 @@ ws.addEventListener('message', (e) => {
     if (m.error) rej(new Error(m.error.message)); else res(m.result);
   }
 });
+// 每条命令带超时：CDP 应答如果永远不来（发给了内部页面、执行上下文被换掉），
+// 这里要变成一条可读的报错 —— 否则整套验收会静默停在这个脚本上 600s。
+const CDP_TIMEOUT_MS = 60000;
 const send = (method, params = {}) => new Promise((res, rej) => {
   const id = ++dseq;
-  pending.set(id, { res, rej });
+  const timer = setTimeout(() => {
+    pending.delete(id);
+    rej(new Error(`CDP 命令超时 ${CDP_TIMEOUT_MS}ms: ${method}`));
+  }, CDP_TIMEOUT_MS);
+  pending.set(id, {
+    res: (v) => { clearTimeout(timer); res(v); },
+    rej: (e) => { clearTimeout(timer); rej(e); },
+  });
   ws.send(JSON.stringify({ id, method, params }));
 });
 const ev = async (expr) => {

@@ -217,7 +217,10 @@ let target = null;
 for (let i = 0; i < 80; i++) {
   try {
     const list = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json();
-    target = list.find((t) => t.type === 'page');
+    // 只挑真正的网页。Edge 有时会先开一个 edge://sync-confirmation-dialog，
+    // 抓它会让后面的 CDP 应答永远不来（实测整套验收在这里挂死 600s）。
+    // 与 m1-23 用 --remote-debugging-port=0 同一理由：不要把浏览器内部页面当被测页面。
+    target = list.find((t) => t.type === 'page' && !/^(edge|chrome|devtools):/i.test(t.url ?? ''));
     if (target?.webSocketDebuggerUrl) break;
   } catch { /* not yet */ }
   await sleep(250);
@@ -244,9 +247,20 @@ ws.addEventListener('message', (e) => {
     if (m.error) rej(new Error(m.error.message)); else res(m.result);
   }
 });
+// 每条命令带超时：CDP 应答如果永远不来（发给了内部页面、执行上下文被换掉），
+// 这里要变成一条可读的报错 —— 否则整套验收会静默停在这个脚本上 600s。
+// 与 scripts/lib/cdp.mjs 同一策略。
+const CDP_TIMEOUT_MS = 60000;
 const send = (method, params = {}) => new Promise((res, rej) => {
   const id = ++seq;
-  pending.set(id, { res, rej });
+  const timer = setTimeout(() => {
+    pending.delete(id);
+    rej(new Error(`CDP 命令超时 ${CDP_TIMEOUT_MS}ms: ${method}`));
+  }, CDP_TIMEOUT_MS);
+  pending.set(id, {
+    res: (v) => { clearTimeout(timer); res(v); },
+    rej: (e) => { clearTimeout(timer); rej(e); },
+  });
   ws.send(JSON.stringify({ id, method, params }));
 });
 const ev = async (expr) => {

@@ -1923,6 +1923,36 @@ input::placeholder { color: var(--fg-faint); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .muted { color: var(--fg-faint); font-size: 13px; }
+
+/* 说明文字（v2.8）。
+ *
+ * .hint 在 29 处用到，但此前**一条基础样式都没有** —— 那些段落继承的是
+ * 浏览器默认 <p>：16px、与正文同色。于是设置页里"说明"比"内容"还显眼，
+ * 而它本该退后一层。这是"配置界面丑"的结构性原因之一：卡片标题 13.5px，
+ * 说明 16px，标题比说明还小。
+ *
+ * 放在 styles.css 而不是 feeds.css：feeds.css 里 .modal-sub、订阅页
+ * .add-panel .hint 各是同一优先级的专门覆盖，基础规则必须更早加载，
+ * 它们才能盖住。.auth-card .hint（下方）与 .hint.warn（mobile.css）
+ * 都是更高优先级，不受影响。
+ */
+.hint {
+  font-size: 12.5px;
+  line-height: 1.62;
+  color: var(--fg-dim);
+  margin: 0 0 10px;
+}
+/* 说明里的代码片段：之前是裸的等宽字，与正文同色同大小，读起来像
+ * 一句话里夹了半句乱码。做成浅底小块，只标"这是个名字/路径"。 */
+.hint code {
+  font-family: var(--mono);
+  font-size: 0.94em;
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-active);
+  color: var(--fg);
+}
+
 .row { display: flex; gap: 8px; align-items: center; }
 .grow { flex: 1; }
 

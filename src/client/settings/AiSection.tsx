@@ -72,6 +72,10 @@ const KEY_SOURCE_LABEL: Record<AiConfigView['keySource'], string> = {
   none: '未配置',
 };
 
+/** token 数：null/undefined 一律 —，别把"没测到"渲染成 0 */
+const tok = (v: number | null | undefined): string =>
+  v === null || v === undefined ? '—' : String(v);
+
 export function AiSection() {
   const [cfg, setCfg] = useState<AiConfigView | null>(null);
   const [stats, setStats] = useState<AiStats | null>(null);
@@ -93,7 +97,20 @@ export function AiSection() {
   // 服务端从不回显、且文件不进库与备份。
   const [newKey, setNewKey] = useState('');
   const [keyBusy, setKeyBusy] = useState(false);
-  const [testMsg, setTestMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  // 「测试连接」的结果。只留一行字是不够的：用户点它问的是"到底通不通、
+  // 慢不慢、卡在哪"，所以失败时也要有耗时与投递方式 —— 同样是 empty，
+  // 合并投递（网关丢了 system）和分角色投递的处置完全不同。
+  const [testMsg, setTestMsg] = useState<{
+    ok: boolean;
+    text: string;
+    model?: string;
+    latencyMs?: number;
+    delivery?: 'split' | 'merged';
+    inTokens?: number;
+    outTokens?: number;
+    costUsd?: number;
+    kind?: string;
+  } | null>(null);
 
   // 单篇总结的提示词（§8.9）
   const [promptDraft, setPromptDraft] = useState('');
@@ -154,15 +171,33 @@ export function AiSection() {
     try {
       const r = await api.testAiKey();
       if (r.ok) {
-        setTestMsg({ kind: 'ok', text: `连接正常（${r.model}）` });
+        setTestMsg({
+          ok: true,
+          // 结论行只说"通/不通 + 模型回了什么"。耗时、模型名、投递方式
+          // 放到下面的指标格里 —— 塞进一句话会让它变成读不完的长句。
+          text: `连接正常，模型回了「${(r.text ?? '').trim() || '…'}」`,
+          model: r.model,
+          latencyMs: r.latencyMs,
+          delivery: r.delivery,
+          inTokens: r.inTokens,
+          outTokens: r.outTokens,
+          costUsd: r.costUsd,
+        });
       } else {
         // 文案按 kind 分流：401 与 network 的处置完全不同，
         // 统一说"测试失败"等于什么都没说。
         const base = r.hint ?? r.failure?.message ?? '测试失败';
-        setTestMsg({ kind: 'err', text: `${base}${r.failure?.kind ? `（${r.failure.kind}）` : ''}` });
+        setTestMsg({
+          ok: false,
+          text: base,
+          model: r.model,
+          latencyMs: r.latencyMs,
+          delivery: r.delivery,
+          kind: r.failure?.kind,
+        });
       }
     } catch (e) {
-      setTestMsg({ kind: 'err', text: e instanceof ApiFailure ? e.message : '测试失败' });
+      setTestMsg({ ok: false, text: e instanceof ApiFailure ? e.message : '测试失败' });
     } finally {
       setKeyBusy(false);
     }
@@ -249,7 +284,7 @@ export function AiSection() {
         <p className="muted">
           条目入库后会自动排队做分类分级与向量化。这里放"用哪个 key、连哪个模型、
           花多少钱"。分类法与分级规则仍然不开放编辑（改了会让历史数据与新数据不可比），
-          但**单篇总结的提示词可以改** —— 它只影响你主动点的那一下。
+          但<strong>单篇总结的提示词可以改</strong> —— 它只影响你主动点的那一下。
         </p>
       </header>
 
@@ -281,22 +316,31 @@ export function AiSection() {
           </p>
         )}
 
+        {/* 四格里"花了多少 / 还剩多少额度"是主问题，调用次数是佐证。
+            原来四格字号一样，用户得先读标签才知道哪格重要；现在金额
+            单独放大一档，额度退成后面的小字 —— 一眼看到的是 $0.916，
+            而不是"今日花费 / 额度"这七个字。 */}
         <dl className="ai-kv">
-          <div>
-            <dt>今日花费 / 额度</dt>
+          <div className="ai-kv-primary">
+            <dt>今日花费</dt>
             <dd>
-              ${stats?.todayUsd?.toFixed(3) ?? '—'} / {stats?.dailyLimit ? `$${stats.dailyLimit}` : '不限'}
-              {stats && stats.dailyLimit > 0 && (
-                <span className="ai-bar" aria-hidden="true">
-                  <span style={{ width: `${pct(stats.todayUsd, stats.dailyLimit)}%` }} />
-                </span>
-              )}
+              <span className="ai-kv-num">${stats?.todayUsd?.toFixed(3) ?? '—'}</span>
+              <span className="ai-kv-of">/ {stats?.dailyLimit ? `$${stats.dailyLimit}` : '不限'}</span>
             </dd>
+            {/* 进度条放在 dd 外面：dd 是 flex 容器，塞进去它就成了同一行的
+                一个弹性项，会被挤在金额右边拉成一条长条。放在这里它是普通
+                块级元素，自然落在金额下面一行，宽度由 .ai-bar 自己定。 */}
+            {stats && stats.dailyLimit > 0 && (
+              <span className="ai-bar" aria-hidden="true">
+                <span style={{ width: `${pct(stats.todayUsd, stats.dailyLimit)}%` }} />
+              </span>
+            )}
           </div>
-          <div>
-            <dt>本月花费 / 额度</dt>
+          <div className="ai-kv-primary">
+            <dt>本月花费</dt>
             <dd>
-              ${stats?.monthUsd?.toFixed(3) ?? '—'} / {stats?.monthlyLimit ? `$${stats.monthlyLimit}` : '不限'}
+              <span className="ai-kv-num">${stats?.monthUsd?.toFixed(3) ?? '—'}</span>
+              <span className="ai-kv-of">/ {stats?.monthlyLimit ? `$${stats.monthlyLimit}` : '不限'}</span>
             </dd>
           </div>
           <div>
@@ -350,7 +394,7 @@ export function AiSection() {
           <strong>不会写进数据库，所以备份包、导出、迁移里都不含它</strong> ——
           换机器时要重新填一次。
           {cfg?.keySource === 'env' && (
-            <> 环境变量 <code>{cfg.apiKeyEnv}</code> 里已有一个；这里填的会**覆盖**它。</>
+            <> 环境变量 <code>{cfg.apiKeyEnv}</code> 里已有一个；这里填的会<strong>覆盖</strong>它。</>
           )}
         </p>
 
@@ -386,10 +430,57 @@ export function AiSection() {
           </button>
         </div>
 
+        {/* 「测试连接」的结果做成结论卡，而不是一行小字。
+            只给一句话用户没法判断：`empty` 到底是 key 错、网络错还是模型
+            不肯答？耗时 2.6 秒是正常还是超时？所以这里固定两段：
+              ① 结论（通/不通 + 该怎么办）
+              ② 这次实际发生了什么（模型 / 耗时 / 投递 / token / 花费）
+            ② 全是"我请求了什么、它花了多久"，出问题时这是唯一可核对的证据。 */}
         {testMsg && (
-          <p className={testMsg.kind === 'ok' ? 'hint' : 'hint warn'} role="status">
-            {testMsg.text}
-          </p>
+          <div
+            className={`ai-test ${testMsg.ok ? 'ai-test-ok' : 'ai-test-err'}`}
+            data-testid="ai-test-result"
+            role="status"
+          >
+            <div className="ai-test-head">
+              <span className="ai-test-dot" aria-hidden="true" />
+              <span className="ai-test-text">{testMsg.text}</span>
+              {testMsg.kind && <code className="ai-test-kind">{testMsg.kind}</code>}
+            </div>
+            <dl className="ai-test-kv">
+              {testMsg.model && (
+                <div>
+                  <dt>模型</dt>
+                  <dd title={testMsg.model}>{testMsg.model}</dd>
+                </div>
+              )}
+              <div>
+                <dt>耗时</dt>
+                <dd>{testMsg.latencyMs == null ? '—' : `${(testMsg.latencyMs / 1000).toFixed(1)} s`}</dd>
+              </div>
+              <div>
+                <dt>投递</dt>
+                <dd title={testMsg.delivery === 'merged' ? '网关丢弃 system 消息，指令与资料已合并成一条' : 'system 与 user 分角色发送'}>
+                  {testMsg.delivery === undefined ? '—' : testMsg.delivery === 'merged' ? '合并单条' : '分角色'}
+                </dd>
+              </div>
+              <div>
+                <dt>token</dt>
+                <dd>
+                  {testMsg.outTokens == null
+                    ? '—'
+                    : `${tok(testMsg.inTokens)}/${tok(testMsg.outTokens)}`}
+                </dd>
+              </div>
+              {testMsg.costUsd != null && testMsg.costUsd > 0 && (
+                <div>
+                  <dt>花费</dt>
+                  {/* 4 位小数：一次探针是 $0.0002 量级，2 位永远显示 $0.00 */}
+                  <dd>${testMsg.costUsd.toFixed(4)}</dd>
+                </div>
+              )}
+            </dl>
+          </div>
         )}
       </section>
 

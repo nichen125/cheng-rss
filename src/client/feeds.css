@@ -737,12 +737,23 @@
  * 因此档位做成带色点的横幅，而不是埋在表单下面的一行小字。
  */
 
+/* 设置页的卡片（v2.8）。
+ *
+ * 之前 background 写的是 `var(--bg-soft, rgba(255,255,255,0.02))` —— 而
+ * --bg-soft 这个 token 根本不存在（全仓只有这一处与 .selftest-raw 用它），
+ * 于是每张卡都是"白底 + 1px 灰边"。弹窗本身也是白的，卡片于是只剩一根
+ * 线，四张卡叠起来像一张长表。
+ *
+ * 改成下沉一层的底色：卡在白弹窗上"凹进去"，输入框保持纯白浮起来 ——
+ * 与设计稿的三层底色约定一致（--bg-sunken 退后、--bg 内容、--bg-elev 浮起），
+ * 不靠加粗边框区分层次。
+ */
 .settings-card {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: 10px;
   padding: 16px 18px;
   margin-bottom: 16px;
-  background: var(--bg-soft, rgba(255, 255, 255, 0.02));
+  background: var(--bg-sunken);
 }
 
 .settings-card-head {
@@ -869,16 +880,105 @@
 .ai-level-text { font-weight: 500; }
 .ai-level-reason { color: var(--fg-faint); }
 
+/* 「测试连接」的结论卡（v2.8）。
+ *
+ * 之前这里是一行小字（`<p class="hint">`）：失败时只显示"模型返回空内容
+ * （empty）"，用户看不出是 key、网络还是模型的问题，也看不到这次到底
+ * 请求了多久 —— 于是这颗按钮"还是不行"，而接口其实一直是 200。
+ *
+ * 结构固定两段：结论行（点 + 话 + kind 代码）+ 指标格（模型/耗时/投递/
+ * token/花费）。指标格用与 .ai-kv 一样的网格，不用表格：它只有一排，
+ * 表格的框线会让它看起来像又一张要读的表。 */
+.ai-test {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: var(--bg-active);
+  border-left: 3px solid var(--fg-faint);
+}
+.ai-test-ok { border-left-color: var(--ok, #4ade80); }
+.ai-test-err { border-left-color: var(--must); }
+
+.ai-test-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12.5px;
+}
+.ai-test-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--fg-faint);
+  flex-shrink: 0;
+  align-self: center;
+}
+.ai-test-ok .ai-test-dot { background: var(--ok, #4ade80); }
+.ai-test-err .ai-test-dot { background: var(--must); }
+.ai-test-text { font-weight: 500; }
+/* kind 是给"搜索这段报错"用的，不是给人读的：等宽 + 弱化，别抢结论 */
+.ai-test-kind {
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-family: var(--mono, ui-monospace, monospace);
+  flex-shrink: 0;
+}
+
+.ai-test-kv {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.ai-test-kv > div { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+.ai-test-kv dt { color: var(--fg-faint); font-size: 11px; }
+.ai-test-kv dd {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
 .ai-kv {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 10px 18px;
+  /* 220 是按卡片实测内宽（632px）定的：3 列要 3×220+2×22=704，放不下，
+     于是稳定排成 2×2；而 minmax(190) 会挤成"三格一排、第四格单独掉下去"，
+     右下留一个洞里最难看的位置。窄屏（≤640px）自然回落成 1 列。 */
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 22px;
   margin: 0 0 10px;
 }
 
 .ai-kv > div { min-width: 0; }
-.ai-kv dt { color: var(--fg-faint); font-size: 11.5px; margin-bottom: 3px; }
+.ai-kv dt {
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  margin-bottom: 3px;
+  letter-spacing: 0.01em;
+}
 .ai-kv dd { margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+/* 括号里的补充（"（失败 332）""（532 篇失败）"）比主数字再退一档：
+   同一行里两个 13px 数字会让人以为是并列的两个指标。 */
+.ai-kv dd .muted { font-size: 11.5px; }
+
+/* 金额两格放大一档（v2.8）。四格同字号时，"今日花费 $0.916 / $1"
+ * 与"今日调用 472 次"权重一样，用户得逐格读才知道哪格在回答
+ * "我还能花多少"。金额用 20px 半粗，额度退成 12px 灰 —— 一眼是数字。 */
+.ai-kv-primary dd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; }
+.ai-kv-num {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+.ai-kv-of { color: var(--fg-faint); font-size: 12px; }
+/* 进度条在 dd 之后、占满这一格的宽度（上限 180px）。
+   它不能进 dd —— dd 是 flex 行，塞进去会被金额和"$1"挤成一条横线。 */
+.ai-kv-primary .ai-bar { display: block; margin-top: 6px; }
 
 /* 预算进度条。只在有额度时显示 —— 不限额时画一条空条只会让人以为"用完了" */
 .ai-bar {

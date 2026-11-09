@@ -552,11 +552,23 @@ export const api = {
       body: JSON.stringify({ apiKey }),
     }),
 
-  /** 用一次最小调用验证 key 能不能用（§8.8）。失败也返 200，看 `ok` */
+  /**
+   * 用一次最小调用验证 key 能不能用（§8.8）。失败也返 200，看 `ok`。
+   *
+   * v2.8 起结果里带 `latencyMs` / `delivery` / 用量：用户按这颗按钮问的是
+   * "到底通不通、慢不慢"，只回一句"连不上"没法判断是 key、网络还是模型。
+   */
   testAiKey: () => request<{
     ok: boolean;
     text?: string;
     model?: string;
+    latencyMs?: number;
+    /** split = system/user 分角色；merged = 网关丢了 system，已合并成一条 */
+    delivery?: 'split' | 'merged';
+    deliveryReason?: 'learned' | 'profile' | 'default';
+    inTokens?: number;
+    outTokens?: number;
+    costUsd?: number;
     failure?: { kind: string; message: string; retryable: boolean };
     hint?: string;
   }>('/settings/ai/test', { method: 'POST', body: '{}' }),

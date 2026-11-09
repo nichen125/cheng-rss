@@ -93,10 +93,15 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
     const uid = requireUserId(c);
     const { aiForUser, runtimeAiBase } = await import('../ai/service.ts');
     const { client } = aiForUser(ctx.dbh.db, uid, runtimeAiBase(ctx.cfg));
+    const model = client.config.models.fast;
+    // 投递方式要在**调用前**问：调用失败后它可能已经被 learnMerged 改过，
+    // 那样报出来的就不是"这次实际用的"，而用户要判断的正是这次。
+    const { delivery, reason: deliveryReason } = client.deliveryInfo(model);
+    const t0 = Date.now();
     const r = await client.chat({
       system: '你是连通性探针。只回复 OK 两个字符，不要解释。',
       user: 'ping',
-      model: client.config.models.fast,
+      model,
       purpose: 'test',
       userId: uid,
       // 64 token 而不是 1（§8.6b）。
@@ -109,18 +114,49 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
       // 实测 deepseek-flash：max_tokens=1 → content 为空，思考只输出 "The"；
       // max_tokens=16 → 仍在思考；64 才能稳定拿到 "OK"。
       // 多花的这 63 个 token 是"测试连接能不能用"的必要成本。
+      //
+      // 2026-11-09 追加：这台网关的推理模型思考长度不稳定，64 有时正好被
+      // 思考吃满（实测 8 次里 2 次）。客户端现在会把预算翻倍重试，所以这里
+      // 保持 64 作为起点，够用且不浪费。
       maxTokens: 64,
       temperature: 0,
     });
-    if (r.ok) return c.json({ ok: true, text: r.text.slice(0, 40), model: client.config.models.fast });
+    const latencyMs = Date.now() - t0;
+    const deliveryNote = delivery === 'split' ? '分角色投递' : '合并单条投递';
+    if (r.ok) {
+      return c.json({
+        ok: true,
+        text: r.text.slice(0, 40),
+        model,
+        latencyMs,
+        delivery,
+        deliveryReason,
+        inTokens: r.usage.inTokens,
+        outTokens: r.usage.outTokens,
+        costUsd: r.usage.costUsd,
+        hint: `已连通（${deliveryNote}，模型回了「${r.text.trim().slice(0, 20)}」）`,
+      });
+    }
     return c.json({
       ok: false,
+      model,
+      latencyMs,
+      delivery,
+      deliveryReason,
       failure: { kind: r.failure.kind, message: r.failure.message, retryable: r.failure.retryable },
-      // 401 与 network 的处置完全不同，UI 靠 kind 给不同文案
+      // 401 与 network 的处置完全不同，UI 靠 kind 给不同文案。
+      // 每条都要回答"那我该做什么"，因为这行字是用户唯一能看到的结论。
       hint: r.failure.kind === 'no-key' ? '先在上面填一个 key 再测试'
         : r.failure.kind === 'http-401' || r.failure.kind === 'http-403' ? 'key 无效或没有权限'
           : r.failure.kind === 'reasoning-only'
-            ? '这个模型是推理模型，思考占满了 token 预算。换一个非推理模型，或调大 max_tokens'
+            ? '这个模型把 token 预算花在了思考上（已自动翻倍重试过一次）。换一个非推理模型，或把「快速模型」换成思考更短的模型'
+          : r.failure.kind === 'empty'
+            ? (delivery === 'merged'
+              ? '网关丢弃 system 消息，指令被合并成一条；模型没照做。换一个模型试试'
+              : '接口通了，但模型对这句探针没有输出正文。换个模型或稍后重试')
+          : r.failure.kind === 'upstream-quota'
+            ? '上游额度用尽，等一会儿或换 key'
+          : r.failure.kind === 'budget' ? '本月预算已用完，去下面调高或等下个月'
           : r.failure.kind === 'network' || r.failure.kind === 'timeout' ? '连不上接口地址，检查 baseURL 与网络'
             : undefined,
     });

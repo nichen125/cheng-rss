@@ -148,6 +148,9 @@ export async function runAnalyze(
     purpose: 'analyze',
     userId: input.userId,
     maxTokens: 1200,
+    // 整条 user 都是抓来的资料（标题/来源/正文/few-shot 里的引用段），
+    // 指令全在 system 里 —— 所以让客户端连 user 一起包（§8.10）。
+    wrapUser: true,
   });
 
   if (!r.ok) {

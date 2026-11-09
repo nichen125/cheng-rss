@@ -159,13 +159,34 @@ export type DigestBody = z.infer<typeof DigestBodySchema>;
  */
 export function describeSchema(schema: z.ZodTypeAny, indent = ''): string {
   const out: string[] = [];
-  const def = schema._def as { typeName?: string; shape?: () => Record<string, z.ZodTypeAny> };
+  const def = unwrapWrappers(schema)._def as { typeName?: string; shape?: () => Record<string, z.ZodTypeAny> };
   if (def.typeName === 'ZodObject' && def.shape) {
     for (const [k, v] of Object.entries(def.shape())) {
       out.push(`${indent}- ${k}: ${describeType(v)}`);
     }
   }
   return out.join('\n');
+}
+
+/**
+ * 剥掉"包一层"的 schema 包装，拿到真正描述字段形状的那层。
+ *
+ * 为什么需要：`EntryAnalysisSchema` 是 `z.preprocess(...)`，zod 把它表示成
+ * `ZodEffects`（`_def.typeName === 'ZodEffects'`，里层在 `_def.schema`）。
+ * 下面两个描述函数原本只认 `ZodObject`，遇到 `ZodEffects` 会走 default 分支，
+ * 于是 json_schema 档发出的 schema 是 `{}`、纯文本档的字段清单是空串 —— 两种
+ * 降级档**同时**失去字段约束，而单测因为 mock 不看 schema 完全发现不了。
+ * 归一化是校验阶段的事，跟"字段长什么样"无关，所以描述时应该看里层。
+ */
+function unwrapWrappers(schema: z.ZodTypeAny): z.ZodTypeAny {
+  let cur = schema;
+  for (let i = 0; i < 5; i += 1) {
+    const d = cur._def as { typeName?: string; schema?: z.ZodTypeAny; out?: z.ZodTypeAny };
+    if (d.typeName === 'ZodEffects' && d.schema) { cur = d.schema; continue; }
+    if (d.typeName === 'ZodPipeline' && d.out) { cur = d.out; continue; }
+    break;
+  }
+  return cur;
 }
 
 /**
@@ -181,7 +202,7 @@ export function describeSchema(schema: z.ZodTypeAny, indent = ''): string {
  * 这里把多余字段留给 zod 的 `.strip()` 处理，比让服务端拒收便宜。
  */
 export function toJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
-  const d = schema._def as {
+  const d = unwrapWrappers(schema)._def as {
     typeName?: string; type?: z.ZodTypeAny; innerType?: z.ZodTypeAny;
     values?: string[]; shape?: () => Record<string, z.ZodTypeAny>;
     checks?: { kind: string; value?: number }[];

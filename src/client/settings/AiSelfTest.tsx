@@ -55,6 +55,13 @@ const STATUS_LABEL: Record<Status, string> = {
   pass: '通过', warn: '降级', fail: '失败', skip: '跳过',
 };
 
+/** 顶层结论条的颜色：fail → 红，有降级/跳过 → 黄，全绿 → 绿。 */
+function levelOf(steps: Step[]): string {
+  if (steps.some((s) => s.status === 'fail')) return 'ai-level-stop';
+  if (steps.some((s) => s.status === 'warn' || s.status === 'skip')) return 'ai-level-warn';
+  return 'ai-level-ok';
+}
+
 const ms = (v: number | null | undefined): string =>
   (v === null || v === undefined ? '—' : `${Math.round(v)} ms`);
 
@@ -105,8 +112,15 @@ export function AiSelfTest() {
       setVerdict(r.verdict);
       setRanAt(r.finishedAt);
       setCost(r.costUsd);
-      const bad = (r.steps ?? []).filter((s) => s.status === 'fail').length;
-      setNotice(bad === 0 ? '自检完成，全部通过' : `自检完成，${bad} 步失败`);
+      // "全部通过"只能在没有 fail、没有 warn、也没有 skip 时说。
+      // 只说 fail 的话，7 步通过 + 1 步降级也报"全部通过" —— 而用户来跑
+      // 自检恰恰是为了看见那一步降级（v2.7 实测那次就有 3 项降级）。
+      const tally = (st: Status) => (r.steps ?? []).filter((s) => s.status === st).length;
+      const parts: string[] = [];
+      if (tally('fail') > 0) parts.push(`${tally('fail')} 步失败`);
+      if (tally('warn') > 0) parts.push(`${tally('warn')} 项降级`);
+      if (tally('skip') > 0) parts.push(`${tally('skip')} 步跳过`);
+      setNotice(parts.length === 0 ? '自检完成，全部通过' : `自检完成：${parts.join('，')}`);
     } catch (e) {
       setErr(e instanceof ApiFailure ? e.message : '自检失败（网络或服务端错误）');
     } finally {
@@ -208,9 +222,11 @@ export function AiSelfTest() {
         </button>
       </div>
 
-      {/* 结论：一行话。用户先看它，需要细节才往下看表 */}
+      {/* 结论：一行话。用户先看它，需要细节才往下看表。
+          三档颜色而不是两档：有降级也涂绿的话，用户会以为"没问题"，
+          而他来跑自检就是为了看见降级（实测那次有 3 项）。 */}
       {verdict && (
-        <div className={`ai-level ai-level-${steps.some((s) => s.status === 'fail') ? 'stop' : 'ok'}`}>
+        <div className={`ai-level ${levelOf(steps)}`}>
           <span className="ai-level-dot" aria-hidden="true" />
           <span className="ai-level-text" data-testid="selftest-verdict">{verdict}</span>
         </div>
@@ -254,7 +270,7 @@ export function AiSelfTest() {
         </table>
       )}
 
-      {/* 测速：每模型一行 × 四列。不支持流式时首字写文案，不写数字 */}
+      {/* 测速：每模型一行。不支持流式时首字写文案，不写数字 */}
       {bench && bench.length > 0 && (
         <>
           <h4 style={{ margin: '18px 0 6px' }}>模型速度</h4>
@@ -266,6 +282,7 @@ export function AiSelfTest() {
                 <th>思考首字</th>
                 <th>总耗时</th>
                 <th>输出速度</th>
+                <th>成功率</th>
               </tr>
             </thead>
             <tbody>
@@ -273,6 +290,7 @@ export function AiSelfTest() {
                 const m = b.median;
                 const noStream = b.runs.every((r) => r.ok && r.streamed === false);
                 const rng = (v: [number, number] | null) => (v ? `（${Math.round(v[0])}~${Math.round(v[1])}）` : '');
+                const firstErr = b.runs.find((r) => !r.ok)?.error;
                 return (
                   <tr key={b.model} data-model={b.model}>
                     <td>{b.model}</td>
@@ -281,8 +299,15 @@ export function AiSelfTest() {
                         : m.ttftMs === null ? '—' : `${Math.round(m.ttftMs)} ms${rng(m.range.ttftMs)}`}
                     </td>
                     <td>{noStream ? '—' : ms(m.firstReasoningMs)}</td>
-                    <td>{m.totalMs > 0 ? `${Math.round(m.totalMs)} ms${rng(m.range.totalMs)}` : ms(m.totalMs)}</td>
+                    {/* 全失败时 totalMs 是 0（没测到），不能渲染成「0 ms」——
+                        那看起来像"快得不可思议"，而事实是一次都没成功。 */}
+                    <td>{m.totalMs > 0 ? `${Math.round(m.totalMs)} ms${rng(m.range.totalMs)}` : '—'}</td>
                     <td>{m.tokensPerSec === null ? '—' : `${m.tokensPerSec} tok/s`}</td>
+                    <td>
+                      {/* 1/3 成功与 3/3 成功都会出中位数，不显示这个数就是在骗人 */}
+                      {b.okCount}/{b.runs.length} 次成功
+                      {firstErr && <div className="hint warn">{firstErr}</div>}
+                    </td>
                   </tr>
                 );
               })}
@@ -314,8 +339,9 @@ export function AiSelfTest() {
           {retrying ? '复位中…' : '重跑 AI 失败条目'}
         </button>
         <span className="muted">
-          只复位与 AI 有关的失败（schema / bad-json / empty / reasoning-only / http-*），
-          不动抓取失败与提取质量不足。会按队列慢慢跑，随时可在预算里叫停。
+          只复位与 AI 有关的失败（schema / bad-json / empty / reasoning-only /
+          upstream-quota / timeout / network / http-*），不动抓取失败与提取质量不足。
+          会按队列慢慢跑，随时可在预算里叫停。
         </span>
       </div>
     </section>

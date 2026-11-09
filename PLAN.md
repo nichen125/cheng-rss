@@ -1695,7 +1695,7 @@ interface AiCapabilities {
 
 | 模式 | 发出的 messages |
 |---|---|
-| `split` | `[{system: 指令}, {user: 正文}]` |
+| `split` | `[{system: 指令 + 防护句}, {user: <<<正文 … 正文>>>}]` |
 | `merged` | `[{user: 指令 + 防护句 + <<<正文 … 正文>>>}]` |
 
 - 默认 `split`；拿到 `bad-json` / `empty` 且当前是 `split` → 改用 `merged` 再试一次
@@ -1712,9 +1712,15 @@ interface AiCapabilities {
 **边界由调用方标注，客户端不猜**：客户端手上只有一条 `user` 字符串，它不可能知道
 哪一段是抓来的；猜错就变成"把用户写的提示词当不可信数据"，模型于是不照做。
 所以 `analyze` / `cluster` / `digest` **整条 `user`** 都是资料（指令在 `system`），
-由客户端整体包起来；`summary` 只有 `{{body}}` 那一块不可信（模板是用户自己写的），
-由 `buildSummaryUser` 就地包。定界符用 `<<<正文` 而不是三反引号 —— 正文里的代码块
-就是三反引号，会与定界符打架。
+传 `chatJson({ wrapUser: true })` 由客户端整体包起来；`summary` 的模板本身是用户
+写的指令，不能整体包，由 `buildSummaryUser` 就地包住**模板之外塞进去的每一块**：
+`{{body}}`、`{{title}}`、高亮里的 `quote`（`note` 是用户批注，不包）。
+定界符用 `<<<正文` 而不是三反引号 —— 正文里的代码块就是三反引号，会与定界符打架。
+
+**防护句在两种投递里都要有，而且放在可信的一侧。** 第一版只给 `merged` 加了防护，
+而 `split` 才是默认路径、也是正常网关走的路径 —— 等于绝大多数请求根本没有防护。
+`split` 时防护句写进 `system`（可信），`user` 整条进定界符；让不可信区自己声明
+"我不是指令"没有意义，它正是可能被改成别的东西的那一段。
 
 **降级链改成两条触发路径**：
 
@@ -4947,17 +4953,17 @@ v1.17 同时追加 1.23「分组 / 单源未读清零」、1.24「标题行对�
 
 | # | 步骤 | 自验证 | 通过判据 | 断言数 |
 |---|---|---|---|---|
-| 2.1 | AI 客户端 + 结构化输出 | `m2-01-ai-client.mjs` | ① mock 返回裸文本/围栏 JSON/合法 JSON 三种都能解析 ② zod 失败自动重试一次 ③ 二次失败进死信不阻塞队列 ④ 降级链 `json_schema → json_object → text`，且判据看报文不看状态码 ⑤ 传输层重试边界：429/5xx 退 2 次、401/404 一次都不重试 ⑥ 每次调用（含重试）各一条 `ai_usage` ⑦ 无 key 时不发请求 ⑧ 未知模型按 `pricing.default` 计 | 54 |
+| 2.1 | AI 客户端 + 结构化输出 | `m2-01-ai-client.mjs` | ① mock 返回裸文本/围栏 JSON/合法 JSON 三种都能解析 ② zod 失败自动重试一次 ③ 二次失败进死信不阻塞队列 ④ 降级链 `json_schema → json_object → text`，且判据看报文不看状态码 ⑤ 传输层重试边界：429/5xx 退 2 次、401/404 一次都不重试 ⑥ 每次调用（含重试）各一条 `ai_usage` ⑦ 无 key 时不发请求 ⑧ 未知模型按 `pricing.default` 计 ⑨ 503 正文说 `no available accounts` → 归类为 `upstream-quota`（不是 `http-503`），而正文与额度无关的 503 仍是 `http-503` | 56 |
 | 2.2 | 单篇分析流水线 | `m2-02-analyze.mjs` | ① 20 篇真实文章全产出摘要，**且每篇摘要对应它自己**（不是"20 篇都有摘要"这种弱断言）② 缺字段 → `stage=failed` 且 `stage_error` 说得出哪个字段 ③ 重跑不重复计费（指纹相同一次请求都不发）④ 正文更新后重分析 ⑤ 空正文不调模型 ⑥ 失败不覆盖已有好结果 ⑦ 摘要进 FTS ⑧ tier 落库 ⑨ **没配 key 时不把整库打成 failed** ⑩ 分析完自动产向量 ⑪ 列表/详情接口带出 summary 与 analysis | 44 |
 | 2.3 | 受控分类 + tier | `m2-03-classify.mjs` | ① slug 不在列表 → 判 `other`（不是 NULL）② tier 边界正确（39/40/69/70/89/90）③ 模型自造 slug 长不出新分类 ④ 大小写容错但**不做**近义/模糊匹配 ⑤ 落库层用假客户端真跑后查库验证 | 42 |
 | 2.4 | Embedding | `m2-04-embed.mjs` | ① 维度 = 配置值 ② BLOB 字节 = dim×4 ③ 1000 条 1536 维余弦 < 20ms（实测 3.9ms）④ 输入 = 标题+摘要+首段（不含正文后续）⑤ 换模型重算 ⑥ 不与 `entry_vectors` 互相覆盖 ⑦ 维度不符不落库 | 33 |
 | 2.5 | 成本审计 + 预算闸门 | `m2-05-budget.mjs` | ① 每次调用都有 `ai_usage` 记录（含失败与重试）② 设 `dailyUsd=0.001` 超限后降 `fast_only` 且**请求照发、模型换成 fast** ③ 再超（月门）则停止、**一个请求都不发**、UI 上可见「已暂停」与原因 ④ 日/月按本地日历边界 ⑤ `0` = 不限额 ⑥ embedding 在日门不降级、月门一起停 ⑦ 闸门可注入 | 35 |
 | 2.6 | **API key 可在界面填写 + 全局失败不刷屏**（v2.0） | `m2-06-api-key.mjs` | ① `PATCH /settings/ai/key {apiKey}` 后 `GET /settings/ai` 返回 `hasKey:true`、`keySource:'file'`；`{apiKey:""}` 删除文件 → `keySource` 回到 `none`；过短（<8）与含空白的 key 被 400 拒；`PATCH /settings/ai` 收到 `apiKey` 时 400 并**指名**该用 `/settings/ai/key` ② **响应里不出现完整 key**：掩码是前 3 + 后 4 且**整个响应体文本**里搜不到明文（只断言"返回了掩码"抓不到既给掩码又附带明文的实现）③ `secrets.json` 已创建、权限收紧到仅当前用户（POSIX `mode & 0o777 === 0o600`；Windows 走 `icacls` 且输出里**没有 `(I)` 继承标记**）④ **不进 `app.db`**：直接读 `app.db` 的字节搜 key；`-wal` / `-shm` 也各搜一遍（SQLite 先写 WAL，只看主库会放过"刚写进去还没合并"的实现）⑤ 文件优先于环境变量（第二个进程同时有两者 → `keySource:'file'`，掩码是文件里那个 key 的）⑥ `POST /settings/ai/test`：401 时 `ok:false` + `kind:'http-401'` + 中文 hint（不是原始报文）；正常时 `ok:true` + 模型名，且探针请求 `max_tokens=1`（不是跑一次推理）⑦ **没 key 时 100 条 analyze 只产出 ≤2 行同类日志**，条目**不落 `failed`**，且确实一条分析都没产出（证明前一条不是"本来就成功"）⑧ 孤儿 analyze 回填：判据认得出这 100 条、排进队列后**同一时刻再调一次不再加**（幂等）⑨ 填上 key 后回填能重新认领那 100 条，且**分析真的开始产出**（≥5 篇有 `entry_analysis` 行） | 35 |
-| 2.7 | **单篇总结 + 可编辑提示词**（v2.0） | `m2-07-summary.mjs` | ① `POST /entries/:id/summary` 返回 Markdown（含 `##` / `-` / `---`）且落库；**返回的总结对应这一篇**（标题回显在结论里）；落库时记了 16 位十六进制的提示词指纹 ② 同提示词再点 = **0 次上游请求**（`cached:true`）；`force:true` 才重算；`GET` 只读缓存不生成 ③ 改提示词 → 1 次请求、同一篇有 **2 行**（旧的不被覆盖）；**改回默认后立刻命中旧缓存（0 次请求）** —— 这条是"按指纹存而不是覆盖"的决定性断言 ④ 四类占位符都被替换、`user` 里不残留未替换的 `{{…}}`、模板里没写的 `{{summary}}` 被**追加**（不是静默丢）、无高亮时不追加空的高亮段 ⑤ 长文按 `SUMMARY_BODY_CLIP=12000` 截断：`user` 长度 < 14000、**结尾那句确实被截掉**（否则等于没截断）、截断处写明"已截断，共 N 字" ⑥ 读/生成别人的条目总结都返回 **404**（不是 403，避免泄露"存在"）⑦ 无占位符的提示词、超长（>8000 字）、非字符串都被 400 拒并说明；**校验失败后配置没有被写脏** ⑧ 空正文不调模型返回 `kind:'empty'`；模型返回空白时判 `empty` 且**不落库** ⑨ 解析器（`digest/md-parse.ts`，纯函数）认出 h2/p/ul/hr、`<script>` 只当字面文字、`[n]` 识别为 cite 段、`[文字](url)` 当普通文字（不给模型留"偷偷写链接"的路） | 39 |
+| 2.7 | **单篇总结 + 可编辑提示词**（v2.0） | `m2-07-summary.mjs` | ① `POST /entries/:id/summary` 返回 Markdown（含 `##` / `-` / `---`）且落库；**返回的总结对应这一篇**（标题回显在结论里）；落库时记了 16 位十六进制的提示词指纹 ② 同提示词再点 = **0 次上游请求**（`cached:true`）；`force:true` 才重算；`GET` 只读缓存不生成 ③ 改提示词 → 1 次请求、同一篇有 **2 行**（旧的不被覆盖）；**改回默认后立刻命中旧缓存（0 次请求）** —— 这条是"按指纹存而不是覆盖"的决定性断言 ④ 四类占位符都被替换、`user` 里不残留未替换的 `{{…}}`、模板里没写的 `{{summary}}` 被**追加**（不是静默丢）、无高亮时不追加空的高亮段；v2.7 起 `{{title}}` 与 `{{body}}` 都包在 `<<<正文 … 正文>>>` 里（RSS 标题由发布方可控，原样进指令区等于把「忽略以上要求」递给模型） ⑤ 长文按 `SUMMARY_BODY_CLIP=12000` 截断：`user` 长度 < 14000、**结尾那句确实被截掉**（否则等于没截断）、截断处写明"已截断，共 N 字" ⑥ 读/生成别人的条目总结都返回 **404**（不是 403，避免泄露"存在"）⑦ 无占位符的提示词、超长（>8000 字）、非字符串都被 400 拒并说明；**校验失败后配置没有被写脏** ⑧ 空正文不调模型返回 `kind:'empty'`；模型返回空白时判 `empty` 且**不落库** ⑨ 解析器（`digest/md-parse.ts`，纯函数）认出 h2/p/ul/hr、`<script>` 只当字面文字、`[n]` 识别为 cite 段、`[文字](url)` 当普通文字（不给模型留"偷偷写链接"的路） | 39 |
 | **2.8** | **AI 配置页分层折叠**（v2.2，§15.29） | `m2-08-ai-settings.mjs` | ① 两个折叠卡默认**收起**、展开状态不跨次记住 ② 用原生 `<details>`/`<summary>`（键盘与 `aria-expanded` 由浏览器给）③ 折叠头行高 ≥44px（触摸红线，与 §15.7 同一标准）④ 折叠头**不带 `user-select:none`** —— 那条是 §15.28.11 给侧栏长按加的，提到卡片上会让配置页标题选不中而画面完全正常 ⑤ 点概要行能展开、**展开后地址 + 三个模型名输入框确实可见**、再点能收起 ⑥ 收起时摘要行显示当前模型名与提示词状态（收起也知道里面是什么）⑦ 预算卡独立于折叠之外，**收起状态下仍能改**（它原本就在「模型连接」卡里，是最容易回归的一条）⑧ 折叠状态比全展开矮 **≥400px**（实测 2027→1237）—— 没有这条，把四张卡都加上 `<details>` 但内容一字不动也能过 ⑨ 展开/收起不丢输入。<br>**⑤ 的判据踩过一个坑**：关闭的 `<details>` 里子元素 `offsetParent` **不为 null**、`getBoundingClientRect()` 也**仍返回真实高度**（实测 37px）—— Chrome 用 `content-visibility` 实现折叠，不是 `display:none`。所以「用 offsetParent 判可见」在这种结构上**恒为真**。唯一真判据是 `checkVisibility()`（关闭 false / 展开 true）。反向验证过：把 details 改成默认 `open`，新断言红、旧断言仍绿 | 19 |
 
-| **2.9** | **能力画像与按需投递 + schema 归一化**（v2.7，§8.10） | `m2-10-ai-delivery.mjs` | ① **网关丢弃 `system` 时 `analyze` 仍产出卡片**（mock 只转发 `user`，模拟 `ty19217.top`）② 第一次请求是 `split`、第二次自动改 `merged`，且合并后 user 里含 `<<<正文` 定界 ③ 定界符出现在指令**之后**（指令不能被当成资料）④ 注入画像 `systemRole:'dropped'` 后**不再发出 split 请求** ⑤ **同一实例分析第二篇只要 1 次请求**（没有这条，795 条积压每条白烧一次）⑥ 画像只写了 `strong` 时，`fast` 的调用仍走自愈路径（不误用别的模型的结论）⑦ `summary` 的定界只包 `{{body}}`，模板里的 `##` 要求在定界符外 ⑧ `entities` 是数组 / `key_points` 7 条 / `sentiment` 缺失 → 归一化后成功（四桶齐、截断到 6、兜底 `neutral`）⑨ mock **同时**丢 `system` 且两档 `response_format` 都回 **200 + 散文** → 仍能降到第三档并成功，`calls.length ≥ 3` | 9 |
-| **2.10** | **自检八步 + 结果落库 + 面板**（v2.7，§8.10 / §15.30） | `m2-11-selftest.mjs` | ① `POST /settings/ai/selftest` 返回 8 步、`id` 依次为 key/models/chat/system/format/embed/analyze/summary ② 每步都有 `status` 与非空 `detail` ③ 丢 system 的 mock 下 `system` 步 `fail` 且带 `hint`、`format` 步 `warn`、`verdict` 提得到根因 —— **`format` 用反提示词判定**：要求散文却仍回出 `{a,b}` 才算支持，只"照提示词吐 JSON"不算（v2.7 收尾时发现过一次这种假阳性，§8.10）④ `GET .../latest` 取回同一份（`id` 相同）⑤ 自检把能力画像**落库**（`capabilities.models[...].systemRole === 'dropped'`）⑥ 没 key 时 `key` 步 `fail`、其余 `skip` ⑦ 上一次的 `dropped` 画像**不被抹成 `unknown`** ⑧ 库里没有可用条目时 `analyze`/`summary` 两步 `skip` 并说明原因 ⑨ 自检产生 `purpose` 含 `selftest` 的 `ai_usage` 行 ⑩ `retry-failed` 只复位 AI 侧失败（`schema:`/`bad-json:`/`empty:`/`reasoning-only:`/`http-` 五种前缀），`fetch-failed` 与 `no-improvement` 不动 ⑪ 复位时**清掉 `dead` 的 analyze 任务**，否则按钮说"N 条"而实际入队 0 条 ⑫ 面板：卡片默认可见、点开始后出现 8 行、状态点随 status 变、`复制报告` 产出含 `##` 的 Markdown、**刷新后仍能看见上次结果**、三颗按钮齐 | 18 |
+| **2.9** | **能力画像与按需投递 + schema 归一化**（v2.7，§8.10） | `m2-10-ai-delivery.mjs` | ① **网关丢弃 `system` 时 `analyze` 仍产出卡片**（mock 只转发 `user`，模拟 `ty19217.top`）② 第一次请求是 `split`、第二次自动改 `merged`，且合并后 user 里含 `<<<正文` 定界 ③ 定界符出现在指令**之后**（指令不能被当成资料）④ 注入画像 `systemRole:'dropped'` 后**不再发出 split 请求** ⑤ **同一实例分析第二篇只要 1 次请求**（没有这条，795 条积压每条白烧一次）⑥ 画像只写了 `strong` 时，`fast` 的调用仍走自愈路径（不误用别的模型的结论）⑦ `summary` 的模板要求留在定界符外，而 `{{title}}`、`{{body}}`、高亮里的 `quote` 都在定界符内 ⑧ `entities` 是数组 / `key_points` 7 条 / `sentiment` 缺失 → 归一化后成功（四桶齐、截断到 6、兜底 `neutral`）⑨ mock **同时**丢 `system` 且两档 `response_format` 都回 **200 + 散文** → 仍能降到第三档并成功，`calls.length ≥ 3` ⑩ `split` 模式下 `user` 也被定界符包住、防护句在 `system` 里 | 10 |
+| **2.10** | **自检八步 + 结果落库 + 面板**（v2.7，§8.10 / §15.30） | `m2-11-selftest.mjs` | ① `POST /settings/ai/selftest` 返回 8 步、`id` 依次为 key/models/chat/system/format/embed/analyze/summary ② 每步都有 `status` 与非空 `detail` ③ 丢 system 的 mock 下 `system` 步 `fail` 且带 `hint`、`format` 步 `warn`、`verdict` 提得到根因 —— **`format` 用反提示词判定**：要求散文却仍回出 `{a,b}` 才算支持，只"照提示词吐 JSON"不算（v2.7 收尾时发现过一次这种假阳性，§8.10）④ `GET .../latest` 取回同一份（`id` 相同）⑤ 自检把能力画像**落库**（`capabilities.models[...].systemRole === 'dropped'`）⑥ 没 key 时 `key` 步 `fail`、其余 `skip` ⑦ 上一次的 `dropped` 画像**不被抹成 `unknown`** ⑧ 库里没有可用条目时 `analyze`/`summary` 两步 `skip` 并说明原因 ⑨ 自检产生 `purpose` 含 `selftest` 的 `ai_usage` 行 ⑩ `retry-failed` 只复位 AI 侧失败（`schema:`/`bad-json:`/`empty:`/`reasoning-only:`/`upstream-quota:`/`timeout:`/`network:`/`http-` 八种前缀），`fetch-failed` 与 `no-improvement` 不动 ⑪ 复位时**清掉 `dead` 的 analyze 任务**，否则按钮说"N 条"而实际入队 0 条 ⑫ 面板：卡片默认可见、点开始后出现 8 行、状态点随 status 变、结论条配色与步骤状态一致（有 `fail` 红 / 只有降级黄 / 全绿才绿）、`复制报告` 产出含 `##` 的 Markdown、**刷新后仍能看见上次结果**、三颗按钮齐、测速表带成功率列且没测到的总耗时写 `—` ⑬ 预算已停时自检一步都不发：`key` 之外的七步全 `skip`，且上游**零请求** | 23 |
 | **2.11** | **模型测速**（v2.7，§8.11） | `m2-12-model-bench.mjs` | ① mock 发 SSE 且首块延迟可注入 → `ttftMs` 落在注入值 ±50ms ② 正文首块迟于思考首块 → `firstReasoningMs <= firstContentMs` ③ mock 忽略 `stream` 只回 JSON → `streamed:false`、`ttftMs:null`、`totalMs > 0` ④ 同一模型 3 次、其中 1 次 500 → 返回 3 条 run、`runs[1].ok===false`、中位数由另外两次算出 ⑤ `tokensPerSec` 只用 `usage.completion_tokens` 与时间差算，**不从 `content` 长度推**（真实网关会把推理文本混进 `content`）⑥ 生成窗口短于 200ms 时 `tokensPerSec` 为 `null` —— 实测该网关把正文攒成一波送，"生成阶段"只有 15ms，167 tok 除出 6466 tok/s 是缓冲区速度不是模型速度 | 6 |
 
 **M2 门禁**：`m2` 全绿 ✅ **+ 黄金测试集 20~30 篇，摘要准确率 ≥85%、分类 ≥80%**（人工标注一次作为回归基线）。

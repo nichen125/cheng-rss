@@ -8,6 +8,7 @@ import { runSummary, summaryPromptState } from './summary.ts';
 import { unpackText } from '../db/text-blob.ts';
 import { htmlToText } from '../feeds/parse.ts';
 import { recordUsage } from './usage.ts';
+import { budgetState } from './budget.ts';
 import type { RuntimeAiBase } from './service.ts';
 
 // AI 自检（PLAN §8.10 / §15.30，v2.7 / 步骤 2.10）。
@@ -140,6 +141,30 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
   }
 
   const apiBase = cfg.baseURL.replace(/\/+$/, '');
+
+  // 预算已经停了就一步都别发。
+  //
+  // 第 2~6 步是裸 fetch，绕过了 AiClient 的闸门（为什么必须绕过见文件头）——
+  // 于是"预算已停"时它们仍会照发五个请求。这正是 §5.5 要堵的洞：
+  // 用户点一次自检就能在已经停止的账户上继续花钱。第 7/8 步走 runAnalyze /
+  // runSummary，闸门会拦住它们，但那会给出三条"失败"，看起来像链路坏了，
+  // 而真实原因只是额度用完了 —— 所以这里统一标 skip 并说清楚。
+  const budget = budgetState(db, userId, cfg);
+  if (budget.level === 'stop') {
+    const rest: [StepId, string][] = [
+      ['models', '模型清单'], ['chat', '对话连通性'], ['system', 'system 角色是否生效'],
+      ['format', '结构化输出档位'], ['embed', '向量模型'], ['analyze', '真实分析一篇'],
+      ['summary', '真实总结一篇'],
+    ];
+    for (const [id, title] of rest) {
+      steps.push({
+        id, title, status: 'skip',
+        detail: `预算已停：${budget.reason}`,
+        hint: '提高预算上限、等额度恢复，或换一个 key 之后再自检',
+      });
+    }
+    return finish(deps, steps, null, startedAt, now);
+  }
 
   /** 一次裸请求。只翻译传输层，不做任何降级 —— 自检要的是测量 */
   const raw = async (opts: {
@@ -318,11 +343,6 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
         + '所有走 system 的提示词（分析、聚类、简报）在你这个网关上都不会生效';
     }
     if (cap !== 'unknown') measured.models[cfg.models.fast] = { systemRole: cap };
-    if (cfg.models.strong !== cfg.models.fast && cap !== 'unknown') {
-      // strong 是否同样被丢，需要单独测：同一网关的不同上游模型行为可能不同。
-      // 这里只复用结论并标注来源，避免再花一次请求 —— 但把它记成 strong 的实测值
-      // 是不诚实的，所以只在 fast===strong 时才写。
-    }
 
     steps.push({
       id: 'system', title: 'system 角色是否生效', status, detail, hint,
@@ -351,6 +371,10 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
     ];
     let best: 'json_schema' | 'json_object' | 'text' | null = null;
     const timeline: string[] = [];
+    // 两档探针都真的拿到了 2xx 正文，才允许下"两档都被忽略"的结论。
+    // 少了这个判断，401/503/超时的空正文会被判成 cap='text' 并覆盖上次
+    // 测出的 json_schema —— 那违反"只覆盖本次真测到的字段"（§5.1）。
+    let usableProbes = 0;
 
     for (const m of modes) {
       const r = await raw({
@@ -370,6 +394,9 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
       });
       addCost(r, 'format');
       const text = contentOf(r);
+      // 探针本身失败（非 2xx / 没正文）说明"这一档没测到"，不是"这一档不行"。
+      const measuredOk = r.ok && r.status !== 0 && text !== '';
+      if (measuredOk) usableProbes++;
       let parsed: unknown = null;
       try {
         const t = text.trim();
@@ -381,35 +408,48 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
       const isObj = Boolean(obj) && typeof obj === 'object';
       // json_schema 档要比 json_object 档更严：字段名与类型都对上，才算
       // "解码被 schema 约束"；只对上"是个对象"可能只是模型顺着习惯吐了 JSON。
-      const hit = m.mode === 'json_schema'
+      const hit = measuredOk && (m.mode === 'json_schema'
         ? isObj && typeof obj?.a === 'string' && typeof obj?.b === 'number'
-        : isObj;
-      timeline.push(`${m.mode}=${hit ? 'ok' : `no(${text.slice(0, 16).replace(/\n/g, ' ')})`}`);
+        : isObj);
+      const why = !measuredOk
+        ? `unmeasured(HTTP ${r.status || r.error || '?'})`
+        : `no(${text.slice(0, 16).replace(/\n/g, ' ')})`;
+      timeline.push(`${m.mode}=${hit ? 'ok' : why}`);
       if (hit) { best = m.mode; break; }
     }
-    // 前两档都没过 = response_format 被忽略。兜底档不需要再发一次请求去证明
-    // "纯文本能用" —— 上面两次调用本身就是纯文本往返，正文已经看到了。
-    const cap: ModelCapability['responseFormat'] = best ?? 'text';
-    if (!best) timeline.push('text=fallback（两档 response_format 都被忽略）');
+
+    // 两档都没过**且都测到了** = response_format 被忽略，降纯文本兜底。
+    // 兜底档不需要再发一次请求去证明"纯文本能用" —— 上面两次调用本身就是
+    // 纯文本往返，正文已经看到了。
+    const cap: ModelCapability['responseFormat'] | null = best
+      ?? (usableProbes === modes.length ? 'text' : null);
+    if (cap === 'text') timeline.push('text=fallback（两档 response_format 都被忽略）');
+    if (cap === null) timeline.push('档位未测出（探针请求本身失败，不写画像）');
 
     // 只有严格档算 pass：另外两档都要靠提示词与归一化兜，属于"能用但不最可靠"，
     // 面板上给黄点比给绿点诚实（§8.10 的能力画像本来就是让用户知道降级了什么）。
-    const status: StepResult['status'] = cap === 'json_schema' ? 'pass' : 'warn';
+    const status: StepResult['status'] = cap === 'json_schema' ? 'pass' : cap === null ? 'fail' : 'warn';
     const detail = cap === 'json_schema'
       ? '支持严格模式（json_schema），结构化输出最可靠'
       : cap === 'json_object'
         ? '只支持 json_object：能保证是 JSON，但不保证字段，靠归一化兜'
-        : '两档 response_format 都被忽略，已降级为纯文本 + 提示词描述字段';
-    measured.models[cfg.models.fast] = { ...(measured.models[cfg.models.fast] ?? {}), responseFormat: cap };
+        : cap === 'text'
+          ? '两档 response_format 都被忽略，已降级为纯文本 + 提示词描述字段'
+          : '两档探针都没拿到 2xx 正文，无法判断档位（上一次的结论保持不变）';
+    if (cap !== null) {
+      measured.models[cfg.models.fast] = { ...(measured.models[cfg.models.fast] ?? {}), responseFormat: cap };
+    }
 
     steps.push({
       id: 'format', title: '结构化输出档位', status, detail,
-      hint: cap === 'text'
-        ? '不需要手动处理：客户端已按纯文本档工作（提示词写清字段 + 归一化补全）。'
-          + '代价是个别回答要点不齐时会多一次重试'
-        : cap === 'json_object'
-          ? '不需要处理：客户端已按这个档位工作。但要知道它会多一次校验重试的概率'
-          : undefined,
+      hint: cap === null
+        ? '先修连通性：探针请求没通，档位判断不出来。修好后重跑自检'
+        : cap === 'text'
+          ? '不需要手动处理：客户端已按纯文本档工作（提示词写清字段 + 归一化补全）。'
+            + '代价是个别回答要点不齐时会多一次重试'
+          : cap === 'json_object'
+            ? '不需要处理：客户端已按这个档位工作。但要知道它会多一次校验重试的概率'
+            : undefined,
       raw: timeline.join(' → '),
     });
   }
@@ -443,8 +483,19 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
   //
   // 选条目优先挑**还没有分析结果**的（规格 §5.5）：这样即使失败也不会抹掉
   // 一份已有的好结果。
-  const entry = pickProbeEntry(db, userId);
-  if (!entry) {
+  //
+  // 进门时查过一次预算，但那之后第 2~6 步又花了几百 token。刚好在这次自检里
+  // 跨过月预算线的话，这条路会花掉最贵的一步（约 $0.002）—— 所以再查一次。
+  const budgetNow = budgetState(db, userId, cfg);
+  const entry = budgetNow.level === 'stop' ? null : pickProbeEntry(db, userId);
+  if (budgetNow.level === 'stop') {
+    const why = `预算已停：${budgetNow.reason}`;
+    steps.push({
+      id: 'analyze', title: '真实分析一篇', status: 'skip', detail: why,
+      hint: '提高预算上限或等额度恢复后重跑',
+    });
+    steps.push({ id: 'summary', title: '真实总结一篇', status: 'skip', detail: why });
+  } else if (!entry) {
     const why = '库里没有可用于测试的条目（正文非空、300~3000 字的条目为 0）';
     steps.push({ id: 'analyze', title: '真实分析一篇', status: 'skip', detail: why, hint: '先订阅一个源并抓几篇回来' });
     steps.push({ id: 'summary', title: '真实总结一篇', status: 'skip', detail: why });
@@ -470,7 +521,7 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
     const rawCfg = readPromptTemplate(db, userId);
     const s = await runSummary(db, client, entry.id, userId, rawCfg, { force: true, now: now() });
     const sOk = s.ok && Boolean(s.body);
-    cost += 0;
+    cost += s.usage?.costUsd ?? 0;
     steps.push({
       id: 'summary', title: '真实总结一篇',
       status: sOk ? 'pass' : 'fail',

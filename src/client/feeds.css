@@ -858,6 +858,9 @@
 
 .ai-level-ok { border-left-color: var(--ok, #4ade80); }
 .ai-level-ok .ai-level-dot { background: var(--ok, #4ade80); }
+/* 自检的"有降级"：不是失败，但也不能涂绿 —— 用户来跑自检就是为了看见它 */
+.ai-level-warn { border-left-color: var(--worth); }
+.ai-level-warn .ai-level-dot { background: var(--worth); }
 .ai-level-fast_only { border-left-color: var(--worth); }
 .ai-level-fast_only .ai-level-dot { background: var(--worth); }
 .ai-level-stop { border-left-color: var(--must); }

@@ -91,11 +91,17 @@ export function enqueueOrphanAnalyze(db: DatabaseSync, limit = ANALYZE_BACKFILL_
  *
  * ## 只复位 AI 侧的
  *
- *   schema / bad-json / empty / reasoning-only / http-*  → 复位
+ *   schema / bad-json / empty / reasoning-only / upstream-quota /
+ *   timeout / network / http-*                        → 复位
  *   fetch-failed（正文抓取失败）、no-improvement（提取质量不足）→ **不动**
  *
  * 后者与模型无关，复位只会把抓取失败的 URL 再抓一遍、把本来就太短的正文
  * 再解析一遍，白花时间。
+ *
+ * `timeout` 与 `network` 也是 AI 侧失败：它们出现在 `runAnalyze` 的
+ * `stage_error` 里意味着"这个网关当时没答上来/连不上"，同样是修好之后
+ * 该重跑的那批。第一版漏了这两个前缀，于是超时的条目永远复位不了 ——
+ * 而超时恰恰是慢网关最典型的表现（实测 ai_usage 里有 7 条 timeout）。
  *
  * ## 顺手清 dead 任务
  *
@@ -107,7 +113,14 @@ export function enqueueOrphanAnalyze(db: DatabaseSync, limit = ANALYZE_BACKFILL_
 export function resetAiFailures(db: DatabaseSync, userId: string): {
   reset: number; clearedDeadJobs: number;
 } {
-  const AI_FAILURE_PREFIXES = ['schema:', 'bad-json:', 'empty:', 'reasoning-only:', 'http-'];
+  const AI_FAILURE_PREFIXES = [
+    'schema:', 'bad-json:', 'empty:', 'reasoning-only:',
+    // 上游额度/账号用尽（classifyHttpFailure 归的类）：换 key 或充值后该重跑
+    'upstream-quota:',
+    // 传输层的两类：超时与连不上。它们同样是"这会儿网关不行"，不是文章的问题
+    'timeout:', 'network:',
+    'http-',
+  ];
   const where = AI_FAILURE_PREFIXES.map(() => 'stage_error LIKE ?').join(' OR ');
 
   // 先取出要复位的 id：清 dead 任务需要按 id 精确删，不能用同一条件再删一次

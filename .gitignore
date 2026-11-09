@@ -4,6 +4,13 @@
 .npm-global/
 .tmp/
 
+# superpowers 工作流的过程产物：设计草稿、实施计划、SDD 台账。
+# 它们描述"怎么做到的"，不是"该怎样"—— 定稿的规格进 PLAN.md / docs/specs/，
+# 草稿留在 .tmp/（docs/development.md:46-49）。这两条是为了防止
+# superpowers 下次创建目录时又把它们混进版本库。
+.superpowers/
+docs/superpowers/
+
 # 依赖与构建产物
 node_modules/
 dist/

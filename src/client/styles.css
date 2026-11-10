@@ -1755,19 +1755,6 @@ input::placeholder { color: var(--fg-faint); }
 }
 .topic + .topic::before { content: '·'; margin-right: 6px; opacity: 0.5; }
 
-.sum-skeleton { display: grid; gap: 8px; padding: 2px 0; }
-.sum-skeleton > span {
-  display: block;
-  height: 11px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--bg-elev2), var(--bg-hover), var(--bg-elev2));
-  background-size: 200% 100%;
-  animation: sk 1.2s ease-in-out infinite;
-}
-.sum-skeleton > span:nth-child(2) { width: 88%; }
-.sum-skeleton > span:nth-child(3) { width: 64%; }
-@keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-
 .sum-fail {
   font-size: 12.5px;
   line-height: 1.6;

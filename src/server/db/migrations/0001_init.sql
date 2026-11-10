@@ -1,6 +1,6 @@
 -- 0001_init.sql —— 初始表结构
--- 对应 src/server/db/schema.ts。手写而非 drizzle-kit 生成，原因：
---   1. entries_fts 是 FTS5 虚拟表，Drizzle 不支持其 DDL
+-- 这份手写 SQL 是表结构的唯一真相（不用 ORM 生成），原因：
+--   1. entries_fts 是 FTS5 虚拟表，ORM 的 DDL 生成器覆盖不到
 --   2. 部分索引的 WHERE 子句需要精确控制
 --   3. 迁移文件要能被 esbuild text loader 内嵌，纯 SQL 最稳
 

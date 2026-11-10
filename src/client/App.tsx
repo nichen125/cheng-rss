@@ -14,6 +14,7 @@ import { useHighlights } from './highlights/useHighlights.ts';
 import { HighlightToolbar, HighlightList } from './highlights/HighlightUI.tsx';
 import { SettingsModal, type SettingsSection } from './settings/SettingsModal.tsx';
 import { ToastHost, type ToastSpec } from './Toasts.tsx';
+import { useConfirm } from './components/ConfirmDialog.tsx';
 import { useArrange } from './useArrange.ts';
 import {
   feedsOfFolder, looseFeedsOf, rowKey, foldersAfterDrop, orderAfterDrop, moveItem,
@@ -266,6 +267,7 @@ interface Stats { entries: number; feeds: number; unread: number; starred: numbe
 
 function Main(props: { user: User; onLogout: () => void }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const confirm = useConfirm();
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('feeds');
   // 默认只看未读（§15.19，v1.16）。改之前是 'inbox' —— 打开就把读过的
   // 一起塞进来，用户得先手动筛掉。默认值应该等于最常见的那次操作。
@@ -1102,11 +1104,12 @@ function Main(props: { user: User; onLogout: () => void }) {
     if (!scope.feedId && !scope.folderId) return;
     const n = scopeUnread;
     if (n === 0) return; // 已经是空的，不必弹一个"清 0 条"的确认框
-    const yes = window.confirm(
-      `把「${listTitle}」里的 ${n} 条未读全部标为已读？\n\n`
-      + `它们不会进入「历史」（那里记录的是你真的打开过的）。\n`
-      + `这个操作没有撤销按钮。`,
-    );
+    const yes = await confirm({
+      title: `把「${listTitle}」里的 ${n} 条未读全部标为已读？`,
+      message: `它们不会进入「历史」（那里记录的是你真的打开过的）。\n`
+        + `这个操作没有撤销按钮。`,
+      confirmText: '全部标为已读',
+    });
     if (!yes) return;
     try {
       const r = await api.markAllRead({ feedId: scope.feedId, folderId: scope.folderId });
@@ -1126,7 +1129,7 @@ function Main(props: { user: User; onLogout: () => void }) {
     } catch (e) {
       setErr(e instanceof Error ? e.message : '标记失败');
     }
-  }, [scope.feedId, scope.folderId, scopeUnread, listTitle, adjustUnread, load]);
+  }, [scope.feedId, scope.folderId, scopeUnread, listTitle, adjustUnread, load, confirm]);
 
   const scopeHasEntries = readTailTotal > 0 || items.length > 0;
 

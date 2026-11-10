@@ -20,6 +20,7 @@ import {
   IconCheck, IconChevronRight, IconEdit, IconExternal, IconFolder, IconPause, IconPlay,
   IconRefresh, IconRss, IconSearch, IconTrash,
 } from '../icons.tsx';
+import { useConfirm } from '../components/ConfirmDialog.tsx';
 import { FOLDER_DROPDOWN_THRESHOLD, UNFILED, useFeeds } from './store.tsx';
 import { RsshubSearch } from './RsshubSearch.tsx';
 
@@ -44,6 +45,7 @@ export function FeedsSection(props: { onClose: () => void }) {
   const [candidates, setCandidates] = useState<DiscoverCandidate[] | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
   const [editing, setEditing] = useState<EditState | null>(null);
+  const confirm = useConfirm();
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   /** 加载失败的图标 id，回退成占位图标而不是留空方块 */
@@ -167,10 +169,12 @@ export function FeedsSection(props: { onClose: () => void }) {
   };
 
   const remove = async (f: FeedItem) => {
-    const yes = window.confirm(
-      `取消订阅「${f.title ?? f.url}」？\n\n`
-      + `未读的 ${f.unread} 条会一起删除；已读和已收藏的条目会保留在列表里。`,
-    );
+    const yes = await confirm({
+      title: `取消订阅「${f.title ?? f.url}」？`,
+      message: `未读的 ${f.unread} 条会一起删除；已读和已收藏的条目会保留在列表里。`,
+      confirmText: '取消订阅',
+      danger: true,
+    });
     if (!yes) return;
     try {
       await api.deleteFeed(f.id);
@@ -330,11 +334,13 @@ export function FeedsSection(props: { onClose: () => void }) {
     const unread = feeds
       .filter((f) => ids.includes(f.id))
       .reduce((n, f) => n + f.unread, 0);
-    const yes = window.confirm(
-      `取消订阅这 ${ids.length} 个源？\n\n`
-      + `未读的 ${unread} 条会一起删除；已读和已收藏的条目会保留。\n`
-      + `这个操作不能撤销。`,
-    );
+    const yes = await confirm({
+      title: `取消订阅这 ${ids.length} 个源？`,
+      message: `未读的 ${unread} 条会一起删除；已读和已收藏的条目会保留。\n`
+        + `这个操作不能撤销。`,
+      confirmText: '取消订阅',
+      danger: true,
+    });
     if (!yes) return;
     await runBulk('取消订阅', (x) => api.bulkDelete(x));
   };

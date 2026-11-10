@@ -95,6 +95,18 @@ jobs:
         shell: bash
         run: '"$NODE_BIN" "$NPM_CLI" run typecheck:all'
 
+      # 单测与 verify-all 是两套东西：verify-all 的 57 个脚本验产品行为（要浏览器、
+      # 要字体、几百秒），tests/ 下的 *.test.ts 验纯函数（URL 去重、向量、排序），
+      # 不需要任何环境，几秒跑完 —— 所以放在类型检查之后就够，也正因为它快，
+      # 没有任何理由让它只活在本地。
+      #
+      # 走 `npm test` 而不是直接 `node scripts/run-tests.mjs`：入口脚本会自己枚举
+      # tests/*.test.ts 并在 0 个文件时 exit 1，"空跑算绿"堵在这里。
+      # （npm run 会把当前 node 的目录加进 PATH，所以脚本里的 node 调用不会 127。）
+      - name: 单元测试
+        shell: bash
+        run: '"$NODE_BIN" "$NPM_CLI" test'
+
       - name: 构建前端
         shell: bash
         run: '"$NODE_BIN" scripts/build-client.mjs'

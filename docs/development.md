@@ -133,6 +133,21 @@ check('生成后 digestDue 说今天已生成', () => ok(!digestDue(db, uid, cfg
 早期文档写过具体数字，改了几轮脚本之后就与实际对不上了 —— 这类数字在
 通用文档里只会变成过期信息。
 
+## 单元测试
+
+纯函数（URL 去重、向量、排序这类不需要库和浏览器的逻辑）用 `tests/*.test.ts`，
+**不能**写成验收脚本 —— 换算成本太高，而它们本该几秒跑完。
+
+```bash
+npm test                                    # = node scripts/run-tests.mjs
+node scripts/run-tests.mjs --test-isolation=none   # 其余参数原样透传给 node --test
+```
+
+加测试就是加一个 `tests/*.test.ts`：用 `node:test` + `node:assert/strict`，
+import 源文件**要带 `.ts` 扩展名**（type stripping 靠它解析）。外壳脚本自己枚举
+`tests/` 并在**一个文件都没有时 exit 1** —— "0 个用例算通过"会让 CI 空转，
+所以 `tests/` 不允许空着。
+
 ## 前端开发
 
 ```bash

@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:client": "tsc -p tsconfig.client.json --noEmit",
     "typecheck:all": "npm run typecheck && npm run typecheck:client",
-    "test": "node --test --experimental-strip-types tests/**/*.test.ts",
+    "test": "node scripts/run-tests.mjs",
     "verify:m0-01": "node scripts/verify/m0-01-toolchain.mjs",
     "verify:m0-02": "node scripts/verify/m0-02-schema.mjs",
     "build:client": "node scripts/build-client.mjs",

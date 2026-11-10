@@ -100,8 +100,14 @@ export function useArrange(opts: {
     }, LONG_PRESS_MS);
   }, [inArrange, lift]);
 
+  // 拖动进行中 = 指针监听必须挂上。这里用一个显式的布尔值而不是直接读
+  // `drag`：`drag` 的坐标每次 pointermove 都变，若把它写进依赖，effect
+  // 会在拖动过程中反复卸载/重挂监听，中间的指针事件直接丢掉 —— 拖起来
+  // 一顿一顿。改成"只关心是否在拖"，依赖写全且不会误触发。
+  const dragging = drag !== null;
+
   useEffect(() => {
-    if (!drag) return;
+    if (!dragging) return;
 
     const onMove = (e: PointerEvent) => {
       const start = startRef.current;
@@ -154,7 +160,7 @@ export function useArrange(opts: {
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
     };
-  }, [drag !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dragging]);
 
   // 长按期间（还没抬起）也要能取消：上面的 effect 只在 drag 存在时才挂监听，
   // 而取消长按必须发生在 drag 之前。所以这里单独挂一组轻量监听。

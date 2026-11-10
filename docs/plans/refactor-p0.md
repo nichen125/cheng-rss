@@ -18,7 +18,7 @@
 每个分支的要求：
 
 - 一个分支内按主题拆 2–4 个提交，提交信息用现有 Conventional Commits 风格（`fix(client): ...` / `chore(deps): ...` / `test(server): ...`），正文说清「为什么」。
-- 提交前必须自检：`npx tsc --noEmit` 通过，`npm test` 通过，`npm run build` 通过（`fix/entry-list-race` 与 `fix/ui-dialog-button` 额外跑 `npm run verify:ui` 若存在）。
+- 提交前必须自检：`npm run typecheck:all` 通过、`npm test` 通过、`npm run build:client` 与 `npm run build:server` 通过。注意 `npm test` 在 `test/real-test-runner` 合并前是空跑（0 用例仍 exit 0），别把它当证据。
 - 不新增运行时依赖。不删除既有注释。不改 `docs/` 之外的文档结构。
 - 不碰 `scripts/verify/*.mjs`，除非该脚本的断言因你的改动必然失败——那时改断言并在提交正文说明。
 
@@ -59,7 +59,7 @@
 2. `package.json` 移除 `drizzle-orm`、`drizzle-kit` 及对应脚本（若有 `db:generate` / `db:push` 之类）。
 3. 全仓清理引用：`grep -rn "drizzle\|from 'drizzle" src/ scripts/ docs/ *.md`，把文档里描述「用 Drizzle 定义 schema」的段落改成现状（schema 真相在 `migrations/*.sql`）。
 4. `scripts/verify/m0-02-schema.mjs`、`m0-03-db.mjs` 等 10 个含 `drizzle`/`orm` 字样的脚本：若断言依赖该字段则改断言，不要直接删脚本。
-5. 确认 `npm ls drizzle-orm` 为空、`npx tsc --noEmit` 通过、`npm run build` 通过。
+5. 同步 `package-lock.json`：用 `npm install --package-lock-only --ignore-scripts` 只改锁文件，**不要**跑 `npm install` / `npm uninstall` —— 各 worktree 的 `node_modules` 是指向主仓库的 junction（共享），装包会污染其他人的环境。最后确认 `npx tsc --noEmit` 与 `npm run build:server` 通过。
 
 **验收**：`git grep -n "drizzle"` 仅剩迁移历史说明（如果有意保留）；服务能正常起（`npm run start -- --help` 或等价冒烟）。
 

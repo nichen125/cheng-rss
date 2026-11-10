@@ -15,6 +15,7 @@ import { HighlightToolbar, HighlightList } from './highlights/HighlightUI.tsx';
 import { SettingsModal, type SettingsSection } from './settings/SettingsModal.tsx';
 import { ToastHost, type ToastSpec } from './Toasts.tsx';
 import { useArrange } from './useArrange.ts';
+import { createLatest, isAbortError } from './lib/latest.ts';
 import {
   feedsOfFolder, looseFeedsOf, rowKey, foldersAfterDrop, orderAfterDrop, moveItem,
   type ArrangeRow, type DropTarget,
@@ -300,6 +301,23 @@ function Main(props: { user: User; onLogout: () => void }) {
    */
   const [tailFetching, setTailFetching] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
+  /**
+   * `cursor` 的 ref 镜像（P0 竞态修复，docs/plans/refactor-p0.md §1）。
+   *
+   * 为什么需要它：`load` 既要服务「重置」也要服务「加载更多」，而后者
+   * 必须读到**发起那一刻**的游标。直接闭包捕获 `cursor` 会让 `load`
+   * 依赖 `cursor`，于是列表一翻页，那个按 `[view, debounced, scope]`
+   * 重取首页的 effect 也会跟着重跑 —— 结果就是每翻一页都把列表重置回第一页。
+   * 之前那行 eslint-disable-next-line 注释就是在掩盖这个矛盾：
+   * 依赖写全会让列表翻不动，写不全就是旧闭包。ref 把"最新值"和
+   * "谁触发重取"这两件事拆开了，两边都不必让步。
+   */
+  const cursorRef = useRef<string | null>(null);
+  /** 改游标只走这一个入口，state 与 ref 不会分叉 */
+  const commitCursor = useCallback((next: string | null) => {
+    cursorRef.current = next;
+    setCursor(next);
+  }, []);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
@@ -356,35 +374,72 @@ function Main(props: { user: User; onLogout: () => void }) {
     return () => clearTimeout(t);
   }, [query]);
 
+  /**
+   * 请求序号守卫（P0 竞态修复）。
+   *
+   * 「序号」和「AbortController」是两道独立的保险，不是重复：
+   *   - abort 只能拦住**还在飞**的请求。响应已经到了、`await` 已经返回，
+   *     但这次 `setItems` 还没执行完的那一刻，abort 是拦不住的。
+   *   - 序号能拦住任何晚到的响应，但它不会让旧请求早点结束。
+   * 一起用：切视图时立刻 abort（省流量、省服务端），任何漏网的晚到响应
+   * 再被 `isLatest` 丢掉（省状态一致性）。
+   */
+  const latestRef = useRef(createLatest());
+  const abortRef = useRef<AbortController | null>(null);
+
   const load = useCallback(async (reset: boolean) => {
     // 简报视图用的是 /digests，与条目列表无关。不加这一句的话切到简报
     // 会白跑一次 listEntries（服务端把未知 view 当 inbox 处理，返回一大堆
     // 用不上的数据），而且它会覆盖 items 让"返回上一视图"时列表闪一下。
     if (view === 'digest') { setLoading(false); return; }
+    // 新请求 = 上一次在途请求立刻过期。先 abort 再领号，顺序无关紧要，
+    // 但两句之间不要有 await：否则中间那一刻两条请求都"合法"。
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const seq = latestRef.current.begin();
     setLoading(true);
     setErr('');
     try {
       const r = await api.listEntries({
         view,
         q: debounced || undefined,
-        cursor: reset ? null : cursor,
+        cursor: reset ? null : cursorRef.current,
         limit: 30,
         feedId: scope.feedId ?? null,
         folderId: scope.folderId ?? null,
+        signal: ctrl.signal,
       });
+      // 双保险的第二道：abort 没赶上（响应已落地）时，只有最新那发能写 state。
+      // 少了这一句的后果不是"多一次渲染"，而是旧视图的 items 盖掉新视图的、
+      // 且 cursor 被旧响应的 nextCursor 带走，后续「加载更多」从错误位置续读。
+      if (!latestRef.current.isLatest(seq)) return;
       setItems((prev) => (reset ? r.items : [...prev, ...r.items]));
       // total 是后端算的命中总数，不是本页条数 —— 分页后
       // items.length 会一直涨到 30/60/90，用它当"多少条"会骗人。
       setTotal(typeof r.total === 'number' ? r.total : null);
-      setCursor(r.nextCursor);
+      commitCursor(r.nextCursor);
     } catch (e) {
+      // 用户切走视图/改了搜索词导致的 abort 不是错误：不写 state、
+      // 不 setLoading、不 toast。写进去的话，切到简报页会看到一条
+      // "This operation was aborted"。
+      if (isAbortError(e) || !latestRef.current.isLatest(seq)) return;
       setErr(e instanceof Error ? e.message : '加载失败');
     } finally {
-      setLoading(false);
+      // loading 同理：过期请求收尾时不能再把它置回 false，
+      // 否则新请求正在加载，按钮却已经可点。
+      if (latestRef.current.isLatest(seq)) setLoading(false);
     }
-  }, [view, debounced, cursor, scope]);
+  }, [view, debounced, scope, commitCursor]);
 
-  useEffect(() => { void load(true); /* eslint-disable-next-line */ }, [view, debounced, scope]);
+  // 依赖写全：`load` 已经用 ref 读游标，所以这里不需要 `cursor`，
+  // 也就不会出现"翻一页就把列表重置回第一页"。
+  useEffect(() => {
+    void load(true);
+    // 卸载/换条件时把在途请求放掉。不 abort 的话它会跑完、然后被
+    // 序号守卫丢掉 —— 结果正确，只是白烧一次请求。
+    return () => { abortRef.current?.abort(); };
+  }, [load]);
 
   /**
    * 分割线下补出来的已读条目（§15.24，v1.18）。
@@ -458,7 +513,9 @@ function Main(props: { user: User; onLogout: () => void }) {
         if (!alive) return;
         setHistoryGroups(r.groups);
         setTotal(typeof r.total === 'number' ? r.total : null);
-        setCursor(r.nextCursor);
+        // 走 commitCursor 而不是 setCursor：游标的 state 与 ref 必须同时更新，
+        // 少更新 ref 的话，从历史页切回列表时「加载更多」会拿着旧游标续读。
+        commitCursor(r.nextCursor);
       })
       .catch((e) => {
         if (!alive) return;

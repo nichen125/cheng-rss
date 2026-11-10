@@ -225,6 +225,28 @@ export interface FeedItem {
 }
 
 /** 简报摘要（列表用，不含 bodyMd） */
+export type DigestRunStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';
+export type DigestRunPhase = 'prepare' | 'clustering' | 'generating' | 'saving';
+
+/** 一次简报生成的进度（服务端 digest_runs 的对外形状） */
+export interface DigestRunView {
+  id: string;
+  status: DigestRunStatus;
+  phase: DigestRunPhase;
+  doneClusters: number;
+  totalClusters: number;
+  costUsd: number;
+  startedAt: number;
+  heartbeatAt: number;
+  elapsedMs: number;
+  /** 心跳停了：跑它的进程已经不在了（而不是这次生成失败） */
+  stale: boolean;
+  cancelReason: string | null;
+  reason: string | null;
+  digestId: string | null;
+  manual: boolean;
+}
+
 export interface DigestSummary {
   id: string;
   title: string;
@@ -654,7 +676,9 @@ export const api = {
 
   // ── 简报（M3）──────────────────────────────────────────
   /** 只提交要改的字段：`{ at?: 'HH:MM', enabled?: boolean }` */
-  patchDigestConfig: (patch: { at?: string; enabled?: boolean; kind?: string }) =>
+  patchDigestConfig: (patch: {
+    at?: string; enabled?: boolean; kind?: string; maxCostUsd?: number;
+  }) =>
     request<{ ok: boolean }>('/settings/digest', {
       method: 'PATCH',
       body: JSON.stringify(patch),
@@ -669,26 +693,43 @@ export const api = {
     attempts: number;
     lastError: string | null;
     nextAt: number;
+    maxCostUsd: number;
+    /** 最近一次生成（含正在跑的那次）；从来没有过则为 null */
+    run: DigestRunView | null;
   }>('/digests/status'),
 
   listDigests: (limit = 20) =>
     request<{ items: DigestSummary[] }>(`/digests?limit=${limit}`),
 
-  /** `force=true` 时允许只有 1 个事件（用户可能就想看这一件事的综述） */
+  /**
+   * 触发一次生成。**立刻返回**，不等生成跑完（202 + runId）。
+   *
+   * `queued:false` 表示已经有一次在跑，返回的是那一次的 runId ——
+   * 连点两下不会花两份钱，也不会出现两个进度条。
+   */
   runDigest: (force = false) =>
     request<{
       ok: boolean;
-      digestId: string | null;
-      reason: string | null;
-      clusterCount: number;
-      entryCount: number;
-      costUsd: number;
-      invalidCites: number;
-      strippedUrls: number;
+      queued: boolean;
+      runId: string;
+      status: DigestRunStatus;
+      message?: string;
+      dayKey?: number;
+      hint?: string | null;
     }>('/digests/run', {
       method: 'POST',
       body: JSON.stringify({ force }),
     }),
+
+  /** 请求停止。语义是"已请求"不是"已停止"，结果要靠轮询状态确认 */
+  stopDigest: (runId: string) =>
+    request<{
+      ok: boolean;
+      status: DigestRunStatus | null;
+      cancelled: boolean;
+      requested: boolean;
+      message: string;
+    }>(`/digests/runs/${runId}/stop`, { method: 'POST' }),
 
   getDigest: (id: string) =>
     request<DigestDetail>(`/digests/${id}`),

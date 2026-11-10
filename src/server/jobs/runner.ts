@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { claimBatch, completeJob, failJob, pruneDoneJobs, queueStats, recoverStaleJobs, type Job } from './queue.ts';
+import { markInterruptedRuns, pruneDigestRuns } from '../digest/runs.ts';
 import { log } from '../logger.ts';
 
 // Job runner：单进程内轮询 + 按 kind 分并发。
@@ -71,6 +72,15 @@ export class JobRunner {
     const recovered = recoverStaleJobs(this.db);
     if (recovered > 0) {
       log.warn(`恢复了 ${recovered} 个僵死任务（上次未正常退出）`);
+    }
+    // 简报的"活着"状态同样要收尸。digest_runs 的 queued/running 行在
+    // 单进程模型下一定是上一个进程的遗留 —— 不收的话页面上会永远显示
+    // "正在生成 3/12"，而实际没有任何进程在跑它（§9.8 的 C6）。
+    // 与 recoverStaleJobs 不同**不按时长判断**：那个等 10 分钟是因为
+    // 可能还有另一个 worker 正在跑同一个库；这里不存在那种可能。
+    const interrupted = markInterruptedRuns(this.db);
+    if (interrupted > 0) {
+      log.warn(`把 ${interrupted} 次上次未结束的简报生成标为已中断`);
     }
     this.stopped = false;
     this.scheduleNext(0);
@@ -195,6 +205,11 @@ export class JobRunner {
   }
 
   prune(keepDays = 7): number {
-    return pruneDoneJobs(this.db, keepDays);
+    const n = pruneDoneJobs(this.db, keepDays);
+    // 简报运行记录与任务同窗口清理。两者的保留期概念不同（进度是给用户
+    // 看的、任务行是给排查看的），所以 keepDays 不共用 —— 30 天的历史
+    // 对"翻一翻这个月什么时候没跑成"有用，而对任务队列没用。
+    pruneDigestRuns(this.db);
+    return n;
   }
 }

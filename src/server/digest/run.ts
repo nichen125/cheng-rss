@@ -12,8 +12,11 @@ import {
 import {
   summarizeCluster, saveCluster, clearWindowClusters, type ClusterMember,
   PER_ENTRY_CLIP,
+  memberKeyOf, findCachedClusters, clearClustersBeforeRun,
 } from '../cluster/summarize.ts';
 import { digestDue, recordAttempt, recordSkip, parseDigestConfig, localDayStart } from './schedule.ts';
+import { setPhase } from './runs.ts';
+import { log } from '../logger.ts';
 import { listDayHighlights, renderDigestHighlightSection } from '../highlights/insight.ts';
 import { htmlToText } from '../feeds/parse.ts';
 import { unpackText } from '../db/text-blob.ts';
@@ -37,6 +40,10 @@ export interface RunDigestResult {
   costUsd: number;
   invalidCites: number;
   strippedUrls: number;
+  /** 这次是被停止的（用户点了停止、或撞上单次花费上限） */
+  cancelled?: boolean;
+  /** 谁停的：'用户手动停止' / '超过单次上限 $0.2' */
+  cancelReason?: string | null;
 }
 
 const EMPTY: RunDigestResult = {
@@ -58,6 +65,38 @@ export interface DigestOptions {
   manual?: boolean;
   /** 手工触发时允许只有 1 个簇（用户可能就是想看这一件事的综述） */
   allowSingle?: boolean;
+  /**
+   * 有值时写进度（`digest_runs` 的 phase / done_clusters / cost_usd）。
+   * 不传则行为与改造前完全一致 —— 验收脚本直接调 runDigest 时走的就是这条。
+   */
+  runId?: string;
+  /**
+   * 取消信号。传进来之后它能中断**在飞的那次模型调用**，
+   * 而不是等它跑完再看标志位。
+   */
+  signal?: AbortSignal;
+  /** 单次花费上限（美元）。缺省取配置里的 maxCostUsd */
+  maxCostUsd?: number;
+}
+
+/**
+ * 被取消时抛它，而不是逐处 return。
+ *
+ * 主链有五个正常返回点（没 key / 没内容 / 簇不够 / 归纳后不够 / 生成失败），
+ * 逐处加"是否被取消"判断会让业务原因与取消原因混在一起，而它们在
+ * digest_skips 里必须分开写。抛出去之后由 runDigest 那层统一转成
+ * cancel 结果 —— 那一层本来就在接异常。
+ */
+class CancelledError extends Error {
+  // 显式声明而不是构造函数参数属性：tsconfig 开了 erasableSyntaxOnly，
+  // 参数属性那种写法在擦除类型后会留下运行时代码，is not allowed。
+  readonly cancelReason: string;
+
+  constructor(cancelReason: string) {
+    super(cancelReason);
+    this.name = 'CancelledError';
+    this.cancelReason = cancelReason;
+  }
 }
 
 /**
@@ -101,12 +140,47 @@ export async function runDigest(
     .get(userId) as { digest_config: string } | undefined;
   const cfg = { ...parseDigestConfig(safeJson(rawCfg?.digest_config)), kind };
 
+  // 取消检查的统一出口。每一处"要花下一次钱"之前都问一遍。
+  const ac = new AbortController();
+  const cancelReasonOf = opts.runId
+    ? () => readCancelReason(db, opts.runId!)
+    : () => null;
+  // 外部 signal 与库里那个"已请求取消"的标志合并：前者是进程内的即时中断，
+  // 后者让 queued 阶段的取消也成立（那时还没有任何在飞调用可中断）。
+  if (opts.signal) {
+    if (opts.signal.aborted) ac.abort();
+    else opts.signal.addEventListener('abort', () => ac.abort(), { once: true });
+  }
+  const heartbeatTimer = opts.runId
+    ? setInterval(() => {
+        const r = readCancelReason(db, opts.runId!);
+        if (r && !ac.signal.aborted) ac.abort();
+      }, CANCEL_POLL_MS)
+    : null;
+  heartbeatTimer?.unref?.();
+
   try {
     return await runDigestInner(ctx, {
       db, now, userId, kind, dayKey, cfg, manual: Boolean(opts.manual),
       allowSingle: Boolean(opts.allowSingle),
+      // runId 必须往下传：主链里每一处 `if (a.runId) setPhase(...)` 都靠它，
+      // 漏了的话整个「进度」只存在于接口层 —— 库里永远是 0/0、phase=prepare，
+      // 而 UI 会照常把一条全零的进度条画得很像在跑（§9.8 症状复现）。
+      runId: opts.runId,
+      signal: ac.signal,
+      cancelReasonOf,
+      maxCostUsd: opts.maxCostUsd ?? cfg.maxCostUsd,
     });
   } catch (e) {
+    // 取消不是失败。单独一条分支的原因：它要落的是"跳过"而不是"失败"。
+    // 失败会进 digest_attempts 的退避重试，而取消恰恰要求**别再自动跑** ——
+    // 把两者混成一种记录，"停一次"就会变成"今天还会重试三次"。
+    if (e instanceof CancelledError) {
+      const msg = `已停止：${e.cancelReason}`;
+      try { recordSkip(db, userId, cfg, dayKey, msg, now); } catch { /* 库不可写时无处可记 */ }
+      return { ...EMPTY, reason: msg, cancelled: true, cancelReason: e.cancelReason };
+    }
+
     // 记 attempt 本身也可能失败（库挂了）。那时只能返回，不能二次抛 ——
     // 调度器下一轮会再试，而抛出去会让整个 sweep 循环中断。
     const msg = `简报生成异常：${(e as Error).message}`;
@@ -114,7 +188,22 @@ export async function runDigest(
       recordAttempt(db, userId, cfg, dayKey, false, msg.slice(0, 500), now);
     } catch { /* 库不可写时无处可记 */ }
     return { ...EMPTY, reason: msg };
+  } finally {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
   }
+}
+
+/** 取消标志的轮询间隔。1 秒：比簇间隔小一个量级，又不至于把库当热点 */
+const CANCEL_POLL_MS = 1_000;
+
+/** 库里是否已被要求取消，是则返回原因 */
+function readCancelReason(db: DatabaseSync, runId: string): string | null {
+  const row = db.prepare(
+    'SELECT cancel_requested, cancel_reason FROM digest_runs WHERE id = ?',
+  ).get(runId) as { cancel_requested: number; cancel_reason: string | null } | undefined;
+  return Number(row?.cancel_requested ?? 0) === 1
+    ? (row?.cancel_reason ?? '用户手动停止')
+    : null;
 }
 
 /** 主链本体。异常由 runDigest 统一兜底，这里只关心业务流程。 */
@@ -124,15 +213,30 @@ async function runDigestInner(
     db: DatabaseSync; now: number; userId: string; kind: string;
     dayKey: number; cfg: ReturnType<typeof parseDigestConfig> & { kind: string };
     manual: boolean; allowSingle: boolean;
+    /** 有值时写进度；没有则整条链不碰 digest_runs（验收脚本直接调时就是这样） */
+    runId?: string;
+    signal?: AbortSignal;
+    /** 库里那个"已请求取消"的原因（没有则 null） */
+    cancelReasonOf: () => string | null;
+    maxCostUsd: number;
   },
 ): Promise<RunDigestResult> {
   const { db, now, userId, kind, dayKey, cfg } = a;
+
+  // 每一处"即将再花一次钱"之前都先问它。抛 CancelledError 而不是返回，
+  // 理由见 CancelledError 的注释。
+  const checkCancel = (): void => {
+    if (!a.signal?.aborted) return;
+    throw new CancelledError(a.cancelReasonOf() ?? '已停止');
+  };
 
   // 手工触发跳过"时间到没到 / 今天做过没"这两关，但**不跳过**"有内容没"。
   if (!a.manual) {
     const due = digestDue(db, userId, cfg, now);
     if (!due.due) return { ...EMPTY, reason: due.reason };
   }
+
+  checkCancel();
 
   const { client, hasKey } = aiForUser(db, userId, runtimeAiBase(ctx.cfg));
   if (!hasKey) {
@@ -167,15 +271,89 @@ async function runDigestInner(
 
   // ── 逐簇归纳 ───────────────────────────────────────────────
   const toast = { userId, model: client.config.models.strong };
-  clearWindowClusters(db, userId, dayKey);
+  const use = clusters.slice(0, 12);
+
+  // 进度：聚类完才知道总数，UI 的"3/12"从这里开始才有意义
+  if (a.runId) setPhase(db, a.runId, { phase: 'clustering', totalClusters: use.length });
+
+  // 清掉**这次运行之前**的簇。原来的 clearWindowClusters(db, userId, dayKey)
+  // 传的是日历日、而 saveCluster 写的 window_start 是 now-24h，两者永不相等，
+  // 所以它一条都没删过（§9.8 记录的现存缺陷）。
+  //
+  // 顺序很重要：**先算缓存快照，再删**。反过来的话"复用上一次的结果"
+  // 永远命中不到，因为上一次的结果刚刚被自己删掉。
+  const keys = use.map((c) => memberKeyOf(c.memberIds));
+  const cached = findCachedClusters(db, userId, keys);
+  // cutoff 传 `now`（不是 now - 24h）：
+  //
+  // 这里的语义是"这次运行会重算整窗，所以上一次的产物全部作废"。
+  // 传 `now - CLUSTER_WINDOW_HOURS` 只删**窗外**的簇，而 saveCluster 写的
+  // 是这次运行的时间（一定在窗内），于是每次手动生成都再插 2 行，
+  // clusters 表只增不减 —— 正是这段注释上面说的那个缺陷没被修干净。
+  // 缓存快照在删除之前读，所以复用不受影响。
+  clearClustersBeforeRun(db, userId, now);
 
   const inputs: DigestClusterInput[] = [];
-  for (const c of clusters.slice(0, 12)) {
+  let done = 0;
+  let reused = 0;
+  // 这次运行开始时的累计花费。上限要按"这次花了多少"判，而 ai_usage 的
+  // usageSince 是"从某时刻起的**全部**花费" —— 它会把这次运行之前、
+  // 同一时刻之后别人（fetch/analyze）花的钱也算进来。所以基线与当前值
+  // 都取同一个口径，相减才是"这次花了多少"。
+  const spendBaseline = usageSince(db, userId, since).usd;
+
+  for (let i = 0; i < use.length; i++) {
+    checkCancel();
+
+    const c = use[i]!;
+    const key = keys[i]!;
+    const hit = cached.get(key) ?? null;
+
+    // 命中缓存 → 不调模型，直接用已归纳的结果重写一行。
+    //
+    // 用**新 id** 重写而不是复用旧 id：旧行马上会被删掉（cache 快照是在
+    // 删除之前读的），而复用 id 会让「删旧写新」变成主键冲突。语义上
+    // 这次运行产出的就是一条新行，id 跟着换是诚实的。
+    if (hit) {
+      const members = loadMembers(db, c.memberIds);
+      const newId = saveCluster(
+        db, userId, c, {
+          title: hit.title,
+          summary: hit.summary ?? '',
+          key_points: hit.keyPoints,
+          consensus: hit.consensus,
+          conflicts: hit.conflicts,
+        }, members, { start: since, end: now }, now, key,
+      );
+      inputs.push({
+        id: newId,
+        title: hit.title,
+        summary: hit.summary,
+        keyPoints: hit.keyPoints,
+        consensus: hit.consensus,
+        conflicts: hit.conflicts,
+        entryCount: c.entryCount,
+        sourceCount: c.sourceCount,
+        heat: c.heat,
+      });
+      reused++;
+      done++;
+      if (a.runId) setPhase(db, a.runId, { doneClusters: done });
+      continue;
+    }
+
     const members = loadMembers(db, c.memberIds);
-    const s = await summarizeCluster(client, members, toast);
+    const s = await summarizeCluster(client, members, { ...toast, signal: a.signal });
+
+    // 归纳被取消：这一簇没产出，不再写库也不再继续。判据是"失败种类",
+    // 不是 abort 标志 —— 失败种类才说明**这次调用**是被我们中断的。
+    if (!s.ok && s.failure?.startsWith('cancelled:')) {
+      throw new CancelledError(a.cancelReasonOf() ?? '已停止');
+    }
+
     const id = saveCluster(
       db, userId, c, s.summary, members,
-      { start: since, end: now }, now,
+      { start: since, end: now }, now, key,
     );
     inputs.push({
       id,
@@ -188,6 +366,26 @@ async function runDigestInner(
       sourceCount: c.sourceCount,
       heat: c.heat,
     });
+    done++;
+
+    // 一簇落库之后立刻算钱并检查上限。放在"落库后"而不是"调用前"：
+    // 花费是那次调用产生的，调用前检查会把刚花掉的那笔当成还没花。
+    const spent = Math.max(0, usageSince(db, userId, since).usd - spendBaseline);
+    if (a.runId) setPhase(db, a.runId, { doneClusters: done, costUsd: spent });
+    if (spent > a.maxCostUsd) {
+      throw new CancelledError(
+        `超过单次上限 $${a.maxCostUsd}（本次已花 $${spent.toFixed(4)}）`,
+      );
+    }
+  }
+
+  // 复用命中时 costUsd 是 0，但这一次并不是"什么都没花钱"—— 省下的
+  // 是上一次已经付过的。runs 表里照实写这次花的钱（0），是对的；
+  // 而日志里明确说有多少簇是复用的，好让"为什么这次这么快"有据可查。
+  if (reused > 0) {
+    log.info(`简报复用 ${reused}/${use.length} 个已归纳事件，跳过模型调用`, {
+      userId, reused, total: use.length,
+    });
   }
 
   // 簇归约后再判一次：全部失败时没有标题可用，也就没有简报
@@ -198,11 +396,28 @@ async function runDigestInner(
   }
 
   // ── 生成简报正文 ───────────────────────────────────────────
+  checkCancel();
+
+  // 上限在正文前也要再判一次：正文那一次是**单次最贵**的调用（2000 token），
+  // 只在簇间检查意味着它总会再花一笔才停。
+  const beforeGen = Math.max(0, usageSince(db, userId, since).usd - spendBaseline);
+  if (beforeGen > a.maxCostUsd) {
+    throw new CancelledError(
+      `超过单次上限 $${a.maxCostUsd}（本次已花 $${beforeGen.toFixed(4)}）`,
+    );
+  }
+
+  if (a.runId) setPhase(db, a.runId, { phase: 'generating' });
+
   const spendBefore = totalCost(db, userId, now);
-  const gen = await generateDigestBody(client, inputs, toast);
+  const gen = await generateDigestBody(client, inputs, { ...toast, signal: a.signal });
   const costUsd = Math.max(0, totalCost(db, userId, now) - spendBefore);
 
   if (!gen.ok || !gen.body) {
+    // 正文生成被取消：不记 attempt（它是"人不要了"，不是"这份简报坏了"）
+    if (gen.failure?.startsWith('cancelled:')) {
+      throw new CancelledError(a.cancelReasonOf() ?? '已停止');
+    }
     const r = `简报生成失败：${gen.failure ?? '未知原因'}`;
     recordAttempt(db, userId, cfg, dayKey, false, r, now);
     return { ...EMPTY, reason: r, costUsd, clusterCount: inputs.length, entryCount: win.items.length };
@@ -239,6 +454,10 @@ async function runDigestInner(
     : fallbackCitations(inputs);
 
   const body = { ...gen.body, body_md: md };
+  // 「落库」这一步也要报：它包含写引用表与写当天要点，在前端是一条
+  // 可能停顿一两百毫秒的尾部。没有它，正文写完之后进度会停在
+  // "写简报 12/12"不动，看起来又像卡住了。
+  if (a.runId) setPhase(db, a.runId, { phase: 'saving', doneClusters: done });
   const id = saveDigest(db, {
     userId, kind, body,
     periodStart: dayKey, periodEnd: now,
@@ -266,7 +485,6 @@ async function runDigestInner(
 function totalCost(db: DatabaseSync, userId: string, since: number): number {
   return usageSince(db, userId, since).usd;
 }
-
 function safeJson(s: string | undefined): unknown {
   if (!s) return null;
   try { return JSON.parse(s); } catch { return null; }

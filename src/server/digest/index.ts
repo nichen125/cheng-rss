@@ -169,7 +169,7 @@ export interface DigestResult {
 export async function generateDigestBody(
   client: AiClient,
   clusters: DigestClusterInput[],
-  opts: { userId?: string; model?: string } = {},
+  opts: { userId?: string; model?: string; signal?: AbortSignal } = {},
 ): Promise<DigestResult> {
   if (clusters.length === 0) {
     return { ok: false, body: null, rendered: null, failure: '没有可用的簇' };
@@ -187,6 +187,7 @@ export async function generateDigestBody(
     userId: opts.userId,
     maxTokens: 2000,
     signalName: 'digest',
+    signal: opts.signal,
   });
 
   if (!r.ok) {

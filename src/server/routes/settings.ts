@@ -317,7 +317,7 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
     const uid = requireUserId(c);
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
 
-    const ALLOWED = new Set(['at', 'enabled', 'kind']);
+    const ALLOWED = new Set(['at', 'enabled', 'kind', 'maxCostUsd']);
     const bad = Object.keys(body).filter((k) => !ALLOWED.has(k));
     if (bad.length > 0) {
       throw badRequest(`不认识的配置项: ${bad.join(', ')}。可改的是 ${[...ALLOWED].join(', ')}`);
@@ -328,6 +328,23 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
     }
     if (body.enabled !== undefined && typeof body.enabled !== 'boolean') {
       throw badRequest('enabled 必须是布尔值');
+    }
+
+    // 上限**在这里拒绝而不是静默截断**。截断会给出一个用户没填过的数字，
+    // 而他事后看到"我设了 200、实际按 5 停"时无法解释发生了什么。
+    // parseDigestConfig 里的截断只兜"配置文件被手改成非法值"那一种。
+    if (body.maxCostUsd !== undefined) {
+      const { MAX_DIGEST_MAX_COST_USD } = await import('../digest/schedule.ts');
+      const n = typeof body.maxCostUsd === 'number'
+        ? body.maxCostUsd : Number(body.maxCostUsd);
+      if (!Number.isFinite(n) || n <= 0) {
+        throw badRequest('maxCostUsd 必须是大于 0 的数字（美元）');
+      }
+      if (n > MAX_DIGEST_MAX_COST_USD) {
+        throw badRequest(`maxCostUsd 不能超过 ${MAX_DIGEST_MAX_COST_USD} 美元`
+          + '（再高就等于没有上限了）');
+      }
+      body.maxCostUsd = n;
     }
 
     const row = ctx.dbh.db.prepare('SELECT digest_config FROM settings WHERE user_id = ?')

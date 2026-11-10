@@ -1345,10 +1345,91 @@
   line-height: 1.5;
 }
 
+/* 生成进度（PLAN §9.8）。
+ *
+ * 进度条只在**真的有东西在跑**时出现，所以它不需要"空状态"样式 ——
+ * 一条常驻的 0% 进度条会让静止的页面看起来像卡住了。
+ *
+ * 数字全部来自服务端 digest_runs：簇数、已花、用时。前端不做估算，
+ * 因为最慢的一步（写正文）不在簇循环里，估算出来的百分比会在那儿停住。
+ */
+.digest-progress {
+  margin: 8px 12px 0;
+  padding: 9px 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+}
+
+/* 心跳停了：跑它的进程已经不在了（而不是这次生成失败）。
+ * 用浅黄而不是红 —— 这不是错误，是"再等等，或者点停止"。
+ * 红会让人以为简报坏了。 */
+.digest-progress[data-stale='1'] {
+  border-color: rgba(234, 179, 8, 0.45);
+}
+
+.digest-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+}
+
+/* 这里的 spinner 比全局的小一号：它与 12.5px 的文字同行，
+ * 17px 会把行高顶起来一行。 */
+.digest-progress-head .spinner {
+  width: 12px; height: 12px;
+  border-width: 1.5px;
+  flex: none;
+}
+
+.digest-progress-phase {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.digest-progress-num {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+.digest-progress-bar {
+  height: 3px;
+  margin: 7px 0 6px;
+  border-radius: 2px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.digest-progress-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--fg-dim);
+  border-radius: 2px;
+  transition: width 400ms ease-out;
+}
+
+.digest-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.digest-progress-stale {
+  color: rgb(202, 138, 4);
+}
+
 .digest-empty {
   padding: 26px 18px;
-}
-.digest-empty h2 {
+}.digest-empty h2 {
   margin: 0 0 8px;
   font-size: 15px;
   font-weight: 600;

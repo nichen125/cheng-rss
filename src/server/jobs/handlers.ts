@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { JobHandler } from './runner.ts';
 import { getFeed } from '../feeds/store.ts';
 import { enqueue } from './queue.ts';
-import { shouldLog } from '../ai/notice.ts';
+import { shouldLog, noteModelFailure, isDeadModel } from '../ai/notice.ts';
 import type { AppContext } from '../app.ts';
 
 // 处理器注册表。
@@ -193,7 +193,16 @@ export function buildHandlers(ctx: HandlerContext): Record<string, JobHandler> {
     const r = await runEmbed(db, client, entryId, { force: p.force === true });
     // 与 analyze 同一套抑制规则：embedding 也是"没 key 时每篇都会失败"，
     // 不抑制的话它会在 analyze 的 745 行之外再刷 745 行。
-    if (r.ok || shouldLog(r.failure.kind)) {
+    //
+    // 但这里多一条：**按模型**抑制。实测配置里写着 text-embedding-3-small、
+    // 网关根本没有这个模型，于是每篇文章都刷一条 503。按 kind 抑制是错的 ——
+    // http-503 也可能是网关真的坏了，一概静默会把事故变成空气。
+    // 按模型判定才精确：同一个模型反复打同一个错，就不是这一篇的问题。
+    const model = client.config.models.embed;
+    if (!r.ok && r.failure.kind !== 'no-key' && r.failure.kind !== 'cancelled') {
+      noteModelFailure(model);
+    }
+    if (r.ok || (shouldLog(r.failure.kind) && !isDeadModel(model))) {
       ctx.log?.(r.ok ? 'embed 完成' : 'embed 失败', {
         entryId, skipped: r.skipped, dim: r.dim,
         failure: r.ok ? undefined : `${r.failure.kind}: ${r.failure.message}`.slice(0, 160),
@@ -217,9 +226,44 @@ export function buildHandlers(ctx: HandlerContext): Record<string, JobHandler> {
     if (!ctx.app) throw new Error('digest 需要 AppContext（仅 serve 模式可用）');
 
     const { runDigest } = await import('../digest/run.ts');
-    const r = await runDigest(ctx.app, { userId, kind: p.kind ? String(p.kind) : undefined });
+    const { getRun, startRun, finishRun } = await import('../digest/runs.ts');
 
-    ctx.log?.(r.ok ? '简报已生成' : '简报未生成', {
+    // 手动触发带着 runId（用户能在页面上看到的那一次）；定时触发没有，
+    // 那种运行照旧不进 digest_runs —— 它没有人在等进度，写一行只是噪声。
+    const runId = p.runId ? String(p.runId) : null;
+    if (runId) {
+      startRun(db, runId);
+      const r0 = getRun(db, runId);
+      // 用户在排队期间就点了停止：handler 拿到手时它已经是终态，
+      // 这一轮不该再跑。不判这一下就会"明明点了停止，还是跑了一整轮"。
+      if (!r0 || r0.status !== 'running') {
+        ctx.log?.('digest: 这次生成已结束或被停止，跳过', { userId, runId, status: r0?.status });
+        return;
+      }
+    }
+
+    const r = await runDigest(ctx.app, {
+      userId,
+      kind: p.kind ? String(p.kind) : undefined,
+      manual: p.manual === true,
+      allowSingle: p.allowSingle === true,
+      runId: runId ?? undefined,
+    });
+
+    if (runId) {
+      finishRun(db, runId, {
+        status: r.cancelled ? 'cancelled' : r.ok ? 'done' : 'failed',
+        reason: r.reason,
+        digestId: r.digestId,
+        costUsd: r.costUsd,
+        // 停因必须落进 digest_runs.cancel_reason：手动停止那条是 requestCancel
+        // 写进去的，而**花费上限**触发的那次从来没有人置过标志位 ——
+        // 不传它，UI 会把"超过上限"显示成"用户手动停止"。
+        cancelReason: r.cancelled ? (r.cancelReason ?? null) : null,
+      });
+    }
+
+    ctx.log?.(r.ok ? '简报已生成' : r.cancelled ? '简报已停止' : '简报未生成', {
       userId,
       digestId: r.digestId,
       clusters: r.clusterCount,
@@ -227,6 +271,7 @@ export function buildHandlers(ctx: HandlerContext): Record<string, JobHandler> {
       // ok=false 不抛：那是"今天没内容"，是正常结果。
       // 真正的基础设施失败（DB 挂了）会在上面抛出来。
       reason: r.reason ?? undefined,
+      cancelled: r.cancelled ? r.cancelReason ?? true : undefined,
     });
   };
 

@@ -20,12 +20,32 @@ export interface DigestConfig {
   /** 本地时间 "HH:MM"。§9.1：每天 08:00 */
   at: string;
   kind: string;
+  /**
+   * 单次生成的花费上限（美元）。超过就在下一次簇间检查时自动停止。
+   *
+   * 有这条的理由是"手动停止"覆盖不了夜里自动跑的那次 —— 用户睡着了，
+   * 没人在那儿点按钮。它是"看进度 + 能停止"的另一半：没人看的时候，
+   * 上限就是唯一能拦住失控花费的东西（PLAN §9.8）。
+   */
+  maxCostUsd: number;
 }
+
+/** 实测一次简报（12 簇归纳 + 1 次正文）约 $0.03，0.2 留了 6 倍余量 */
+export const DEFAULT_DIGEST_MAX_COST_USD = 0.2;
+/**
+ * 上限的上界。
+ *
+ * 防手滑而不是防恶意：填成 200 就等于没有上限，而"我设了 0.2 却花了 20"
+ * 这种事故用户事后无法解释。5 美元是"真的想要一份很贵的简报"也能接受
+ * 的量级。
+ */
+export const MAX_DIGEST_MAX_COST_USD = 5;
 
 export const DEFAULT_DIGEST_CONFIG: DigestConfig = {
   enabled: true,
   at: '08:00',
   kind: 'daily',
+  maxCostUsd: DEFAULT_DIGEST_MAX_COST_USD,
 };
 
 /** 单日最多尝试几次（含第一次） */
@@ -43,7 +63,17 @@ export function parseDigestConfig(raw: unknown): DigestConfig {
     enabled: o.enabled === undefined ? DEFAULT_DIGEST_CONFIG.enabled : Boolean(o.enabled),
     at,
     kind: typeof o.kind === 'string' && o.kind ? o.kind : DEFAULT_DIGEST_CONFIG.kind,
+    // 非法值一律退回默认：配置文件是手改过的 JSON，读到一个 "abc" 时
+    // 最坏的选择是当成 0（那会让下一次生成还没调模型就"超限"）。
+    maxCostUsd: parseMaxCost(o.maxCostUsd),
   };
+}
+
+/** 上限的解析：非数字/≤0 用默认，超上界截到上界 */
+export function parseMaxCost(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_DIGEST_MAX_COST_USD;
+  return Math.min(n, MAX_DIGEST_MAX_COST_USD);
 }
 
 /**
@@ -191,6 +221,8 @@ export interface DigestStatus {
   attempts: number;
   lastError: string | null;
   nextAt: number;
+  /** 单次花费上限，UI 要能回显（改过配置的用户看到的是自己设的值） */
+  maxCostUsd: number;
 }
 
 export function digestStatus(
@@ -248,5 +280,6 @@ export function digestStatus(
     attempts: Number(att.c ?? 0),
     lastError: lastErr?.error ?? null,
     nextAt,
+    maxCostUsd: cfg.maxCostUsd,
   };
 }

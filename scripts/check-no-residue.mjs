@@ -26,6 +26,7 @@ const ALLOW = [
   '.vscode', '.config/Code', 'AppData/Roaming/Code',
   '.claude', '.cursor',
   '.dsh',              // harness 自身的会话存储，与被测项目无关
+  '.local/state/billion-context', // 同一个 harness 的上下文压缩插件日志，同上
 ];
 
 function isAllowed(rel) {

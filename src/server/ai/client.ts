@@ -148,7 +148,16 @@ export type AiFailureKind =
   | 'upstream-quota'
   | 'budget'
   | 'dim-mismatch'
-  | 'rate-limited';
+  | 'rate-limited'
+  /**
+   * 调用方主动取消（简报的「停止」、花费上限触发的自动停止）。
+   *
+   * **与 `timeout` 分开**：两者的传输层表现一模一样（都是 abort），但处置
+   * 完全相反 —— 超时是"过一会儿再试就有救"，取消是"人已经说了不要"。
+   * 混成一个 kind 之后，取消会被 `AI_FAILURE_PREFIXES` 里的 `timeout:`
+   * 捞回来，"重跑失败条目"会把用户亲手停掉的任务复活并再花一次钱。
+   */
+  | 'cancelled';
 
 export interface AiFailure {
   kind: AiFailureKind;
@@ -200,6 +209,11 @@ export interface ChatJsonOptions<S extends z.ZodTypeAny> {
   maxTokens?: number;
   /** 只在纯文本降级模式的提示词里用到 */
   signalName?: string;
+  /**
+   * 调用方的取消信号。传进来之后它和超时合并成同一个 AbortSignal 交给 fetch，
+   * 因此中止可以在**在飞那次请求**里立刻生效，而不是等它跑完再看标志位。
+   */
+  signal?: AbortSignal;
   /**
    * `user` 整条都是抓来的资料（analyze / cluster / digest 的形态）。
    *
@@ -410,6 +424,8 @@ export class AiClient {
     userId?: string;
     temperature?: number;
     maxTokens?: number;
+    /** 调用方的取消信号（简报「停止」用）。超时仍然由配置管 */
+    signal?: AbortSignal;
   }): Promise<
     { ok: true; text: string; usage: AiUsageRecord }
     | { ok: false; failure: AiFailure; usage: AiUsageRecord | null }
@@ -464,15 +480,11 @@ export class AiClient {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(this.config.timeoutMs),
+          signal: this.signalFor(opts.signal),
         });
       } catch (e) {
         const latencyMs = this.now() - t0;
-        const isTimeout = /abort|timeout/i.test((e as Error)?.name ?? '')
-          || /timeout/i.test((e as Error)?.message ?? '');
-        const failure: AiFailure = isTimeout
-          ? { kind: 'timeout', message: `请求超过 ${this.config.timeoutMs}ms 未返回`, retryable: true }
-          : { kind: 'network', message: (e as Error)?.message ?? '网络请求失败', retryable: true };
+        const failure = this.abortFailure(e, opts.signal);
         const usage: AiUsageRecord = {
           purpose: opts.purpose, model, userId: opts.userId,
           inTokens: null, outTokens: null, costUsd: 0,
@@ -667,6 +679,13 @@ export class AiClient {
 
       const failure: AiFailure = att.failure ?? { kind: 'network', message: '未知失败', retryable: true };
 
+      // 取消不是"这次不行"，是"整件事不要了"。放在所有补救分支**之前**：
+      // 一次取消不该变成"换个投递再问一次"或"格式降级再问一次"，
+      // 那样每条补救路径都会再发一次请求、再记一笔费用。
+      if (failure.kind === 'cancelled') {
+        return { ok: false, usage: att.usage, failure };
+      }
+
       // ① 格式被拒：降级重来（不消耗结构重试次数）
       if (att.retryWithFormat) {
         this.formatUnsupported.add(this.formatKey(opts.model, mode));
@@ -803,6 +822,10 @@ export class AiClient {
       if (res.retryWithFormat) return last;
       if (!failure.retryable) return last;
 
+      // 取消是最外层的决定，任何形式的"再试一次"都不该发生：
+      // 降级投递、翻倍预算、结构补救这三条路都会再花一次钱。
+      if (failure.kind === 'cancelled') return last;
+
       // 推理模型吃掉了预算（§8.6b）：原样重发只会再截断一次，
       // 必须把 max_tokens 翻倍才有意义。
       if (failure.kind === 'reasoning-only' && opts.maxTokens) {
@@ -822,6 +845,47 @@ export class AiClient {
   private backoffMs(attempt: number, retryAfterMs?: number): number {
     if (retryAfterMs !== undefined) return Math.min(retryAfterMs, 60_000);
     return attempt === 0 ? 1000 : 3000;
+  }
+
+  /**
+   * 这一请求实际使用的取消信号：超时 + 调用方的 signal。
+   *
+   * 两者必须是**同一个** AbortSignal，而不是各自 try/catch：`fetch` 只接受
+   * 一个 signal，想同时满足"单次调用不能超过 timeoutMs"与"用户点了停止
+   * 就要立刻断"，只能合并成一个。`AbortSignal.any` 是 Node 20+ 的 API，
+   * 本项目的 SEA 基线满足（PLAN §3.2）。
+   */
+  private signalFor(external?: AbortSignal): AbortSignal {
+    const timeout = AbortSignal.timeout(this.config.timeoutMs);
+    return external ? AbortSignal.any([timeout, external]) : timeout;
+  }
+
+  /**
+   * 把 fetch 抛出的异常翻译成失败类别。
+   *
+   * 判定顺序是**先看主动取消、再看超时**，不能反过来：两者抛的都是
+   * `AbortError`，先问"是不是超时"会把用户点的那次取消也说成超时，
+   * 然后进重试。`external.aborted` 是最可靠的分辨依据 —— 超时信号是自己
+   * 造的，外部信号是调用方给的，只有后者能证明"是人说要停"。
+   */
+  private abortFailure(
+    e: unknown,
+    external: AbortSignal | undefined,
+    what = '请求',
+  ): AiFailure {
+    if (external?.aborted) {
+      return {
+        kind: 'cancelled',
+        message: `${what}被取消`,
+        // 取消永远不重试：人已经说了不要，再问一遍只是再花一次钱
+        retryable: false,
+      };
+    }
+    const isTimeout = /abort|timeout/i.test((e as Error)?.name ?? '')
+      || /timeout/i.test((e as Error)?.message ?? '');
+    return isTimeout
+      ? { kind: 'timeout', message: `请求超过 ${this.config.timeoutMs}ms 未返回`, retryable: true }
+      : { kind: 'network', message: (e as Error)?.message ?? '网络请求失败', retryable: true };
   }
 
   /**
@@ -902,16 +966,13 @@ export class AiClient {
           authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.config.timeoutMs),
+        signal: this.signalFor(opts.signal),
       });
     } catch (e) {
       const latencyMs = this.now() - t0;
-      const isTimeout = /abort|timeout/i.test((e as Error)?.name ?? '') || /timeout/i.test((e as Error)?.message ?? '');
       return {
         ok: false, latencyMs,
-        failure: isTimeout
-          ? { kind: 'timeout', message: `请求超过 ${this.config.timeoutMs}ms 未返回`, retryable: true }
-          : { kind: 'network', message: (e as Error)?.message ?? '网络请求失败', retryable: true },
+        failure: this.abortFailure(e, opts.signal),
       };
     }
 
@@ -1052,7 +1113,7 @@ export class AiClient {
   // 没有任何共同点（没有 messages、没有 schema、没有结构重试）。
   // 合在一起会让"重试策略"出现两套互相干扰的分支。
 
-  async embed(input: string, model?: string): Promise<
+  async embed(input: string, model?: string, opts: { signal?: AbortSignal } = {}): Promise<
     { ok: true; vec: Float32Array; dim: number; usage: AiUsageRecord }
     | { ok: false; failure: AiFailure; usage: AiUsageRecord | null }
   > {
@@ -1085,16 +1146,10 @@ export class AiClient {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
         body: JSON.stringify({ model: m, input }),
-        signal: AbortSignal.timeout(this.config.timeoutMs),
+        signal: this.signalFor(opts.signal),
       });
     } catch (e) {
-      const isTimeout = /abort|timeout/i.test((e as Error)?.name ?? '');
-      return {
-        ok: false, usage: null,
-        failure: isTimeout
-          ? { kind: 'timeout', message: `embedding 请求超时（${this.config.timeoutMs}ms）`, retryable: true }
-          : { kind: 'network', message: (e as Error)?.message ?? '网络请求失败', retryable: true },
-      };
+      return { ok: false, usage: null, failure: this.abortFailure(e, opts.signal, 'embedding ') };
     }
 
     const latencyMs = this.now() - t0;

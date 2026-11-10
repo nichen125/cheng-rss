@@ -58,11 +58,49 @@ export function digestRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   r.get('/digests/status', async (c) => {
     const uid = requireUserId(c);
     const { digestStatus, parseDigestConfig } = await import('../digest/schedule.ts');
+    const { latestRun, viewOf } = await import('../digest/runs.ts');
     const row = ctx.dbh.db.prepare('SELECT digest_config FROM settings WHERE user_id = ?')
       .get(uid) as { digest_config: string } | undefined;
     let raw: unknown = null;
     try { raw = row?.digest_config ? JSON.parse(row.digest_config) : null; } catch { /* 坏配置用默认 */ }
-    return c.json(digestStatus(ctx.dbh.db, uid, parseDigestConfig(raw)));
+    return c.json({
+      ...digestStatus(ctx.dbh.db, uid, parseDigestConfig(raw)),
+      // 进度挂在状态上而不是单独一个接口：前端本来就在轮询它。
+      // 多一个真相源就多一处会不同步的地方 —— "状态说在跑、进度说没跑"
+      // 那种自相矛盾，用户无法判断该信哪个。
+      run: viewOf(latestRun(ctx.dbh.db, uid)),
+    });
+  });
+
+  /**
+   * 停止正在生成的那一次。
+   *
+   * 返回的语义是**「已经请求停止」**，不是「已经停止」：在飞的那次模型
+   * 调用要等它自己被 abort（最多一秒的轮询间隔 + 一次网络收尾）。
+   * 前端据此显示"正在停止…"，然后继续轮询状态直到 status 变成 cancelled。
+   *
+   * 为什么不做成同步等待到停下：那会让这个请求同样挂几分钟，而用户点
+   * "停止"时最不想看到的就是又一个转不完的圈。
+   */
+  r.post('/digests/runs/:id/stop', async (c) => {
+    const uid = requireUserId(c);
+    const { getRun, requestCancel } = await import('../digest/runs.ts');
+    const runId = c.req.param('id');
+    const row = getRun(ctx.dbh.db, runId);
+    // 不属于这个用户的 run 一律按"不存在"处理，不泄露别人有没有在跑
+    if (!row || row.user_id !== uid) throw notFound('没有这次生成');
+
+    const res = requestCancel(ctx.dbh.db, runId);
+    return c.json({
+      ok: res.ok,
+      status: res.status,
+      // cancelled = 还没开始就停掉了（不用再等）；requested = 已在跑，等它收尾
+      cancelled: res.cancelled,
+      requested: res.requested,
+      message: res.cancelled
+        ? '已停止（还没开始，直接作废）'
+        : res.requested ? '已请求停止，正在收尾' : '这次生成已经结束，无需停止',
+    });
   });
 
   r.get('/digests/:id', (c) => {
@@ -142,35 +180,77 @@ export function digestRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   });
 
   /**
-   * 手动生成。
+   * 手动生成。**202 + 立即返回**，不再等那 8~9 分钟。
    *
-   * 返回 200 + `ok:false` 而不是 4xx：**"没有内容"不是请求错误**。
-   * 用户点"生成今天的简报"时如果今天确实没什么新闻，那是正常结果，
-   * 用 4xx 会让前端弹一个红色错误框，而正确表现是一句说明。
+   * 之前的实现是全同步：`await runDigest(...)` 之后才响应，于是前端点了
+   * 「现在生成」就盯着一个 disabled 按钮直到整条链跑完（实测 528 秒）。
+   * 浏览器不会超时，用户只能刷新页面 —— 而刷新之后连"还在跑"都看不到。
+   *
+   * 现在返回的是一个 runId，进度与结果都从 `GET /digests/status` 的 `run`
+   * 字段读。202 而不是 200：语义确实是"已受理，尚未完成"，这是让客户端
+   * （以及将来的任何调用方）不用猜"这个 200 到底是跑完了还是刚开始"。
+   *
+   * 已经有一次在跑时**不新建**，把那一次的 runId 交回去（queued:false）：
+   * 用户连点两下按钮不该花两份钱，而"等它这次跑完"才是他真正想要的。
    */
   r.post('/digests/run', async (c) => {
     const uid = requireUserId(c);
     const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+    const { liveRun, createRun, setRunJob } = await import('../digest/runs.ts');
+    const { digestStatus, parseDigestConfig, localDayStart } = await import('../digest/schedule.ts');
+    const { enqueue } = await import('../jobs/queue.ts');
 
-    const { runDigest } = await import('../digest/run.ts');
-    const r2 = await runDigest(ctx, {
-      userId: uid,
-      manual: true,
-      // allowSingle：手动生成时 1 个簇也出 —— 用户可能就想看这一件事的综述；
-      // force 的语义是"跳过'只有 1 个事件不值得'这条判断"，不是绕过内容检查
-      allowSingle: Boolean(body.force),
+    const db = ctx.dbh.db;
+    const existing = liveRun(db, uid);
+    if (existing) {
+      return c.json({
+        ok: true,
+        queued: false,
+        runId: existing.id,
+        status: existing.status,
+        message: existing.status === 'queued'
+          ? '已经在排队，稍后自动开始'
+          : '已经有一次正在生成',
+      }, 202);
+    }
+
+    const cfgRow = db.prepare('SELECT digest_config FROM settings WHERE user_id = ?')
+      .get(uid) as { digest_config: string } | undefined;
+    let raw: unknown = null;
+    try { raw = cfgRow?.digest_config ? JSON.parse(cfgRow.digest_config) : null; } catch { /* 坏配置用默认 */ }
+    const cfg = parseDigestConfig(raw);
+
+    const run = createRun(db, { userId: uid, manual: true });
+
+    // dedupeKey 用 runId：同一用户同一天可以手动跑多次（每次都是新的 run），
+    // 而"同一 run 不重复入队"仍要成立 —— 用 dayKey 做键会把第二次手动跑
+    // 吞掉，症状是"点了没反应，但上一次的结果出现了"。
+    // enqueue 返回的是 job **id**（不是行对象）；null 表示去重命中，
+    // 而这里的 dedupeKey 带 runId，不可能命中已存在的那条。
+    const jobId = enqueue(db, {
+      kind: 'digest',
+      payload: {
+        userId: uid, kind: cfg.kind, manual: true,
+        allowSingle: Boolean(body.force), runId: run.id,
+      },
+      dedupeKey: `digest-run:${run.id}`,
+      priority: 1,
+      maxAttempts: 1,
     });
+    setRunJob(db, run.id, jobId);
 
+    // 没有 worker（纯 API 进程）时任务会一直 pending。那种部署下
+    // 把 run 留在 queued 是诚实的 —— 但至少要让用户知道它不会自己动。
+    const st = digestStatus(db, uid, cfg);
     return c.json({
-      ok: r2.ok,
-      digestId: r2.digestId,
-      reason: r2.reason,
-      clusterCount: r2.clusterCount,
-      entryCount: r2.entryCount,
-      costUsd: Number(r2.costUsd.toFixed(6)),
-      invalidCites: r2.invalidCites,
-      strippedUrls: r2.strippedUrls,
-    });
+      ok: true,
+      queued: true,
+      runId: run.id,
+      status: run.status,
+      dayKey: localDayStart(Date.now()),
+      // 复用现有的"为什么今天可能不出"逻辑，前端不必自己推
+      hint: st.state === 'skipped' ? st.skipReason : null,
+    }, 202);
   });
 
   return r;

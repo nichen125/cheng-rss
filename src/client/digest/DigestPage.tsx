@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, type DigestSummary, type DigestCluster, type DigestDetail } from '../api.ts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  api, type DigestSummary, type DigestCluster, type DigestDetail, type DigestRunView,
+} from '../api.ts';
 import { parseMarkdown, renderInline, type CiteInfo } from './markdown.tsx';
 
 // 简报页（PLAN §15.4 / 3.5）。三栏里复用一个"列表 + 阅读区"的形状：
@@ -31,9 +33,28 @@ export function DigestPage(props: DigestPageProps) {
   const [status, setStatus] = useState<{
     enabled: boolean; at: string; state: string; skipReason: string | null;
     nextAt: number | null; attempts: number; lastError: string | null;
+    maxCostUsd: number; run: DigestRunView | null;
   } | null>(null);
-  const [generating, setGenerating] = useState(false);
   const [genMsg, setGenMsg] = useState('');
+  const [stopping, setStopping] = useState(false);
+
+  // 正在跑的那一次。**以服务端为准**，不在本地维护"我在生成"这个标志 ——
+  // 用户刷新页面、或从另一个标签页点生成，本地标志都会撒谎。
+  const run = status?.run ?? null;
+  const generating = run !== null && (run.status === 'queued' || run.status === 'running');
+
+  const open = useCallback(async (id: string) => {
+    setOpenId(id);
+    setDetailLoading(true);
+    setActiveCite(null);
+    try {
+      setDetail(await api.getDigest(id));
+    } catch {
+      setDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,42 +74,74 @@ export function DigestPage(props: DigestPageProps) {
 
   useEffect(() => { void load(); }, []);   // 只在挂载时拉一次
 
-  const open = useCallback(async (id: string) => {
-    setOpenId(id);
-    setDetailLoading(true);
-    setActiveCite(null);
-    try {
-      setDetail(await api.getDigest(id));
-    } catch {
-      setDetail(null);
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
+  // 进度轮询：只在**有东西在跑**时开，跑完立刻停。
+  //
+  // 常开轮询会让"读简报"这种静止页面也一直在打扰服务端；而完全不轮询，
+  // 用户点完「现在生成」就看不到任何变化（上一次的实现在这里让按钮
+  // disabled 了整整 528 秒）。
+  const pollRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!generating) return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const st = await api.digestStatus();
+        if (!alive) return;
+        setStatus(st);
+        // 跑完了：刷新列表并打开新生成的那一份。这一步不能放在"点击之后"
+        // —— 那时服务端还没跑完，拿不到 digestId。
+        const r = st.run;
+        if (r && (r.status === 'done' || r.status === 'cancelled' || r.status === 'failed')) {
+          setGenMsg(
+            r.status === 'done' ? '已生成'
+              : r.status === 'cancelled' ? `已停止：${r.cancelReason ?? '用户手动停止'}`
+                : `没生成出来：${r.reason ?? '未知原因'}`,
+          );
+          await load();
+          if (r.status === 'done' && r.digestId) await open(r.digestId);
+        }
+      } catch { /* 轮询失败不打断用户：下一轮再试 */ }
+    };
+    void tick();
+    pollRef.current = window.setInterval(() => void tick(), 2000);
+    return () => {
+      alive = false;
+      if (pollRef.current !== null) window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    };
+  }, [generating, load, open]);
 
   useEffect(() => {
     if (openId) void open(openId);
   }, [openId, open]);
 
   const generate = useCallback(async () => {
-    setGenerating(true);
     setGenMsg('');
     try {
       const r = await api.runDigest();
-      if (r.ok && r.digestId) {
-        setGenMsg('已生成');
-        await load();
-        await open(r.digestId);
-      } else {
-        // "没有内容"不是错误 —— 用说明文字而不是红框
-        setGenMsg(r.reason ?? '没有可以生成的内容');
-      }
+      // 立刻返回（202）。这一次的"正在跑"由轮询发现，不在这里等。
+      if (!r.queued) setGenMsg(r.message ?? '已经有一次在生成');
+      // 顺手把运行态塞进状态里，让按钮立刻变成「停止」
+      const st = await api.digestStatus();
+      setStatus(st);
     } catch (e) {
-      setGenMsg(e instanceof Error ? e.message : '生成失败');
-    } finally {
-      setGenerating(false);
+      setGenMsg(e instanceof Error ? e.message : '发起生成失败');
     }
-  }, [load, open]);
+  }, []);
+
+  const stop = useCallback(async () => {
+    if (!run) return;
+    setStopping(true);
+    try {
+      const r = await api.stopDigest(run.id);
+      setGenMsg(r.message);
+      setStatus(await api.digestStatus());
+    } catch (e) {
+      setGenMsg(e instanceof Error ? e.message : '停止失败');
+    } finally {
+      setStopping(false);
+    }
+  }, [run]);
 
   const byIndex = useMemo(() => {
     const m = new Map<number, CiteInfo>();
@@ -133,15 +186,57 @@ export function DigestPage(props: DigestPageProps) {
             <h1>简报</h1>
             {items.length > 0 && <span className="pane-count">{items.length}</span>}
           </div>
-          <button
-            className="btn sm"
-            disabled={generating}
-            onClick={() => void generate()}
-            title="立刻生成今天的简报（跳过定时）"
-          >
-            {generating ? '生成中…' : '现在生成'}
-          </button>
+          {generating ? (
+            // 生成中时这颗按钮变成"停止"。不给停止路径的话，用户唯一能做的
+            // 就是等 9 分钟 —— 而 AI 调用是要花钱的，停不下来等于没有上限。
+            <button
+              className="btn sm danger"
+              disabled={stopping}
+              onClick={() => void stop()}
+              title="停止这次生成（已经花掉的不会退）"
+            >
+              {stopping ? '正在停止…' : '停止'}
+            </button>
+          ) : (
+            <button
+              className="btn sm"
+              onClick={() => void generate()}
+              title="立刻生成今天的简报（跳过定时）"
+            >
+              现在生成
+            </button>
+          )}
         </header>
+
+        {/* 进度条：跑起来之后用户要能看见"到第几个事件了、已经花了多少"。
+            这些数字全部来自服务端，不在前端估算 —— 估算出来的进度条
+            会在最慢的那一步停住不动，比没有更让人怀疑它死了。 */}
+        {generating && run && (
+          <div className="digest-progress" data-stale={run.stale ? '1' : '0'}>
+            <div className="digest-progress-head">
+              <span className="spinner" />
+              <span className="digest-progress-phase">{phaseLabel(run.phase, run.status)}</span>
+              <span className="digest-progress-num">
+                {run.doneClusters}/{run.totalClusters || '?'}
+              </span>
+            </div>
+            <div className="digest-progress-bar">
+              <span
+                style={{
+                  width: `${run.totalClusters > 0
+                    ? Math.min(100, (run.doneClusters / run.totalClusters) * 100)
+                    : 8}%`,
+                }}
+              />
+            </div>
+            <div className="digest-progress-meta">
+              <span>已花 ${run.costUsd.toFixed(4)}</span>
+              {status && <span> · 上限 ${status.maxCostUsd}</span>}
+              <span> · 用时 {fmtElapsed(run.elapsedMs)}</span>
+              {run.stale && <span className="digest-progress-stale"> · 心跳停了</span>}
+            </div>
+          </div>
+        )}
 
         {genMsg && <div className="digest-gen-msg">{genMsg}</div>}
 
@@ -358,6 +453,10 @@ export function DigestPage(props: DigestPageProps) {
     </div>
   );
 }
+
+// 阶段名与用时格式化放在 run-format.ts：配置页也要显示同一条进度，
+// 两处各写一份就会分叉成两个名字。
+import { fmtElapsed, phaseLabel } from './run-format.ts';
 
 /** 2026-10-29 */
 function fmtDay(ms: number | null): string {

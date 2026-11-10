@@ -18,11 +18,67 @@ import { log } from '../logger.ts';
 /** 进程生命周期内只应报一次的全局失败种类 */
 const GLOBAL_KINDS = new Set(['no-key', 'budget']);
 
+/**
+ * 「这个失败是配置问题，不是这一篇的问题」——按**模型**判定，不是按 kind。
+ *
+ * 起因是实测：配置里写着 `text-embedding-3-small`，而网关没有这个模型，
+ * 于是每条 analyze 之后的那条 embed 都是 503 `model_not_found`。
+ * 按 kind 归类的话那是 `http-503`，而 `http-503` 也可能是"上游真的坏了"，
+ * 不能一律抑制 —— 抑制真实 5xx 会让"网关炸了"变成静默。
+ *
+ * 判据换成模型维度就精确了：同一个模型反复报 404/503/model_not_found，
+ * 说明这个模型名在网关上根本不存在，跟具体哪篇文章无关。
+ * 换模型或改配置后这个 key 自然会变，所以抑制不会跟着用户走。
+ */
+const modelDead = new Map<string, number>();
+
+/**
+ * 这个模型连续失败到可以认定"网关上没有它"的门槛。
+ *
+ * 3 次而不是 1 次：一次 503 可能只是网关抖了一下，而"模型不存在"是
+ * 每次必现的。用 1 次会把一次偶发故障记成配置错误，用户照提示去改配置
+ * 反而把能用的模型改掉。
+ */
+export const DEAD_MODEL_THRESHOLD = 3;
+
+/** 这个模型是否已被认定为"网关上没有它" */
+export function isDeadModel(model: string): boolean {
+  return (modelDead.get(model) ?? 0) >= DEAD_MODEL_THRESHOLD;
+}
+
+/**
+ * 记一次该模型失败。返回 true 表示**这一次**该进日志。
+ *
+ * 前两次照常记（那两次还可能是偶发），到阈值那一次记一条"这个模型
+ * 不存在"的警告，之后静默 —— 之后的每一次都已经被那条警告解释了。
+ */
+export function noteModelFailure(model: string): boolean {
+  const n = (modelDead.get(model) ?? 0) + 1;
+  modelDead.set(model, n);
+  if (n < DEAD_MODEL_THRESHOLD) return true;
+  if (n === DEAD_MODEL_THRESHOLD) {
+    log.warn(
+      `模型 ${model} 连续 ${n} 次失败，网关上很可能没有这个模型。`
+      + ' 去「配置 → AI 分析 → 模型名称」改成网关确实提供的模型；'
+      + '在此之前它不会再逐条记日志。',
+      { model, count: n },
+    );
+    return true;
+  }
+  return false;
+}
+
+/** 某模型失败过几次（状态页用） */
+export function modelFailureCount(model: string): number {
+  return modelDead.get(model) ?? 0;
+}
+
 const seen = new Map<string, number>();
 
 /** 供验收脚本复位（不在业务路径里调用） */
 export function resetNotices(): void {
   seen.clear();
+  modelDead.clear();
 }
 
 export function isGlobalKind(kind: string): boolean {

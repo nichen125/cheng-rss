@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import type { AiClient } from '../ai/client.ts';
 import { ClusterSummarySchema, type ClusterSummary } from '../ai/schema.ts';
 import { packVec } from '../dedupe/cosine.ts';
@@ -86,7 +87,7 @@ export interface SummarizeResult {
 export async function summarizeCluster(
   client: AiClient,
   members: ClusterMember[],
-  opts: { userId?: string; model?: string } = {},
+  opts: { userId?: string; model?: string; signal?: AbortSignal } = {},
 ): Promise<SummarizeResult> {
   if (members.length === 0) {
     return { ok: false, summary: null, failure: '空簇', droppedSources: [] };
@@ -104,6 +105,7 @@ export async function summarizeCluster(
     userId: opts.userId,
     maxTokens: 900,
     signalName: 'cluster_summary',
+    signal: opts.signal,
   });
 
   if (!r.ok) {
@@ -176,6 +178,8 @@ export function saveCluster(
   members: ClusterMember[],
   window: { start: number; end: number },
   now = Date.now(),
+  /** 复用键：这组文章是不是同一批（见 memberKeyOf）。缺省 null = 未标定 */
+  memberKey?: string | null,
 ): string {
   const id = `cl_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -189,8 +193,9 @@ export function saveCluster(
   try {
     db.prepare(`
       INSERT INTO clusters (id, user_id, kind, title, summary, key_points, consensus,
-        conflicts, centroid, entry_count, source_count, heat, window_start, window_end, created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        conflicts, centroid, entry_count, source_count, heat, window_start, window_end,
+        created_at, member_key)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       id, userId, 'event',
       summary?.title ?? fallbackTitle(members),
@@ -201,6 +206,7 @@ export function saveCluster(
       packVec(c.centroid),
       c.entryCount, c.sourceCount, c.heat,
       window.start, window.end, now,
+      memberKey ?? null,
     );
 
     const ins = db.prepare(`
@@ -239,5 +245,117 @@ export function clearWindowClusters(
   const r = db.prepare(
     'DELETE FROM clusters WHERE user_id = ? AND window_start = ?',
   ).run(userId, windowStart);
+  return Number(r.changes ?? 0);
+}
+
+// ── 簇复用（PLAN §9.8 的 C7）──────────────────────────────────
+//
+// 为什么需要它：一次简报要逐簇归纳，而"归纳"是这段流程里最贵的一段
+// （每簇一次模型调用）。用户点了「停止」之后再点「生成」，如果他做的是
+// 同一批事件，把已经归纳好的结果重新归纳一遍就是纯粹地重复付钱。
+// 缓存键取**成员条目的集合**，不取时间窗：同一批文章在十分钟后仍然是
+// 同一件事，而"是不是同一批"跟哪一天、哪次运行无关，所以可以跨天命中。
+
+/**
+ * 一组成员的复用键。
+ *
+ * `sha256(排序后的 entry_id 拼接).slice(0,16)`：排序是为了"同一批"这
+ * 个语义不被喂进来的顺序影响 —— 聚类结果的顺序会随阈值与新增条目变化，
+ * 而它们描述的还是那几篇报道。
+ *
+ * 截到 16 个字符（64 bit）而不是更短：碰撞的后果是"把 A 事件的综述
+ * 当成 B 事件"，那比"多花一次调用"严重得多。64 bit 在单用户的量级上
+ * 远远够（生日界下要百万级成员组合才有一次碰撞）。
+ */
+export function memberKeyOf(entryIds: string[]): string {
+  const sorted = [...entryIds].sort();
+  return createHash('sha256').update(sorted.join('|')).digest('hex').slice(0, 16);
+}
+
+export interface CachedCluster {
+  id: string;
+  title: string;
+  summary: string | null;
+  keyPoints: string[];
+  consensus: string[];
+  conflicts: { claim: string; sources: string[] }[];
+  entryCount: number;
+  sourceCount: number;
+  heat: number;
+  memberKey: string;
+  createdAt: number;
+}
+
+/**
+ * 按 member_key 取回已归纳的簇。跨天，取最新的一条。
+ *
+ * 一次查回全部 key 而不是逐个查：簇有 12 个，逐查就是 12 次往返，
+ * 而这条路径发生在用户点了"生成"之后的第一秒里，它不该是慢的部分。
+ */
+export function findCachedClusters(
+  db: DatabaseSync,
+  userId: string,
+  keys: string[],
+): Map<string, CachedCluster> {
+  const out = new Map<string, CachedCluster>();
+  if (keys.length === 0) return out;
+
+  const rows = db.prepare(`
+    SELECT * FROM clusters
+     WHERE user_id = ? AND member_key IS NOT NULL
+       AND member_key IN (${keys.map(() => '?').join(',')})
+     ORDER BY created_at ASC
+  `).all(userId, ...keys) as Record<string, unknown>[];
+
+  for (const r of rows) {
+    // 同一 key 有多行时（同一天重新跑过、或跨天命中）保留**最新**的：
+    // ORDER BY created_at ASC 之后逐条覆盖，最后留下的就是最新那条。
+    const key = String(r.member_key);
+    out.set(key, {
+      id: String(r.id),
+      title: String(r.title ?? ''),
+      summary: r.summary === null ? null : String(r.summary),
+      keyPoints: parseArr<string>(r.key_points),
+      consensus: parseArr<string>(r.consensus),
+      conflicts: parseArr<{ claim: string; sources: string[] }>(r.conflicts),
+      entryCount: Number(r.entry_count ?? 0),
+      sourceCount: Number(r.source_count ?? 0),
+      heat: Number(r.heat ?? 0),
+      memberKey: key,
+      createdAt: Number(r.created_at ?? 0),
+    });
+  }
+  return out;
+}
+
+function parseArr<T>(raw: unknown): T[] {
+  if (raw === null || raw === undefined || raw === '') return [];
+  try {
+    const v = JSON.parse(String(raw));
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 清掉"这次运行之前"的簇，但**只清即将重算的那一批**。
+ *
+ * 原来的 `clearWindowClusters(db, userId, dayKey)` 传的是**日历日**，
+ * 而 `saveCluster` 写进去的 `window_start` 是 `now - 24h` —— 两个键
+ * 永不相等，所以它一条都没删过。实测库里 clusters 只增不减，
+ * 抽掉这条清理之后"整窗重算"的语义就只剩一半。
+ *
+ * 现在按**时间**清：`created_at < sinceCreated` 的簇都算上一轮的产物。
+ * 不传 cutoff 的老调用（验收脚本）仍走 clearWindowClusters 的原语义。
+ */
+export function clearClustersBeforeRun(
+  db: DatabaseSync,
+  userId: string,
+  sinceCreated: number,
+): number {
+  const r = db.prepare(
+    'DELETE FROM clusters WHERE user_id = ? AND created_at < ?',
+  ).run(userId, sinceCreated);
   return Number(r.changes ?? 0);
 }

@@ -343,7 +343,6 @@ group('简报运行 · 进度落库');
     v.status === 'done' && v.digestId === r.digestId && v.stale === false,
     JSON.stringify(v),
   ));
-
   // 复跑时进度要从 0 重新开始，而不是接着上一轮的 2/2
   const run2 = createRun(h.db, { userId: 'u1', manual: true });
   startRun(h.db, run2.id);
@@ -484,6 +483,13 @@ group('简报运行 · 在飞取消');
   });
   const v = viewOf(getRun(h.db, run.id));
   check('⑦ 结束后 status 是 cancelled 而不是 done', () => eq(v.status, 'cancelled'));
+  check('⑦ 跑着的时候心跳在往前走（否则 60 秒后 UI 会对一次正常生成喊"心跳停了"）', () => {
+    const row = getRun(h.db, run.id);
+    return ok(
+      Number(row.heartbeat_at) > Number(row.started_at),
+      JSON.stringify({ started: row.started_at, beat: row.heartbeat_at }),
+    );
+  });
   check('⑦ 跳过记录写了「已停止」', () => {
     const s = h.db.prepare('SELECT reason FROM digest_skips WHERE user_id = ?').get('u1');
     return ok(s && /已停止/.test(String(s.reason)), String(s?.reason));

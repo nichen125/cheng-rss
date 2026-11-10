@@ -15,7 +15,7 @@ import {
   memberKeyOf, findCachedClusters, clearClustersBeforeRun,
 } from '../cluster/summarize.ts';
 import { digestDue, recordAttempt, recordSkip, parseDigestConfig, localDayStart } from './schedule.ts';
-import { setPhase } from './runs.ts';
+import { setPhase, beatAndCheckCancel } from './runs.ts';
 import { log } from '../logger.ts';
 import { listDayHighlights, renderDigestHighlightSection } from '../highlights/insight.ts';
 import { htmlToText } from '../feeds/parse.ts';
@@ -151,10 +151,13 @@ export async function runDigest(
     if (opts.signal.aborted) ac.abort();
     else opts.signal.addEventListener('abort', () => ac.abort(), { once: true });
   }
+  // 心跳与取消检查合并成一次往返（beatAndCheckCancel 的注释解释了为什么）。
+  // 光读取消标记是不行的：那样子跑得再欢库里心跳也停在 started_at，
+  // 60 秒后 viewOf 就会判 stale=true，UI 对着一次完全正常的生成说"心跳停了"。
   const heartbeatTimer = opts.runId
     ? setInterval(() => {
-        const r = readCancelReason(db, opts.runId!);
-        if (r && !ac.signal.aborted) ac.abort();
+        const b = beatAndCheckCancel(db, opts.runId!);
+        if (b.cancelRequested && !ac.signal.aborted) ac.abort();
       }, CANCEL_POLL_MS)
     : null;
   heartbeatTimer?.unref?.();

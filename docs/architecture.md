@@ -49,7 +49,7 @@ src/
 │  ├─ search/            FTS5 + 程序侧 bigram
 │  ├─ highlights/        划词高亮（三选择器降级）
 │  ├─ jobs/              任务队列（SQLite 表 + 内联 runner）
-│  └─ db/                连接、迁移、schema
+│  └─ db/                连接、迁移、手写 DDL
 └─ client/               React 19（无路由库，一个 useReducer 管视图）
 ```
 
@@ -115,11 +115,22 @@ digest job（每天定时）
 决定性的是 `node:sqlite`：它让项目**零原生插件**，`npm ci` 在任何平台都能装完
 （`better-sqlite3` 需要编译工具链，在 NAS 的 ARM 容器里经常失败）。
 
-### Drizzle ORM 的 `1.0.0-rc.5`，不是稳定版
+### 裸 `node:sqlite`，不是 ORM
 
-因为**稳定版 `0.45.x` 没有 `node-sqlite` 驱动**。这是个被迫的版本选择，
-所以 ORM 只用于类型推导与 `dbstat` 之类的查询，**迁移全部手写 SQL**
-（`src/server/db/migrations/*.sql`）—— 不把建表逻辑托付给 RC 版本。
+原本计划用 Drizzle 做类型化查询，且必须钉在 `1.0.0-rc.5` —— 稳定版 `0.45.x` 的 sqlite
+驱动只有 `better-sqlite3` / `bun-sqlite` / `libsql` 等，**没有 `node-sqlite`**。这个被迫的
+版本选择最终没有成立，原因有三条：
+
+- `entries_fts` 是 FTS5 虚拟表，`drizzle-kit` 的 DDL 生成器覆盖不到
+- 部分索引的 `WHERE` 子句需要精确控制，同样超出生成器能力
+- 全仓 `db.select|insert|update|delete` 命中 0 次、`db/schema.ts`（333 行）被 0 个文件
+  import —— 表结构有两份真相，而真正被使用的那份（`migrations/*.sql`）与 ORM 无关
+
+P0 已删掉 `drizzle-orm` / `drizzle-kit` 与 `src/server/db/schema.ts`：`openDb` 只返回原生
+`DatabaseSync`，事务、PRAGMA、迁移、查询全走它。**表结构的唯一真相是
+`src/server/db/migrations/*.sql` 里的手写 DDL**（经 esbuild 的 text loader 内嵌进二进制，
+登记在 `src/server/db/migration-sql.ts`）。代价是没有编译期列类型推导，换来 DDL 完全可控
+—— 这也是能在 SEA 里跑通的组合。
 
 ### Hono，不是 Next.js / Express
 

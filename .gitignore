@@ -64,3 +64,6 @@ export-*.tar.gz
 # 测试夹具中的临时文件（HAR 本身要提交）
 tests/fixtures/**/*.tmp
 tests/fixtures/**/scratch/**
+
+# 并行开发的 worktree 目录，不随仓库分发
+.worktrees/

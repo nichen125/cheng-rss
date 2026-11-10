@@ -51,6 +51,19 @@ const EMPTY: RunDigestResult = {
   clusterCount: 0, entryCount: 0, costUsd: 0, invalidCites: 0, strippedUrls: 0,
 };
 
+/**
+ * 简报自身产生的花费只来自这两类调用。
+ *
+ * 单次上限若按用户总花费算，会把同一时间段里并发的 analyze/embed 也算进
+ * 「本次简报」——积压任务多的时候，一份只花了 $0.02 的简报会因为别人花了
+ * $0.25 而被取消。
+ */
+const DIGEST_PURPOSES = ['cluster', 'digest'] as const;
+
+function digestSpendUsd(db: DatabaseSync, userId: string, since: number): number {
+  return usageSince(db, userId, since, DIGEST_PURPOSES).usd;
+}
+
 /** 一条簇至少要有的信息量。少于这个数进简报只会浪费一次调用 */
 export const MIN_ENTRIES_FOR_DIGEST = 1;
 /** 少于这么多簇时不出简报 —— 一则孤立的新闻不构成"日报" */
@@ -140,6 +153,17 @@ export async function runDigest(
     .get(userId) as { digest_config: string } | undefined;
   const cfg = { ...parseDigestConfig(safeJson(rawCfg?.digest_config)), kind };
 
+  // 「这次花了多少」的统一口径：同一个起点、同一个基线，主链与异常/取消
+  // 出口都用它。基线放在主链之前取，但两边相减，所以窗口内别人（analyze /
+  // embed）的花费既不会算进本次，也不会因为基线取得晚而漏掉。
+  const costSince = now - CLUSTER_WINDOW_HOURS * 3600_000;
+  let spendBaseline = 0;
+  try {
+    spendBaseline = digestSpendUsd(db, userId, costSince);
+  } catch {
+    // 基线查询失败不该让整次生成直接失败；按 0 算最多是上限偏严。
+  }
+
   // 取消检查的统一出口。每一处"要花下一次钱"之前都问一遍。
   const ac = new AbortController();
   const cancelReasonOf = opts.runId
@@ -172,16 +196,29 @@ export async function runDigest(
       runId: opts.runId,
       signal: ac.signal,
       cancelReasonOf,
+      since: costSince,
+      spendBaseline,
       maxCostUsd: opts.maxCostUsd ?? cfg.maxCostUsd,
     });
   } catch (e) {
+    // 取消/异常也要带上**已经花掉的钱**。此前这里返回 EMPTY 的 costUsd=0，
+    // handler 再把它交给 finishRun，COALESCE 会用 0 覆盖进度里已报过的
+    // 真实花费 —— 用户点了停止，账单还在，面板却归零。
+    let costUsd = 0;
+    try {
+      costUsd = Math.max(0, digestSpendUsd(db, userId, costSince) - spendBaseline);
+    } catch { /* 库不可写时保持 0 */ }
+
     // 取消不是失败。单独一条分支的原因：它要落的是"跳过"而不是"失败"。
     // 失败会进 digest_attempts 的退避重试，而取消恰恰要求**别再自动跑** ——
     // 把两者混成一种记录，"停一次"就会变成"今天还会重试三次"。
     if (e instanceof CancelledError) {
       const msg = `已停止：${e.cancelReason}`;
       try { recordSkip(db, userId, cfg, dayKey, msg, now); } catch { /* 库不可写时无处可记 */ }
-      return { ...EMPTY, reason: msg, cancelled: true, cancelReason: e.cancelReason };
+      return {
+        ...EMPTY, reason: msg, cancelled: true,
+        cancelReason: e.cancelReason, costUsd,
+      };
     }
 
     // 记 attempt 本身也可能失败（库挂了）。那时只能返回，不能二次抛 ——
@@ -190,7 +227,7 @@ export async function runDigest(
     try {
       recordAttempt(db, userId, cfg, dayKey, false, msg.slice(0, 500), now);
     } catch { /* 库不可写时无处可记 */ }
-    return { ...EMPTY, reason: msg };
+    return { ...EMPTY, reason: msg, costUsd };
   } finally {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
   }
@@ -221,6 +258,9 @@ async function runDigestInner(
     signal?: AbortSignal;
     /** 库里那个"已请求取消"的原因（没有则 null） */
     cancelReasonOf: () => string | null;
+    /** 花费统计的起点与开跑时的基线（由 runDigest 统一算好传下来） */
+    since: number;
+    spendBaseline: number;
     maxCostUsd: number;
   },
 ): Promise<RunDigestResult> {
@@ -249,8 +289,7 @@ async function runDigestInner(
   }
 
   // ── 取窗口 + 聚类 ──────────────────────────────────────────
-  const since = now - CLUSTER_WINDOW_HOURS * 3600_000;
-  const win = loadClusterWindow(db, userId, since, now);
+  const win = loadClusterWindow(db, userId, a.since, now);
   if (win.items.length === 0) {
     const r = '最近 24 小时没有新条目';
     recordSkip(db, userId, cfg, dayKey, r, now);
@@ -299,11 +338,8 @@ async function runDigestInner(
   const inputs: DigestClusterInput[] = [];
   let done = 0;
   let reused = 0;
-  // 这次运行开始时的累计花费。上限要按"这次花了多少"判，而 ai_usage 的
-  // usageSince 是"从某时刻起的**全部**花费" —— 它会把这次运行之前、
-  // 同一时刻之后别人（fetch/analyze）花的钱也算进来。所以基线与当前值
-  // 都取同一个口径，相减才是"这次花了多少"。
-  const spendBaseline = usageSince(db, userId, since).usd;
+  // 基线由 runDigest 统一算好传下来（取消/异常出口也要用同一个值），
+  // 这里不能再算一次，否则两处口径会漂移。
 
   for (let i = 0; i < use.length; i++) {
     checkCancel();
@@ -326,7 +362,7 @@ async function runDigestInner(
           key_points: hit.keyPoints,
           consensus: hit.consensus,
           conflicts: hit.conflicts,
-        }, members, { start: since, end: now }, now, key,
+        }, members, { start: a.since, end: now }, now, key,
       );
       inputs.push({
         id: newId,
@@ -356,7 +392,7 @@ async function runDigestInner(
 
     const id = saveCluster(
       db, userId, c, s.summary, members,
-      { start: since, end: now }, now, key,
+      { start: a.since, end: now }, now, key,
     );
     inputs.push({
       id,
@@ -373,7 +409,7 @@ async function runDigestInner(
 
     // 一簇落库之后立刻算钱并检查上限。放在"落库后"而不是"调用前"：
     // 花费是那次调用产生的，调用前检查会把刚花掉的那笔当成还没花。
-    const spent = Math.max(0, usageSince(db, userId, since).usd - spendBaseline);
+    const spent = Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline);
     if (a.runId) setPhase(db, a.runId, { doneClusters: done, costUsd: spent });
     if (spent > a.maxCostUsd) {
       throw new CancelledError(
@@ -395,7 +431,12 @@ async function runDigestInner(
   if (inputs.length < minClusters) {
     const r = `簇归纳后只剩 ${inputs.length} 个可用事件`;
     recordSkip(db, userId, cfg, dayKey, r, now);
-    return { ...EMPTY, reason: r, clusterCount: inputs.length, entryCount: win.items.length };
+    // 簇归纳已经真花过钱，这条"没出简报"的路径同样要报实际花费。
+    return {
+      ...EMPTY, reason: r,
+      clusterCount: inputs.length, entryCount: win.items.length,
+      costUsd: Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline),
+    };
   }
 
   // ── 生成简报正文 ───────────────────────────────────────────
@@ -403,7 +444,7 @@ async function runDigestInner(
 
   // 上限在正文前也要再判一次：正文那一次是**单次最贵**的调用（2000 token），
   // 只在簇间检查意味着它总会再花一笔才停。
-  const beforeGen = Math.max(0, usageSince(db, userId, since).usd - spendBaseline);
+  const beforeGen = Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline);
   if (beforeGen > a.maxCostUsd) {
     throw new CancelledError(
       `超过单次上限 $${a.maxCostUsd}（本次已花 $${beforeGen.toFixed(4)}）`,
@@ -418,7 +459,7 @@ async function runDigestInner(
   // 只算正文有一个当场能看见的毛病：簇归纳阶段进度条已经报到 $0.088，
   // 正文写完 finishRun 又把 run 行写成 $0.036 —— 数字在"完成"那一刻变小，
   // 而用户实付的是两者之和（12 簇 $0.088 + 正文 $0.036）。
-  const costUsd = Math.max(0, usageSince(db, userId, since).usd - spendBaseline);
+  const costUsd = Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline);
 
   if (!gen.ok || !gen.body) {
     // 正文生成被取消：不记 attempt（它是"人不要了"，不是"这份简报坏了"）

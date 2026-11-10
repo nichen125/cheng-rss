@@ -277,6 +277,17 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
     const { readAiConfigRaw } = await import('../ai/service.ts');
     const cur = readAiConfigRaw(ctx.dbh.db, uid);
 
+    // timeoutMs 必须显式拒绝 <= 0：0 会让 AbortSignal.timeout(0) 在下一个
+    // tick 立即中止，AI 功能整体不可用，而设置界面不暴露这个字段，用户
+    // 无法从 UI 改回来。空串 / null 仍表示"删除该键、回落默认"。
+    if (body.timeoutMs !== undefined && body.timeoutMs !== null && body.timeoutMs !== '') {
+      const n = typeof body.timeoutMs === 'number' ? body.timeoutMs : Number(body.timeoutMs);
+      if (!Number.isFinite(n) || n <= 0) {
+        throw badRequest('timeoutMs 必须是大于 0 的数字（毫秒）');
+      }
+      body.timeoutMs = n;
+    }
+
     // 深合并一层：{models:{fast:'x'}} 不该把 strong/embed 一起抹掉
     const next: Record<string, unknown> = { ...cur };
     for (const [k, v] of Object.entries(body)) {

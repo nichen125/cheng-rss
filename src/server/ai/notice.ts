@@ -1,4 +1,5 @@
 import { log } from '../logger.ts';
+import type { AiFailure } from './client.ts';
 
 // 全局性 AI 失败的"只报一次"闸门（PLAN §8.8，2.6）。
 //
@@ -7,16 +8,16 @@ import { log } from '../logger.ts';
 // 真实库里有 745 篇待分析 —— 那会是 745 行，而且每轮 backfill 重排时
 // 再来一遍。日志里 745 行同一句"没配置 API key"，把真正的错误全埋掉了。
 //
-// 分类是关键：`no-key` / `budget` / `http-429` 冷却 是**全局配置状态**，
-// 不是某篇文章的属性 —— 报 745 次不会多出任何信息，只报 1 次也不会少。
-// 而 `schema` / `empty` / `bad-json` 是**这一篇的问题**，删掉它们就丢信息，
-// 所以那几类仍然逐条记。
+// 分类是关键：`no-key` / `budget` / `upstream-quota`（额度用尽） / `http-429`
+// 冷却 是**全局配置状态**，不是某篇文章的属性 —— 报 745 次不会多出任何信息，
+// 只报 1 次也不会少。而 `schema` / `empty` / `bad-json` 是**这一篇的问题**，
+// 删掉它们就丢信息，所以那几类仍然逐条记。
 //
 // 不变量：这个模块只在进程内生效。重启后第一条会重新报出来 —— 那是正确的，
 // 因为"重启之后还是没 key"本身是需要知道的事。
 
 /** 进程生命周期内只应报一次的全局失败种类 */
-const GLOBAL_KINDS = new Set(['no-key', 'budget']);
+const GLOBAL_KINDS = new Set(['no-key', 'budget', 'upstream-quota']);
 
 /**
  * 「这个失败是配置问题，不是这一篇的问题」——按**模型**判定，不是按 kind。
@@ -71,6 +72,23 @@ export function noteModelFailure(model: string): boolean {
 /** 某模型失败过几次（状态页用） */
 export function modelFailureCount(model: string): number {
   return modelDead.get(model) ?? 0;
+}
+
+/**
+ * 「这个失败能指向『模型不存在』」的判据。
+ *
+ * `noteModelFailure` 的阈值和警告文案只在“模型名在网关上根本不存在”时
+ * 才成立。timeout / network / 普通 5xx / upstream-quota 都是网关或账号的
+ * 瞬时状态，拿去凑 3 次会把一次抖动记成配置错误，并让后续真实故障被
+ * `isDeadModel` 静默掉。
+ */
+const MODEL_MISSING_RE =
+  /model_not_found|no such model|unknown model|invalid model|model[^\n]{0,40}(?:not found|not exist|does not exist)|模型[^\n]{0,20}不存在/i;
+
+export function isModelMissingFailure(f: Pick<AiFailure, 'kind' | 'message'>): boolean {
+  // 404 在这个 API 上基本只有“路径或模型名不对”，按模型缺失处理；
+  // baseURL 写错时提示会指向模型，是已知取舍。
+  return f.kind === 'http-404' || MODEL_MISSING_RE.test(f.message);
 }
 
 const seen = new Map<string, number>();

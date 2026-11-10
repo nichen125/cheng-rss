@@ -88,7 +88,7 @@ export function resolveAiConfig(raw: unknown): AiConfig {
       onBudgetExceeded: fallback.onBudgetExceeded === 'stop' ? 'stop' : 'fast_only',
     },
     pricing: { ...DEFAULT_AI_CONFIG.pricing, ...pricing } as Record<string, PricingEntry>,
-    timeoutMs: num(src.timeoutMs, DEFAULT_AI_CONFIG.timeoutMs),
+    timeoutMs: positiveNum(src.timeoutMs, DEFAULT_AI_CONFIG.timeoutMs),
   };
 }
 
@@ -98,6 +98,17 @@ function str(v: unknown, def: string): string {
 function num(v: unknown, def: number): number {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? n : def;
+}
+/**
+ * 与 `num` 的唯一区别是 0 不合法。
+ *
+ * 只给 `timeoutMs` 用：`AbortSignal.timeout(0)` 会在下一个 tick 立即中止，
+ * 等于所有模型调用都超时。其余字段的 0 有明确语义（预算 0 = 不限额、
+ * rpm 0 = 不限流），不能共用这个函数。
+ */
+function positiveNum(v: unknown, def: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : def;
 }
 
 /** 美元。token 缺失按 0 计，未知模型按 default 计（不记 0） */

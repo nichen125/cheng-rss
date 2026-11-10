@@ -195,12 +195,17 @@ export function failJob(
  *
  * 不打回 pending 的话，进程被 kill 后那些任务会永远卡在 running，
  * 对应条目也就永远停在处理中 —— 这在实际使用中是必现的。
+ *
+ * 判据用 `<=` 而不是 `<`：`staleMs=0`（启动时的单进程恢复）会拿
+ * `Date.now()` 当 cutoff，而 `claimBatch` 刚写的 `locked_at` 很可能与它是
+ * 同一毫秒。严格小于会让「刚认领就崩溃」的任务恰好漏掉 —— 那正是这次
+ * 修复要覆盖的场景。默认 10 分钟的路径几乎不可能正好落在边界上。
  */
 export function recoverStaleJobs(db: DatabaseSync, staleMs = STALE_LOCK_MS): number {
   const cutoff = Date.now() - staleMs;
   const r = db.prepare(`
     UPDATE jobs SET status='pending', locked_by=NULL, locked_at=NULL, updated_at=?
-     WHERE status='running' AND (locked_at IS NULL OR locked_at < ?)
+     WHERE status='running' AND (locked_at IS NULL OR locked_at <= ?)
   `).run(Date.now(), cutoff);
   return Number(r.changes ?? 0);
 }

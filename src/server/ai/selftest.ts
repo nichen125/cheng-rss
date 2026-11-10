@@ -211,13 +211,18 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
    * 那个数字判断要不要继续用。purpose 用 `selftest-<步名>` 前缀，
    * 便于在 ai_usage 里单独统计"自检本身花了多少"。
    */
-  const addCost = (r: RawCallResult, purpose: StepId | 'selftest') => {
-    const c = estimate(cfg.pricing, cfg.models.fast, r.inTokens, r.outTokens);
+  const addCost = (
+    r: RawCallResult,
+    purpose: StepId | 'selftest',
+    // 默认 fast；embedding 探针要用向量模型的价格，否则成本会按对话模型算。
+    model: string = cfg.models.fast,
+  ) => {
+    const c = estimate(cfg.pricing, model, r.inTokens, r.outTokens);
     cost += c;
     try {
       recordUsage(db, {
         purpose: `selftest-${purpose}`,
-        model: cfg.models.fast,
+        model,
         inTokens: r.inTokens,
         outTokens: r.outTokens,
         costUsd: c,
@@ -457,6 +462,9 @@ export async function runSelfTest(deps: SelfTestDeps): Promise<SelfTestReport> {
   // ── ⑥ 向量模型 ──────────────────────────────────────────────
   {
     const r = await raw({ path: '/embeddings', body: { model: cfg.models.embed, input: '你好' } });
+    // 向量请求同样真实计费；不记账的话「今日花费」和返回的 costUsd
+    // 都会漏掉这一笔，用户据此判断预算会偏低。
+    addCost(r, 'embed', cfg.models.embed);
     const vec = (r.parsed as { data?: { embedding?: number[] }[] })?.data?.[0]?.embedding;
     const dim = Array.isArray(vec) ? vec.length : null;
     measured.embed = { model: cfg.models.embed, ok: Boolean(dim), dim };

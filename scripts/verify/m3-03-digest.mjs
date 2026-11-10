@@ -193,6 +193,8 @@ group('3.3 简报 · 结构');
       String(r.rendered?.citations?.length)));
   check('调模型时 purpose=digest（成本归到简报）', () =>
     eq(c.calls[0]?.purpose, 'digest'));
+  check('整条 user 都是簇归纳产物，必须带 wrapUser（防提示注入）', () =>
+    eq(c.calls[0]?.wrapUser, true));
   check('传给模型的 user 里带 id=（否则模型无从引用）', () =>
     ok(String(c.calls[0]?.user).includes('id=cl_a'), String(c.calls[0]?.user)?.slice(0, 100)));
 }

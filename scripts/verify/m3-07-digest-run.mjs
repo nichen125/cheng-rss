@@ -56,6 +56,10 @@ const {
 // 才看到标志位"，那正好是这套机制要避免的形态。
 const calls = [];
 let delayMs = 0;
+// 给「单次上限只算简报自己」那条用：mock 收到簇归纳请求时往当前库插一条
+// analyze 花费，模拟同进程并发的积压分析任务。
+let injectAnalyzeUsd = 0;
+let activeDb = null;
 const chatBody = (content) => ({
   id: 'x', object: 'chat.completion',
   choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
@@ -88,6 +92,12 @@ const srv = createServer((req, res) => {
     const sys = String(body.messages?.[0]?.content ?? '');
     const isCluster = /多源情报编辑/.test(sys);
     calls.push({ kind: isCluster ? 'cluster' : 'digest' });
+    if (isCluster && injectAnalyzeUsd > 0 && activeDb) {
+      activeDb.prepare(`INSERT INTO ai_usage
+          (user_id, purpose, model, in_tokens, out_tokens, cost_usd, latency_ms, ok, error, created_at)
+        VALUES ('u1', 'analyze', 's', 0, 0, ?, 0, 1, NULL, ?)`)
+        .run(injectAnalyzeUsd, Date.now());
+    }
     const content = isCluster ? CLUSTER_JSON : digestJson(['cl_1', 'cl_2']);
     const send = () => {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -121,6 +131,8 @@ function freshDb(users = ['u1']) {
   //     **上一组那个已经关掉的库**：usage 记不进来 → 花费上限永远不触发，
   //     症状正是"上限设了、也花了钱、但它就是不停"。
   calls.length = 0;
+  injectAnalyzeUsd = 0;
+  activeDb = h.db;
   resetAiCache();
   migrate(h.db);
   const now = Date.now();
@@ -340,12 +352,24 @@ group('简报运行 · 进度落库');
   // 不是只算正文那一笔。只算正文的话，进度条报到 $0.08 之后 finishRun
   // 会把那个数字改写成更小的 $0.03 —— 用户实付的是两者之和。
   const spentAll = Number(
-    h.db.prepare('SELECT COALESCE(SUM(cost_usd),0) AS s FROM ai_usage WHERE user_id = ?')
-      .get('u1').s,
+    h.db.prepare(
+      "SELECT COALESCE(SUM(cost_usd),0) AS s FROM ai_usage WHERE user_id = ? AND purpose IN ('cluster','digest')",
+    ).get('u1').s,
   );
   check('④ 返回的 costUsd 覆盖整条链（簇归纳 + 正文），不是只算正文', () =>
     ok(Math.abs(spentAll - r.costUsd) < 1e-9,
       JSON.stringify({ usage: spentAll, reported: r.costUsd })));
+
+  // 列表接口必须带出真实引用数。SELECT 漏 cites 列时 citeCount 会恒为 0，
+  // 而详情接口用 SELECT * 却是对的 —— 只看详情永远发现不了。
+  {
+    const app = createApp(ctx);
+    const s = createSession(h.db, 'u1', 30);
+    const hdr = { cookie: `cheng_rss_sid=${s.token}` };
+    const list = await (await app.request('/api/v1/digests', { headers: hdr })).json();
+    check('④ GET /digests 列表的 citeCount 与详情一致（不是恒 0）', () =>
+      ok(list.items?.[0]?.citeCount === 2, JSON.stringify({ citeCount: list.items?.[0]?.citeCount })));
+  }
 
   // 心跳在 startRun 那一刻已经写过，跑完由 finishRun 刷新
   finishRun(h.db, run.id, { status: 'done', digestId: r.digestId, costUsd: r.costUsd });
@@ -425,6 +449,8 @@ group('简报运行 · 花费上限');
   ));
   check('⑥ 停因写明是超过上限、并带上已花金额', () =>
     ok(/超过单次上限/.test(String(r.cancelReason ?? '')), String(r.cancelReason)));
+  check('⑥ 取消返回的 costUsd 保留已花金额（不是 0）', () =>
+    ok(r.costUsd > 0, JSON.stringify({ costUsd: r.costUsd })));
   check('⑥ 第一簇之后就叫停：没有继续归纳第二簇、也没有写正文', () => ok(
     clusterCalls() === 1 && digestCalls() === 0,
     JSON.stringify({ c: clusterCalls(), d: digestCalls() }),
@@ -441,10 +467,16 @@ group('简报运行 · 花费上限');
   ));
   check('⑥ 停因落进了 run 行（UI 不能把"超限"显示成"用户手动停止"）', () => {
     finishRun(h.db, run.id, {
-      status: 'cancelled', reason: r.reason, cancelReason: r.cancelReason ?? null,
+      status: 'cancelled', reason: r.reason,
+      cancelReason: r.cancelReason ?? null, costUsd: r.costUsd,
     });
     const v = viewOf(getRun(h.db, run.id));
     return ok(/超过单次上限/.test(String(v.cancelReason ?? '')), JSON.stringify(v));
+  });
+  check('⑥ finishRun 不能用 0 覆盖进度里已报的花费', () => {
+    const c = Number(h.db.prepare('SELECT cost_usd FROM digest_runs WHERE id=?').get(run.id).cost_usd);
+    return ok(c > 0 && Math.abs(c - r.costUsd) < 1e-9,
+      JSON.stringify({ db: c, returned: r.costUsd }));
   });
 
   // 上限设成默认值之外的天文数字：应当能跑完（说明上限不是硬停在第一簇）
@@ -455,6 +487,32 @@ group('简报运行 · 花费上限');
   const r2 = await runDigest(ctx, { userId: 'u1', manual: true, runId: run2.id });
   check('⑥ 上限放宽后同一份内容能正常生成（不是"只要设了上限就停"）', () =>
     ok(r2.ok === true, JSON.stringify(r2)));
+}
+
+// ── ⑥b 单次上限只统计简报自身的花费 ────────────────────────
+//
+// 同进程并发的 analyze/embed 会往 ai_usage 里写钱。上限若按用户总花费算，
+// 一份实际只花几厘的简报会被积压任务"顶"到取消。这里在每次簇归纳请求
+// 期间注入一条 $5 的 analyze 记录，maxCostUsd 设 0.01，必须仍然成功。
+group('简报运行 · 上限只算简报自己');
+{
+  const { tmp, h } = freshDb();
+  const ctx = mkCtx(tmp, h);
+  seedEntries(h.db);
+  h.db.prepare('INSERT OR REPLACE INTO settings (user_id, digest_config) VALUES (?,?)')
+    .run('u1', JSON.stringify({ enabled: true, at: '00:00', maxCostUsd: 0.01 }));
+
+  injectAnalyzeUsd = 5;
+  const run = createRun(h.db, { userId: 'u1', manual: true });
+  startRun(h.db, run.id);
+  const r = await runDigest(ctx, { userId: 'u1', manual: true, runId: run.id });
+  injectAnalyzeUsd = 0;
+
+  check('⑥b 并发的 analyze 花费不触发简报的单次上限', () =>
+    ok(r.ok === true && r.cancelled !== true,
+      JSON.stringify({ ok: r.ok, cancelled: r.cancelled, reason: r.reason })));
+  check('⑥b 返回的 costUsd 不含 analyze 的花费', () =>
+    ok(r.costUsd > 0 && r.costUsd < 0.01, JSON.stringify({ costUsd: r.costUsd })));
 }
 
 // ── ⑦ 在飞取消：请求停止能真的中断那次悬着的调用 ──────────

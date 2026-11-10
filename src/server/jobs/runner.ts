@@ -67,9 +67,15 @@ export class JobRunner {
    *
    * 恢复必须在这里做而不是靠人工 —— 进程被 Ctrl-C / kill -9 后，
    * running 状态的任务不会自己回到 pending。
+   *
+   * 传 0 而不是默认的 10 分钟：当前是单进程 + SQLite 模型，启动时本
+   * runner 还没认领任何任务，所有 running 行一定是上一个进程的遗留。
+   * 按 10 分钟判断会让「刚认领 3 分钟就崩溃」的任务被跳过，之后再无
+   * 恢复时机，永远卡在 running（digest_runs 的 markInterruptedRuns
+   * 已经采用同一假设）。
    */
   start(): void {
-    const recovered = recoverStaleJobs(this.db);
+    const recovered = recoverStaleJobs(this.db, 0);
     if (recovered > 0) {
       log.warn(`恢复了 ${recovered} 个僵死任务（上次未正常退出）`);
     }

@@ -127,6 +127,8 @@ group('3.2 簇归纳 · 正常路径');
   ));
   check('调模型时 purpose=cluster（成本要归到聚类而不是分析）', () =>
     eq(c.calls[0]?.purpose, 'cluster'));
+  check('整条 user 都是抓取内容，必须带 wrapUser（防提示注入）', () =>
+    eq(c.calls[0]?.wrapUser, true));
   check('提示词里明确要求"只有一篇时必须留空 conflicts"', () =>
     ok(/只有一篇时\*\*必须\*\*留空/.test(CLUSTER_SYSTEM), CLUSTER_SYSTEM.slice(0, 200)));
 }

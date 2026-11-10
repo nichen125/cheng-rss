@@ -64,8 +64,12 @@ async function startUpstream() {
       calls.push(body);
 
       if (req.url?.includes('/embeddings')) {
-        res.writeHead(503, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: { message: 'no available accounts' } }));
+        // 成功返回：自检的向量探针也要真实计费，这里让记账路径跑起来。
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          data: [{ embedding: Array.from({ length: 8 }, (_, i) => (i + 1) / 8) }],
+          usage: { prompt_tokens: 17, total_tokens: 17 },
+        }));
         return;
       }
 
@@ -256,6 +260,19 @@ if (appA.up && appB.up && appC.up) {
     ).get();
     db.close();
     return ok(Number(row.c) > 0, `rows=${row.c}`);
+  });
+
+  check('⑨ 向量探针也记账（selftest-embed，按 embedding 模型计价）', () => {
+    const db = openSqlite(join(dirA, 'data', 'app.db'));
+    const row = db.prepare(
+      "SELECT model, in_tokens, cost_usd FROM ai_usage WHERE purpose = 'selftest-embed'",
+    ).get();
+    db.close();
+    return ok(
+      row && row.model === 'text-embedding-3-small'
+      && Number(row.in_tokens) === 17 && Number(row.cost_usd) > 0,
+      JSON.stringify(row),
+    );
   });
 
   // ── ⑤ 自检把能力画像落库（走生产读取路径）──

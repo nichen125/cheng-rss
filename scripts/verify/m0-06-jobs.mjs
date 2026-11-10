@@ -132,8 +132,20 @@ if (mode === 'basics') {
   recoverStaleJobs(h.db);
   const freshStatus = h.db.prepare('SELECT status FROM jobs WHERE id=?').get(freshId).status;
 
+  // 刚认领 3 分钟就崩溃：锁还是新鲜的，但启动时也必须立即恢复。
+  // 启动时本 runner 尚未认领任何任务，所有 running 行都是上个进程的遗留。
+  enqueue(h.db, { kind: 'noop', payload: {} });
+  const crashed = claimBatch(h.db, 'crashed-worker', 1);
+  const crashedId = crashed[0].id;
+  const runner = new JobRunner({ db: h.db, handlers: {}, workerId: 'w_restart', pollMs: 60000 });
+  runner.start();
+  const immediateStatus = h.db.prepare('SELECT status FROM jobs WHERE id=?').get(crashedId).status;
+  await runner.stop();
+
   h.close();
-  console.log(JSON.stringify({ before, recovered, after, freshStatus, STALE_LOCK_MS }));
+  console.log(JSON.stringify({
+    before, recovered, after, freshStatus, immediateStatus, STALE_LOCK_MS,
+  }));
 } else if (mode === 'unknown-kind') {
   enqueue(h.db, { kind: 'no_such_handler', payload: {} });
   const runner = new JobRunner({ db: h.db, handlers: {}, pollMs: 20 });
@@ -275,6 +287,9 @@ if (stale) {
   });
   check('锁未超时的 running 不被误恢复', () => {
     return eq(stale.freshStatus, 'running');
+  });
+  check('启动时立即恢复刚认领就崩溃的任务（不等 10 分钟）', () => {
+    return eq(stale.immediateStatus, 'pending');
   });
 }
 

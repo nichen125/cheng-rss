@@ -17,7 +17,7 @@ export function digestRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     const limit = Math.min(50, Math.max(1, Number(c.req.query('limit') ?? 20)));
     const rows = ctx.dbh.db.prepare(`
       SELECT id, title, intro, period_start, period_end, entry_count, cluster_count,
-             model, cost_usd, delivered_at, created_at, day_key
+             model, cost_usd, delivered_at, created_at, day_key, cites
         FROM digests WHERE user_id = ?
         ORDER BY day_key DESC, created_at DESC LIMIT ?
     `).all(uid, limit) as Record<string, unknown>[];

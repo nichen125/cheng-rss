@@ -186,6 +186,9 @@ export async function generateDigestBody(
     purpose: 'digest',
     userId: opts.userId,
     maxTokens: 2000,
+    // 整条 user 都是簇归纳产物（标题/综述/要点/分歧），指令全在
+    // DIGEST_SYSTEM 里 —— 按与 analyze 相同的判据整体包起来。
+    wrapUser: true,
     signalName: 'digest',
     signal: opts.signal,
   });

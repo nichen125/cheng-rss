@@ -104,6 +104,9 @@ export async function summarizeCluster(
     purpose: 'cluster',
     userId: opts.userId,
     maxTokens: 900,
+    // 整条 user 都是抓来的资料（来源名/标题/摘要/正文节选），指令全在
+    // CLUSTER_SYSTEM 里 —— 与 analyze 同一判据，让客户端加定界符与防护句。
+    wrapUser: true,
     signalName: 'cluster_summary',
     signal: opts.signal,
   });

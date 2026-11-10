@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { JobHandler } from './runner.ts';
 import { getFeed } from '../feeds/store.ts';
 import { enqueue } from './queue.ts';
-import { shouldLog, noteModelFailure, isDeadModel } from '../ai/notice.ts';
+import { shouldLog, noteModelFailure, isDeadModel, isModelMissingFailure } from '../ai/notice.ts';
 import type { AppContext } from '../app.ts';
 
 // 处理器注册表。
@@ -199,14 +199,23 @@ export function buildHandlers(ctx: HandlerContext): Record<string, JobHandler> {
     // http-503 也可能是网关真的坏了，一概静默会把事故变成空气。
     // 按模型判定才精确：同一个模型反复打同一个错，就不是这一篇的问题。
     const model = client.config.models.embed;
-    if (!r.ok && r.failure.kind !== 'no-key' && r.failure.kind !== 'cancelled') {
-      noteModelFailure(model);
-    }
-    if (r.ok || (shouldLog(r.failure.kind) && !isDeadModel(model))) {
-      ctx.log?.(r.ok ? 'embed 完成' : 'embed 失败', {
-        entryId, skipped: r.skipped, dim: r.dim,
-        failure: r.ok ? undefined : `${r.failure.kind}: ${r.failure.message}`.slice(0, 160),
-      });
+    if (!r.ok) {
+      // 只有“模型不存在”才计入模型死亡。timeout / network / 普通 5xx /
+      // upstream-quota 是真实故障，拿去凑阈值会让用户去改一个没问题的
+      // 模型名，并让之后的真实故障被 isDeadModel 静默掉。
+      const missing = r.failure.kind !== 'no-key'
+        && r.failure.kind !== 'cancelled'
+        && isModelMissingFailure(r.failure);
+      if (missing) noteModelFailure(model);
+
+      if (shouldLog(r.failure.kind) && !(missing && isDeadModel(model))) {
+        ctx.log?.('embed 失败', {
+          entryId, skipped: r.skipped, dim: r.dim,
+          failure: `${r.failure.kind}: ${r.failure.message}`.slice(0, 160),
+        });
+      }
+    } else {
+      ctx.log?.('embed 完成', { entryId, skipped: r.skipped, dim: r.dim });
     }
   };
 

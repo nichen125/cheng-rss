@@ -118,6 +118,38 @@ await reset();
   });
 }
 
+// ── ①b 按 purpose 统计 ───────────────────────────────────────
+//
+// 简报的单次上限必须只看 cluster/digest；预算日/月门仍看用户总花费。
+// 两参调用保持原口径是兼容性要求，四参过滤是新能力。
+group('2.5 预算 · 按 purpose 统计');
+{
+  DB.prepare('DELETE FROM ai_usage').run();
+  const now = Date.now();
+  const put = (purpose, costUsd) => recordUsage(DB, {
+    purpose, model: 'm', inTokens: 0, outTokens: 0, costUsd, ok: true, userId: UID,
+  }, now);
+  put('analyze', 2);
+  put('cluster', 0.5);
+  put('digest', 0.25);
+
+  const all = usageSince(DB, UID, 0);
+  const two = usageSince(DB, UID, 0, ['cluster', 'digest']);
+  const one = usageSince(DB, UID, 0, 'digest');
+  const none = usageSince(DB, UID, 0, []);
+  check('不传 purpose 时仍是用户总花费（预算门口径不变）', () =>
+    ok(Math.abs(all.usd - 2.75) < 1e-9, JSON.stringify(all)));
+  check('传数组时只统计指定 purpose', () =>
+    ok(Math.abs(two.usd - 0.75) < 1e-9 && two.calls === 2, JSON.stringify(two)));
+  check('传字符串时只统计该 purpose', () =>
+    ok(Math.abs(one.usd - 0.25) < 1e-9 && one.calls === 1, JSON.stringify(one)));
+  check('空数组返回 0（不拼非法的 IN ()）', () =>
+    ok(none.usd === 0 && none.calls === 0, JSON.stringify(none)));
+
+  // 后面的预算组仍按"总花费"造数，清掉这三行避免把它们的起点抬高。
+  DB.prepare('DELETE FROM ai_usage').run();
+}
+
 // 失败的调用也要记（成本账不能只记成功）
 await reset();
 {

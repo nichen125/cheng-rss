@@ -26,18 +26,34 @@ export function recordUsage(db: DatabaseSync, u: InsertUsageInput, now = Date.no
   );
 }
 
-/** 某用户从 `since` 起的花费与调用数。预算闸门读它 */
+/**
+ * 某用户从 `since` 起的花费与调用数。预算闸门读它。
+ *
+ * 第 4 个参数用于「只统计某一类调用」——简报的单次花费上限必须排除并发
+ * 的 analyze/embed，否则别人花的钱会让本次生成提前取消。不传则维持原口径
+ * （预算日/月门需要的是用户总花费）。
+ */
 export function usageSince(
   db: DatabaseSync,
   userId: string,
   since: number,
+  purpose?: string | readonly string[],
 ): { usd: number; calls: number; failures: number } {
+  const purposes = purpose === undefined
+    ? null
+    : (typeof purpose === 'string' ? [purpose] : purpose);
+  // 空数组的语义是「没有任何一类」——直接返回 0，不拼出非法的 IN ()。
+  if (purposes !== null && purposes.length === 0) {
+    return { usd: 0, calls: 0, failures: 0 };
+  }
+  const filter = purposes ? ` AND purpose IN (${purposes.map(() => '?').join(',')})` : '';
   const row = db.prepare(`
     SELECT COALESCE(SUM(cost_usd), 0) AS usd,
            COUNT(*) AS calls,
            SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures
-      FROM ai_usage WHERE user_id = ? AND created_at >= ?
-  `).get(userId, since) as { usd: number; calls: number; failures: number | null } | undefined;
+      FROM ai_usage WHERE user_id = ? AND created_at >= ?${filter}
+  `).get(userId, since, ...(purposes ?? [])) as
+    { usd: number; calls: number; failures: number | null } | undefined;
   return {
     usd: Number(row?.usd ?? 0),
     calls: Number(row?.calls ?? 0),

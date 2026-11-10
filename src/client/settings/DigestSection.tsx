@@ -338,7 +338,8 @@ export function DigestSection() {
         <div className="settings-card-head"><h3>单次花费上限</h3></div>
         <p className="hint">
           超过这个数就停下 —— 没人在旁边盯着的时候，这是唯一能拦住失控花费的东西。
-          实测一次（十几个事件归纳 + 一次正文）约 $0.03。
+          实测十来个事件的一次完整生成约 $0.05–0.12（簇归纳占了大部分），
+          所以默认的 0.2 有余量但不算宽裕。
         </p>
         <div className="field-row">
           <label className="field">

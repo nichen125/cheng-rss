@@ -359,6 +359,13 @@
   border-top: 1px solid var(--border-soft);
 }
 
+/* 确认弹窗的后果说明。文案里用空行分段（"会删掉什么" / "什么会保留"），
+   所以保留换行。 */
+.confirm-message {
+  white-space: pre-line;
+  margin: 10px 0 0;
+}
+
 /* 手机上弹窗贴底，更像原生 sheet */
 @media (max-width: 640px) {
   .modal-backdrop { align-items: flex-end; padding: 0; }

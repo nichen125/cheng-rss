@@ -108,6 +108,10 @@
   line-height: 1;
 }
 
+/* 箭头按钮禁用态比通用 .btn:disabled 更淡：它是列表翻页的辅助控件，
+   禁用时要一眼看出"没有下一页了"，0.45 还不够 */
+.btn.tiny.icon-arrow:disabled { opacity: 0.32; cursor: default; }
+
 /* 组内源列表：比分组行右移一级，用脊线表达从属（与侧栏 tree-kids 同一语言） */
 .folder-feed-list {
   list-style: none;

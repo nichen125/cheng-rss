@@ -196,6 +196,30 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* 五态收口（v1.9，§15.12）：:hover / :focus-visible 已在上面，这里补
+   :active / :disabled / [aria-busy="true"]。
+   按下态用 --bg-active 而不是再压一档的 --bg-hover —— 悬停和按下的差别
+   必须看得出来，否则点了没反应。
+   变体（.primary / .danger）的按下态各自在下面重写，因为它们有自己的
+   底色，基类的灰底会把强调色顶掉。 */
+.btn:active:not(:disabled) {
+  background: var(--bg-active);
+  border-color: var(--noise);
+  color: var(--fg);
+}
+/* 禁用：压到 0.45 并把指针从 pointer 换回 default，否则按钮看起来还是能点。
+   组件里一直用 `disabled` 属性，所以这里不必再给 .btn.disabled 造一套。 */
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* 加载态（[aria-busy="true"]）：按钮还在工作，只是暂时不接受点击，
+   所以压得比禁用轻（0.6），光标换成 progress 表示"等一下"。 */
+.btn[aria-busy='true'] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -207,7 +231,46 @@ button:disabled { opacity: 0.45; cursor: default; }
   border-color: var(--accent-hover);
   color: var(--accent-fg);
 }
+/* 实心按钮的按下反馈不能靠换底色 —— 调色板里 --accent-hover 就是悬停色，
+   再没有更暗的一档。用 brightness 压一档，不新增色值，
+   也不会把强调色换成灰。 */
+.btn.primary:active:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--accent-fg);
+  filter: brightness(0.93);
+}
 .btn.block { width: 100%; }
+
+/* ── 小号按钮（v1.9：从 feeds.css 收口到这里）───────────── */
+
+/* v1.8（§15.12）：.btn 基样式有显式 height: 32px，
+   所以这里必须显式覆盖 height，否则 .btn.tiny 会被撑回 32px，
+   和它的 11.5px 字号完全不匹配。
+   圆角保持 --radius-sm（26px 高于 24px 的 xs 档），
+   只是把三档高度收敛成 26/32 两档。 */
+.btn.tiny {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
+  border-radius: var(--radius-sm);
+}
+
+/* 危险动作：只把文字染成 --must，不动底色。
+   一屏里出现两三个"危险"按钮时，实心红会把整个界面变成警告色，
+   而这里的危险动作（取消订阅、删除分组）本来就有二次确认。 */
+.btn.danger { color: var(--must); }
+.btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--err) 10%, transparent);
+  border-color: color-mix(in srgb, var(--err) 30%, transparent);
+  color: var(--must);
+}
+/* 按下比悬停再压实一档（10% → 18%），叠在基类的灰底之上。 */
+.btn.danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--err) 18%, transparent);
+  border-color: color-mix(in srgb, var(--err) 35%, transparent);
+  color: var(--must);
+}
 
 /* 图标按钮：没有底色、没有边框，只在悬停时给一层淡底。
    常驻描边会让每个图标看起来都是一个"按钮"，一屏十几个就是一片框。 */

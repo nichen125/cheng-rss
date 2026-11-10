@@ -12,11 +12,13 @@
 import { useMemo, useState } from 'react';
 import { api, ApiFailure, type FolderItem } from '../api.ts';
 import { IconChevronRight, IconFolder } from '../icons.tsx';
+import { useConfirm } from '../components/ConfirmDialog.tsx';
 import { compareFeedInGroup, feedsOfFolder } from '../arrange.ts';
 import { useFeeds } from './store.tsx';
 
 export function FoldersSection() {
   const { folders, feeds, busy, setBusy, setErr, setNotice, reload, fail, toast } = useFeeds();
+  const confirm = useConfirm();
   const [name, setName] = useState('');
   /** 展开着看组内源的组。可以同时展开多个 —— 这里是整理，不是浏览 */
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
@@ -87,10 +89,12 @@ export function FoldersSection() {
   };
 
   const remove = async (f: FolderItem) => {
-    const yes = window.confirm(
-      `删除分组「${f.name}」？\n\n`
-      + `里面的 ${f.feedCount} 个订阅不会被删，会退回「未分组」。`,
-    );
+    const yes = await confirm({
+      title: `删除分组「${f.name}」？`,
+      message: `里面的 ${f.feedCount} 个订阅不会被删，会退回「未分组」。`,
+      confirmText: '删除分组',
+      danger: true,
+    });
     if (!yes) return;
     setBusy(true);
     setErr('');

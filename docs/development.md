@@ -156,6 +156,8 @@ check('生成后 digestDue 说今天已生成', () => ok(!digestDue(db, uid, cfg
 
 ### 加一个迁移
 
+迁移 SQL **手写**，没有代码生成步骤（ORM 已移除，`drizzle-kit` 之类不再参与建表）。
+
 三处都要改，少一处会静默失败（开发时能跑通，打 SEA 之后才炸）：
 
 ```

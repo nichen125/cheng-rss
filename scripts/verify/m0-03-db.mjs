@@ -28,7 +28,7 @@ const dbPath = join(dataDir, 'app.db');
 
 const probe = String.raw`
 import { gzipSync } from 'node:zlib';
-import { drizzle } from 'drizzle-orm/node-sqlite';
+import { DatabaseSync } from 'node:sqlite';
 import { migrate } from './src/server/db/migrate.ts';
 import { openDb, readPragmas } from './src/server/db/client.ts';
 import { packText, unpackText } from './src/server/db/text-blob.ts';
@@ -38,12 +38,10 @@ const mode = process.env.CHENG_RSS_MODE;
 
 const h = openDb({ dataDir });
 
-// Drizzle 传实例必须用 { client }。位置参数会被静默忽略并新建一个
-// :memory: 连接 —— 表现为"写入成功但查不到"，是极难定位的坑。
-// 这里断言 openDb 返回的 orm 确实绑在同一个连接上。
-function ormBoundToSameConnection() {
-  return h.orm.$client === h.db;
-}
+// openDb 只返回原生 DatabaseSync（Drizzle 已于 P0 移除）。这里要防的坑没变：
+// 曾经 openDb 内部用 drizzle(db) 传实例会被静默忽略并新建 :memory: 连接，
+// 表现为"写入成功但查不到"。现在的等价断言是：关掉句柄后另开一个连接
+// 重数，条数必须还在文件库里 —— 落到 :memory: 就数不出来。
 
 if (mode === 'single') {
   migrate(h.db);
@@ -78,6 +76,13 @@ if (mode === 'single') {
   const nullBack = unpackText(packText(null));
 
   h.close();
+
+  // 另开一个连接重数：证明 1 万条确实在 app.db 里，而不是被写进某个
+  // 隐式新建的 :memory: 库（那种错误只在关掉句柄后才暴露）。
+  const reopened = new DatabaseSync(dataDir + '/app.db', { readOnly: true });
+  const reopenedCount = reopened.prepare('SELECT COUNT(*) c FROM entries').get().c;
+  reopened.close();
+
   console.log(JSON.stringify({
     pragmas, count, insertMs, N,
     longOk: longBack === long,
@@ -87,7 +92,7 @@ if (mode === 'single') {
     legacyOk: unpackText(gzipSync(Buffer.from(long, 'utf8'))) === long,
     ratio: longRaw / longPacked,
     longRaw, longPacked,
-    ormBound: ormBoundToSameConnection(),
+    reopenedCount,
   }));
 } else {
   // 并发模式：两个进程交替写，看会不会 SQLITE_BUSY
@@ -159,11 +164,10 @@ check('正文压缩比 > 2.0×', () => {
     `压缩比 ${single.ratio.toFixed(2)}×（${single.longRaw}B → ${single.longPacked}B）`);
 });
 
-// 这条防的是一个静默 bug：drizzle(db) 传实例会被忽略并新建 :memory:，
-// 表现为"写入成功但查不到"，不会报任何错。
-check('Drizzle 绑定在同一连接上（不是隐式新建 :memory:）', () => {
-  return ok(single.ormBound,
-    'orm.$client !== db —— 极可能用了 drizzle(db) 而非 drizzle({client: db})，写入会进内存库');
+// 这条防的是一个静默 bug：句柄关掉后另开连接应该还能读到全部数据。
+// 写进 :memory: 的话，这里会是 0 或另外一个库里的数字，且不会报任何错。
+check('关闭后另开连接仍能读到 1 万条（数据在文件库，不是 :memory:）', () => {
+  return eq(single.reopenedCount, 10000);
 });
 
 // ── 并发写：两个进程同时跑 ──────────────────────────────────

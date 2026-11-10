@@ -14,7 +14,6 @@
     "typecheck:client": "tsc -p tsconfig.client.json --noEmit",
     "typecheck:all": "npm run typecheck && npm run typecheck:client",
     "test": "node --test --experimental-strip-types tests/**/*.test.ts",
-    "db:generate": "drizzle-kit generate",
     "verify:m0-01": "node scripts/verify/m0-01-toolchain.mjs",
     "verify:m0-02": "node scripts/verify/m0-02-schema.mjs",
     "build:client": "node scripts/build-client.mjs",
@@ -24,7 +23,6 @@
   "dependencies": {
     "@hono/node-server": "^1.14.4",
     "@mozilla/readability": "^0.5.0",
-    "drizzle-orm": "1.0.0-rc.5",
     "fflate": "^0.8.2",
     "hono": "^4.6.14",
     "linkedom": "^0.18.7",
@@ -37,7 +35,6 @@
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
-    "drizzle-kit": "1.0.0-rc.5",
     "esbuild": "^0.24.2",
     "postject": "^1.0.0-alpha.6",
     "typescript": "^5.7.2",

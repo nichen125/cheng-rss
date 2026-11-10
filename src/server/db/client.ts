@@ -1,12 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
-import { drizzle } from 'drizzle-orm/node-sqlite';
 
 // 数据库访问层。
 //
-// 两层结构（PLAN §3.3）：
-//   db       —— 原生 node:sqlite 的 DatabaseSync，用于事务/PRAGMA/迁移
-//   orm      —— Drizzle，用于类型化查询
+// 只有一层：原生 node:sqlite 的 DatabaseSync，事务/PRAGMA/迁移/查询都走它。
+// 表结构的真相在 migrations/*.sql（手写 DDL），本文件不参与建表。
 //
 // 抽 adapter 的目的是：node:sqlite 目前是 RC，将来若换 better-sqlite3，
 // 只改这个文件。
@@ -21,14 +19,8 @@ export interface OpenOptions {
   mmapBytes?: number;
 }
 
-// drizzle 1.0-rc 的 schema 泛型接收的是 relations 配置，不是 schema 对象。
-// 本项目以裸 SQL 为主、Drizzle 作类型化查询，不需要 relations，
-// 因此不传 schema —— 传了会被当作 relations 配置而类型报错。
-export type Orm = ReturnType<typeof drizzle>;
-
 export interface DbHandle {
   db: DatabaseSync;
-  orm: Orm;
   close(): void;
 }
 
@@ -74,14 +66,8 @@ export function openDb(opts: OpenOptions): DbHandle {
   const mmap = opts.mmapBytes ?? 268435456;
   if (mmap > 0) db.exec(`PRAGMA mmap_size = ${mmap};`);
 
-  // 重要：drizzle 必须用 { client } 形式。传实例作为位置参数会被
-  // 静默忽略并新建一个 :memory: 连接（PLAN §3.4 实测）。
-  // 0.3 的验收脚本对此有专门断言。
-  const orm = drizzle({ client: db });
-
   return {
     db,
-    orm,
     close() {
       try {
         // WAL 未 checkpoint 的内容会留在 -wal 文件里，关闭前合并回主库，

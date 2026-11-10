@@ -1,8 +1,8 @@
-// 应用级确认弹窗（替代 window.confirm）。
+// 应用级确认弹窗（替代浏览器原生 confirm）。
 //
-// 为什么不用原生 confirm：它是同步阻塞的浏览器弹框，样式不跟主题、
-// 说不清"这一步会删掉什么"，手机上还会整屏冻结。改成自绘弹窗后，
-// 调用方式几乎一样 —— Promise 化的 `confirm(options)`：
+// 为什么不用浏览器原生的同步确认框：样式不跟主题、说不清"这一步会删掉
+// 什么"，手机上还会整屏冻结。改成自绘弹窗后，调用方式几乎一样 ——
+// Promise 化的 `confirm(options)`：
 //
 //     const yes = await confirm({ title: '取消订阅…', danger: true });
 //     if (!yes) return;

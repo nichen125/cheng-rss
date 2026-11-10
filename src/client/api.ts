@@ -380,6 +380,8 @@ export const api = {
     limit?: number;
     feedId?: string | null;
     folderId?: string | null;
+    /** 切视图/改搜索词要能中途作废，见 lib/latest.ts */
+    signal?: AbortSignal;
   }) => {
     const sp = new URLSearchParams();
     if (params.view) sp.set('view', params.view);
@@ -388,7 +390,7 @@ export const api = {
     if (params.feedId) sp.set('feedId', params.feedId);
     if (params.folderId) sp.set('folderId', params.folderId);
     sp.set('limit', String(params.limit ?? 30));
-    return request<ListResponse>(`/entries?${sp}`);
+    return request<ListResponse>(`/entries?${sp}`, { signal: params.signal });
   },
   getEntry: (id: string) => request<EntryDetail>(`/entries/${id}`),
 
@@ -399,11 +401,15 @@ export const api = {
    * 因为历史页要渲染日期标题。把它塞进 listEntries 的返回类型，
    * 会逼所有调用方处理一个它们从来不会用的 groups 字段。
    */
-  listHistory: (params: { cursor?: string | null; limit?: number } = {}) => {
+  listHistory: (params: {
+    cursor?: string | null;
+    limit?: number;
+    signal?: AbortSignal;
+  } = {}) => {
     const sp = new URLSearchParams();
     if (params.cursor) sp.set('cursor', params.cursor);
     sp.set('limit', String(params.limit ?? 60));
-    return request<HistoryResponse>(`/entries/history?${sp}`);
+    return request<HistoryResponse>(`/entries/history?${sp}`, { signal: params.signal });
   },
 
   // ── RSSHub 订阅搜索（§10）──────────────────────────────
@@ -417,8 +423,8 @@ export const api = {
     request<{ ok: boolean; routes: number; radar: number; errors: string[]; ms: number; cache: RsshubConfigResponse['cache'] }>(
       '/rsshub/refresh', { method: 'POST' },
     ),
-  searchRsshub: (q: string, limit = 20) =>
-    request<RsshubSearchResponse>(`/rsshub/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  searchRsshub: (q: string, limit = 20, signal?: AbortSignal) =>
+    request<RsshubSearchResponse>(`/rsshub/search?q=${encodeURIComponent(q)}&limit=${limit}`, { signal }),
   previewRsshub: (path: string, params: Record<string, string> = {}) =>
     request<RsshubPreviewResponse>('/rsshub/preview', {
       method: 'POST',
@@ -462,7 +468,13 @@ export const api = {
     request<{ items: HighlightItem[] }>(`/entries/${entryId}/highlights`),
 
   /** 全局列表（跨条目）。cursor 是上一页最后一条的 createdAt */
-  allHighlights: (params: { limit?: number; cursor?: string | null; color?: string | null } = {}) => {
+  allHighlights: (params: {
+    limit?: number;
+    cursor?: string | null;
+    color?: string | null;
+    /** 切到别的标签页就可能被判过期，见 lib/latest.ts */
+    signal?: AbortSignal;
+  } = {}) => {
     const sp = new URLSearchParams();
     if (params.limit) sp.set('limit', String(params.limit));
     if (params.cursor) sp.set('cursor', params.cursor);
@@ -470,6 +482,7 @@ export const api = {
     const qs = sp.toString();
     return request<{ items: (HighlightItem & { entryTitle: string; sourceName: string })[]; nextCursor: string | null }>(
       '/highlights' + (qs ? '?' + qs : ''),
+      { signal: params.signal },
     );
   },
 
@@ -698,8 +711,8 @@ export const api = {
     run: DigestRunView | null;
   }>('/digests/status'),
 
-  listDigests: (limit = 20) =>
-    request<{ items: DigestSummary[] }>(`/digests?limit=${limit}`),
+  listDigests: (limit = 20, signal?: AbortSignal) =>
+    request<{ items: DigestSummary[] }>(`/digests?limit=${limit}`, { signal }),
 
   /**
    * 触发一次生成。**立刻返回**，不等生成跑完（202 + runId）。
@@ -735,13 +748,13 @@ export const api = {
     request<DigestDetail>(`/digests/${id}`),
 
   // ── 订阅 ────────────────────────────────────────────────
-  listFeeds: (params: { folderId?: string | null } = {}) => {
+  listFeeds: (params: { folderId?: string | null; signal?: AbortSignal } = {}) => {
     const sp = new URLSearchParams();
     if (params.folderId !== undefined && params.folderId !== null) {
       sp.set('folderId', params.folderId);
     }
     const qs = sp.toString();
-    return request<FeedListResponse>('/feeds' + (qs ? '?' + qs : ''));
+    return request<FeedListResponse>('/feeds' + (qs ? '?' + qs : ''), { signal: params.signal });
   },
 
   /** 编辑订阅：标题 / 分组 / 抓取间隔 */
@@ -755,7 +768,8 @@ export const api = {
   }),
 
   // ── 分组 ────────────────────────────────────────────────
-  listFolders: () => request<{ items: FolderItem[] }>('/folders'),
+  listFolders: (params: { signal?: AbortSignal } = {}) =>
+    request<{ items: FolderItem[] }>('/folders', { signal: params.signal }),
   createFolder: (name: string) =>
     request<{ folder: FolderItem }>('/folders', {
       method: 'POST',

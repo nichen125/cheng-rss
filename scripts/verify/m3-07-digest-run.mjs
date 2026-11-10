@@ -336,6 +336,17 @@ group('简报运行 · 进度落库');
   check('④ cost_usd 有值且大于 0（不是一直显示 $0.0000）', () =>
     ok(Number(row.cost_usd) > 0, String(row.cost_usd)));
 
+  // 结果里的 costUsd 必须是**这次整条链**花的钱（簇归纳 + 正文），
+  // 不是只算正文那一笔。只算正文的话，进度条报到 $0.08 之后 finishRun
+  // 会把那个数字改写成更小的 $0.03 —— 用户实付的是两者之和。
+  const spentAll = Number(
+    h.db.prepare('SELECT COALESCE(SUM(cost_usd),0) AS s FROM ai_usage WHERE user_id = ?')
+      .get('u1').s,
+  );
+  check('④ 返回的 costUsd 覆盖整条链（簇归纳 + 正文），不是只算正文', () =>
+    ok(Math.abs(spentAll - r.costUsd) < 1e-9,
+      JSON.stringify({ usage: spentAll, reported: r.costUsd })));
+
   // 心跳在 startRun 那一刻已经写过，跑完由 finishRun 刷新
   finishRun(h.db, run.id, { status: 'done', digestId: r.digestId, costUsd: r.costUsd });
   const v = viewOf(getRun(h.db, run.id));

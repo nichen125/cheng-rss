@@ -412,9 +412,13 @@ async function runDigestInner(
 
   if (a.runId) setPhase(db, a.runId, { phase: 'generating' });
 
-  const spendBefore = totalCost(db, userId, now);
   const gen = await generateDigestBody(client, inputs, { ...toast, signal: a.signal });
-  const costUsd = Math.max(0, totalCost(db, userId, now) - spendBefore);
+  // 「这一次运行花了多少」= 簇归纳 + 正文，不是只算正文。
+  //
+  // 只算正文有一个当场能看见的毛病：簇归纳阶段进度条已经报到 $0.088，
+  // 正文写完 finishRun 又把 run 行写成 $0.036 —— 数字在"完成"那一刻变小，
+  // 而用户实付的是两者之和（12 簇 $0.088 + 正文 $0.036）。
+  const costUsd = Math.max(0, usageSince(db, userId, since).usd - spendBaseline);
 
   if (!gen.ok || !gen.body) {
     // 正文生成被取消：不记 attempt（它是"人不要了"，不是"这份简报坏了"）
@@ -484,10 +488,6 @@ async function runDigestInner(
   };
 }
 
-/** 只算该用户从 `since` 起的总花费（用于算单次简报的成本） */
-function totalCost(db: DatabaseSync, userId: string, since: number): number {
-  return usageSince(db, userId, since).usd;
-}
 function safeJson(s: string | undefined): unknown {
   if (!s) return null;
   try { return JSON.parse(s); } catch { return null; }

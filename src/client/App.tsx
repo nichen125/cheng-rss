@@ -227,7 +227,7 @@ function Main(props: { user: User; onLogout: () => void }) {
   const [tailFetching, setTailFetching] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   /**
-   * `cursor` 的 ref 镜像（P0 竞态修复，docs/plans/refactor-p0.md §1）。
+   * `cursor` 的 ref 镜像（P0 竞态修复）。
    *
    * 为什么需要它：`load` 既要服务「重置」也要服务「加载更多」，而后者
    * 必须读到**发起那一刻**的游标。直接闭包捕获 `cursor` 会让 `load`

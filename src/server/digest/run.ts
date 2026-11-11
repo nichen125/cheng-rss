@@ -599,7 +599,7 @@ async function runDigestInner(
   ctx: AppContext,
   a: RunDigestArgs,
 ): Promise<RunDigestResult> {
-  const { db, now, userId, kind, dayKey, cfg } = a;
+  const { db, now, userId, dayKey, cfg } = a;
 
   // 每一处"即将再花一次钱"之前都先问它。抛 CancelledError 而不是返回，
   // 理由见 CancelledError 的注释。

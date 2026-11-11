@@ -44,6 +44,11 @@ export interface EntrySummary {
   wordCount: number | null;
   /** 所属的源 id；网页捕获的条目为 null（v1.17 起列表与详情都带） */
   feedId: string | null;
+  /**
+   * 源的标题。列表和详情都返回它，所以是必填；阅读页的"去源站"用它，
+   * 列表页则靠 siteName —— 两边都需要它存在，只是用法不同。
+   */
+  feedTitle: string | null;
 }
 
 /** 历史条目：比 EntrySummary 多"怎么读的"这一组字段（PLAN §7.4） */
@@ -193,10 +198,16 @@ export interface FeedItem {
   errorCount: number;
   unread: number;
   total: number;
-  folderId: string | null;
-  folderName: string | null;
   /** 组内顺序（PLAN §15.28）。迁移前的老数据全是 0，并列时退回按标题比 */
   sort: number;
+  /**
+   * 所属分组。**可选**：列表接口（GET /feeds）一定返回它，而"单个源"
+   * 的响应（POST /feeds 返回的那个 feed）历史上不带分组信息 —— 客户端
+   * 在那条路径上只读 title/url，强制成必填等于让类型说谎。
+   */
+  folderId?: string | null;
+  /** 同上：只有列表与编辑接口会查分组名并把这份带上 */
+  folderName?: string | null;
 }
 
 /** 简报摘要（列表用，不含 bodyMd） */

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { AppContext, Variables } from '../app.ts';
+import type { FeedItem, FeedListResponse, FolderItem } from '../../shared/dto.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import { requireUserId } from '../auth/require-user.ts';
 import { log } from '../logger.ts';
@@ -34,23 +35,24 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     const uid = requireUserId(c);
     const rows = listFeeds(ctx.dbh.db, uid);
     const folderNames = folderNameMap(ctx.dbh.db, uid);
-    const items = rows.map((f) => ({
+    const items: FeedItem[] = rows.map((f) => ({
       ...shapeFeed(f),
       folderId: f.folder_id,
       folderName: f.folder_id ? (folderNames.get(f.folder_id) ?? null) : null,
     }));
     // 支持 ?folderId= 过滤（前端按组查看时用）
     const folderId = c.req.query('folderId');
-    const filtered = folderId === undefined
+    const filtered: FeedItem[] = folderId === undefined
       ? items
       : folderId === 'none'
         ? items.filter((f) => !f.folderId)
         : items.filter((f) => f.folderId === folderId);
 
-    return c.json({
+    const folders: FolderItem[] = listFolders(ctx.dbh.db, uid);
+    const body: FeedListResponse = {
       items: filtered,
       total: filtered.length,
-      folders: listFolders(ctx.dbh.db, uid),
+      folders,
       /** 各状态的源数，供侧栏与空态使用 */
       counts: {
         active: items.filter((f) => f.status === 'active').length,
@@ -59,7 +61,8 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
         unread: items.reduce((n, f) => n + f.unread, 0),
         unfiled: items.filter((f) => !f.folderId).length,
       },
-    });
+    };
+    return c.json(body);
   });
 
   // ── 分组 CRUD ───────────────────────────────────────────
@@ -679,24 +682,19 @@ export function sweepDueFeeds(ctx: AppContext, now = Date.now()): number {
 
 // ── 形状转换 ───────────────────────────────────────────────
 
-interface ShapedFeed {
-  id: string;
-  url: string;
-  title: string | null;
-  siteUrl: string | null;
-  iconUrl: string | null;
-  status: FeedStatus;
-  fetchInterval: number;
-  lastFetchedAt: number | null;
-  nextFetchAt: number | null;
-  errorCount: number;
-  unread: number;
-  total: number;
-  /** 组内顺序（§15.28）。前端排序要用，缺了它所有并列项会退回标题序 */
-  sort: number;
-}
-
-function shapeFeed(f: FeedRow & { unread?: number; total?: number }): ShapedFeed {
+/**
+ * 源（feed）行 → 对外形状。
+ *
+ * 显式标 `Omit<FeedItem, 'folderId' | 'folderName'>` 的原因：这个函数被
+ * 六个端点共用（列表、新增、编辑、批量、刷新），任何一处少给或多给字段
+ * 都会同时污染六条响应，而以前它们全靠"凑巧一致" —— 返回类型标上去之后，
+ * 谁再改这里就立刻编译失败。
+ *
+ * 分组信息（folderId/folderName）**刻意不在这里拼**：它要查 folderNameMap，
+ * 而只有列表与编辑两个端点需要。所以由调用方额外补上，FeedItem 里那两个
+ * 字段因此是可选的（见 dto.ts 的注释）。
+ */
+function shapeFeed(f: FeedRow & { unread?: number; total?: number }): Omit<FeedItem, 'folderId' | 'folderName'> {
   return {
     id: f.id,
     url: f.url,

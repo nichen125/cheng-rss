@@ -8,6 +8,7 @@ import {
 } from './index.ts';
 import {
   clusterVectors, loadClusterWindow, thresholdFor, CLUSTER_WINDOW_HOURS,
+  type Cluster,
 } from '../cluster/index.ts';
 import {
   summarizeCluster, saveCluster, clearWindowClusters, type ClusterMember,
@@ -246,23 +247,91 @@ function readCancelReason(db: DatabaseSync, runId: string): string | null {
     : null;
 }
 
+/**
+ * 主链三个阶段共用的入参。
+ *
+ * 由 runDigest 一次性解析/算好后整份传下去：`since` 与 `spendBaseline` 只要
+ * 在哪一段里重算一次，"这次花了多少"的口径就会在簇阶段与正文阶段之间漂移，
+ * 而这笔钱同时写进 digest_runs 的进度与返回值，漂了就是账单对不上进度条。
+ */
+interface RunDigestArgs {
+  db: DatabaseSync; now: number; userId: string; kind: string;
+  dayKey: number; cfg: ReturnType<typeof parseDigestConfig> & { kind: string };
+  manual: boolean; allowSingle: boolean;
+  /** 有值时写进度；没有则整条链不碰 digest_runs（验收脚本直接调时就是这样） */
+  runId?: string;
+  signal?: AbortSignal;
+  /** 库里那个"已请求取消"的原因（没有则 null） */
+  cancelReasonOf: () => string | null;
+  /** 花费统计的起点与开跑时的基线（由 runDigest 统一算好传下来） */
+  since: number;
+  spendBaseline: number;
+  maxCostUsd: number;
+}
+
+/**
+ * 取窗口的结果。`loadClusterWindow` 的返回原样保留 —— 下游只读 items 与
+ * source，但 semanticCoverage 是它已经算出来的东西，在这里再拆一次只是
+ * 多一层要跟着改的字段清单。
+ */
+type DigestWindow = ReturnType<typeof loadClusterWindow>;
+
+/**
+ * 阶段一的出口。
+ *
+ * `finished` 为真时 result 就是 runDigest 的最终返回值：这一段的"没内容"
+ * 与"簇不够"都是**正常结束**，不是失败。它们与主干那条异常兜底必须分开 ——
+ * 主干落 digest_attempts（会触发退避重试），这里落 digest_skips（跳过）。
+ */
+type WindowOutcome =
+  | { finished: true; result: RunDigestResult }
+  | { finished: false; win: DigestWindow; clusters: Cluster[]; minClusters: number };
+
+/**
+ * 阶段一：取窗口 + 聚类。
+ *
+ * 单独抽出来，是因为它有两条"这段流程到此为止"的正常出口，各自要按不同
+ * 原因写 digest_skips；留在主干里，主干的 return 就同时承担"今天没内容"
+ * 与"取消/异常"两种语义，而这两类在库里的记录必须分开。
+ */
+function collectWindow(a: RunDigestArgs): WindowOutcome {
+  const { db, now, userId, cfg, dayKey } = a;
+
+  const win = loadClusterWindow(db, userId, a.since, now);
+  if (win.items.length === 0) {
+    const r = '最近 24 小时没有新条目';
+    recordSkip(db, userId, cfg, dayKey, r, now);
+    return { finished: true, result: { ...EMPTY, reason: r } };
+  }
+
+  const clusters = clusterVectors(
+    win.items.map((x) => ({
+      id: x.id, vec: x.vec, publishedAt: x.publishedAt,
+      sourceId: x.feedId ?? 'unknown',
+    })),
+    { threshold: thresholdFor(win.source), now },
+  ).filter((c) => c.entryCount >= MIN_ENTRIES_FOR_DIGEST);
+
+  const minClusters = a.allowSingle ? 1 : MIN_CLUSTERS_FOR_DIGEST;
+  if (clusters.length < minClusters) {
+    const r = `只有 ${clusters.length} 个事件，不足以构成简报`;
+    recordSkip(db, userId, cfg, dayKey, r, now);
+    return {
+      finished: true,
+      result: {
+        ...EMPTY, reason: r,
+        clusterCount: clusters.length, entryCount: win.items.length,
+      },
+    };
+  }
+
+  return { finished: false, win, clusters, minClusters };
+}
+
 /** 主链本体。异常由 runDigest 统一兜底，这里只关心业务流程。 */
 async function runDigestInner(
   ctx: AppContext,
-  a: {
-    db: DatabaseSync; now: number; userId: string; kind: string;
-    dayKey: number; cfg: ReturnType<typeof parseDigestConfig> & { kind: string };
-    manual: boolean; allowSingle: boolean;
-    /** 有值时写进度；没有则整条链不碰 digest_runs（验收脚本直接调时就是这样） */
-    runId?: string;
-    signal?: AbortSignal;
-    /** 库里那个"已请求取消"的原因（没有则 null） */
-    cancelReasonOf: () => string | null;
-    /** 花费统计的起点与开跑时的基线（由 runDigest 统一算好传下来） */
-    since: number;
-    spendBaseline: number;
-    maxCostUsd: number;
-  },
+  a: RunDigestArgs,
 ): Promise<RunDigestResult> {
   const { db, now, userId, kind, dayKey, cfg } = a;
 
@@ -289,27 +358,9 @@ async function runDigestInner(
   }
 
   // ── 取窗口 + 聚类 ──────────────────────────────────────────
-  const win = loadClusterWindow(db, userId, a.since, now);
-  if (win.items.length === 0) {
-    const r = '最近 24 小时没有新条目';
-    recordSkip(db, userId, cfg, dayKey, r, now);
-    return { ...EMPTY, reason: r };
-  }
-
-  const clusters = clusterVectors(
-    win.items.map((x) => ({
-      id: x.id, vec: x.vec, publishedAt: x.publishedAt,
-      sourceId: x.feedId ?? 'unknown',
-    })),
-    { threshold: thresholdFor(win.source), now },
-  ).filter((c) => c.entryCount >= MIN_ENTRIES_FOR_DIGEST);
-
-  const minClusters = a.allowSingle ? 1 : MIN_CLUSTERS_FOR_DIGEST;
-  if (clusters.length < minClusters) {
-    const r = `只有 ${clusters.length} 个事件，不足以构成简报`;
-    recordSkip(db, userId, cfg, dayKey, r, now);
-    return { ...EMPTY, reason: r, clusterCount: clusters.length, entryCount: win.items.length };
-  }
+  const w = collectWindow(a);
+  if (w.finished) return w.result;
+  const { win, clusters, minClusters } = w;
 
   // ── 逐簇归纳 ───────────────────────────────────────────────
   const toast = { userId, model: client.config.models.strong };

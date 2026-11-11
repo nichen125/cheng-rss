@@ -19,6 +19,7 @@ import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { EntryRow } from './components/EntryRow.tsx';
 import { EmptyState } from './components/EmptyState.tsx';
 import { HistoryMeta } from './components/HistoryMeta.tsx';
+import { PrefsPanel } from './components/PrefsPanel.tsx';
 import { useArrange } from './useArrange.ts';
 import { createLatest, isAbortError } from './lib/latest.ts';
 import { hostOf, markDays, tierLabel } from './lib/format.ts';
@@ -27,10 +28,7 @@ import {
   feedsOfFolder, looseFeedsOf, rowKey, foldersAfterDrop, orderAfterDrop, moveItem,
   type ArrangeRow, type DropTarget,
 } from './arrange.ts';
-import {
-  applyPrefs, DEFAULT_PREFS, FONT_SIZES, loadPrefs, savePrefs,
-  THEMES, WIDTHS, type ReaderPrefs,
-} from './reader-prefs.ts';
+import { applyPrefs, loadPrefs, savePrefs, type ReaderPrefs } from './reader-prefs.ts';
 
 // 主界面 = 三栏（PLAN §15.1/§15.2/§15.3）
 //
@@ -2539,66 +2537,6 @@ function Reader(props: {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-/** 阅读偏好面板（§15.11）。三个值都是"本设备生效"，不落服务端。 */
-function PrefsPanel(props: {
-  prefs: ReaderPrefs;
-  onChange: (p: ReaderPrefs) => void;
-  onClose: () => void;
-}) {
-  const { prefs } = props;
-  return (
-    <div className="prefs-panel">
-      <div className="prefs-row">
-        <span className="prefs-label">字号</span>
-        <div className="seg">
-          {FONT_SIZES.map((s) => (
-            <button
-              key={s}
-              className={`seg-btn ${prefs.fontSize === s ? 'on' : ''}`}
-              onClick={() => props.onChange({ ...prefs, fontSize: s })}
-              title={`${s}px`}
-            >
-              {s === 15 ? '小' : s === 16.5 ? '中' : s === 18 ? '大' : '特大'}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="prefs-row">
-        <span className="prefs-label">宽度</span>
-        <div className="seg">
-          {WIDTHS.map((w) => (
-            <button
-              key={w}
-              className={`seg-btn ${prefs.width === w ? 'on' : ''}`}
-              onClick={() => props.onChange({ ...prefs, width: w })}
-              title={`${w} 字符`}
-            >
-              {w}ch
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="prefs-row">
-        <span className="prefs-label">底色</span>
-        <div className="seg">
-          {THEMES.map((t) => (
-            <button
-              key={t.key}
-              className={`seg-btn ${prefs.theme === t.key ? 'on' : ''}`}
-              onClick={() => props.onChange({ ...prefs, theme: t.key })}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <button className="btn block prefs-reset" onClick={() => props.onChange({ ...DEFAULT_PREFS })}>
-        恢复默认
-      </button>
     </div>
   );
 }

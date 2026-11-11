@@ -503,8 +503,15 @@ export class AiClient {
     // 投递切换的独立计数（§8.10）：它与格式降级、结构重试是三件事，
     // 混用一个计数器就会出现"少试一次或多试一次"，而两者都表现为钱花多了。
     let deliverySwitches = 0;
+    // 预算只在**本次调用**内翻倍（§8.6b）。
+    //
+    // 为什么用局部变量而不是就地写 opts.maxTokens：opts 是调用方自己的对象，
+    // 改写它会残留到下一次调用 —— 同一个 opts 连调两次，第二次就从翻倍后的
+    // 值起跳，再翻一次就是 4 倍、8 倍。花钱的上限由调用方定，这里只能借用
+    // 一次、不能改它。翻倍时机（reasoning-only 的可重试失败之后）不变。
+    let maxTokens = opts.maxTokens;
     for (let attempt = 0; attempt <= TRANSPORT_RETRIES; attempt++) {
-      const att = await this.chatOnce(opts, model);
+      const att = await this.chatOnce(opts, model, maxTokens);
 
       if (att.ok) return { ok: true, text: att.text.trim(), usage: att.usage };
 
@@ -512,7 +519,14 @@ export class AiClient {
       // 没有任何指令的正文，回空是它最自然的反应，而不是"无话可说"。
       // 换投递不写 last：空内容不是传输层失败，翻预算与退避都救不了它。
       if (att.failure.kind === 'empty') {
-        if (att.delivery === 'split' && deliverySwitches < 1 && this.learnMerged(model)) {
+        // 换投递之前先确认还有下一次请求的额度。没有的话 `continue` 会直接
+        // 出循环，函数末尾用 last=null 兜成"请求未发出" —— 已经发了 3 次、
+        // 最后明确是空内容，却报成没发出去且可重试。是否换投递不影响
+        // 这次空内容的结论，所以没额度就原样报它。
+        if (
+          attempt < TRANSPORT_RETRIES
+          && att.delivery === 'split' && deliverySwitches < 1 && this.learnMerged(model)
+        ) {
           deliverySwitches++;
           continue;
         }
@@ -527,7 +541,7 @@ export class AiClient {
       // 可重试：把预算翻倍再问一次。原样重发只会再截断一次 ——
       // 那正是修复前 379 次调用全失败却毫无进展的原因（§8.6b）。
       // 翻倍而不是加固定值：思考长度随输入变，加 500 长短都不合适。
-      if (att.bumpBudget && opts.maxTokens) opts.maxTokens *= 2;
+      if (att.bumpBudget && maxTokens) maxTokens *= 2;
 
       // Retry-After 只在 HTTP 失败时有；其余由 backoffMs 给默认退避。
       await this.waitBeforeRetry(attempt, att.retryAfterMs);
@@ -542,19 +556,29 @@ export class AiClient {
   /**
    * chat 的单次请求：限流 → 组装请求体 → fetch → 读出正文与用量。
    *
+   * `maxTokens` 单独传进来而不是从 opts 读：重试会把预算翻倍（§8.6b），而
+   * opts 是调用方的对象、不能改写，所以翻倍后的值没有别的地方能放。走参数
+   * 而不是在这里 `{...opts, maxTokens}` 浅拷贝：拷贝会让"这次实际用的预算"
+   * 多出一个只在函数体内存在的假 opts，读代码的人会以为还有第二份配置在生效；
+   * 参数只有一项，来源一眼可查（chat 的循环）。
+   *
    * 只报告"这一次发生了什么"（正文、用量、失败类别、值不值得再试、要不要
    * 翻预算），不睡、不重试、不动计数器 —— 重试与投递切换是策略，留在 chat
    * 主干。混进这里的话，"为什么又发了一次、钱花在第几次"就散在两处，谁也
    * 算不清总请求数。
    */
-  private async chatOnce(opts: ChatOptions, model: string): Promise<ChatAttemptResult> {
+  private async chatOnce(
+    opts: ChatOptions,
+    model: string,
+    maxTokens: number | undefined,
+  ): Promise<ChatAttemptResult> {
     await this.waitForRateLimit();
     const t0 = this.now();
     const url = `${this.config.baseURL.replace(/\/+$/, '')}/chat/completions`;
     // 记下**本次实际用的**预算。重试会把它翻倍（§8.6b），所以不能在
-    // 错误信息里读 opts.maxTokens —— 那会报出翻倍后的值，而用户要的是
+    // 错误信息里读 opts.maxTokens —— 那会报出调用方原始的值，而用户要的是
     // "这次失败时用的是什么"，好据此判断该加多少。
-    const maxTokensThisCall = opts.maxTokens;
+    const maxTokensThisCall = maxTokens;
     const delivery = this.deliveryFor(model);
     const body: Record<string, unknown> = {
       model,
@@ -565,7 +589,7 @@ export class AiClient {
           { role: 'user', content: opts.user },
         ],
       temperature: opts.temperature ?? 0.3,
-      ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
     };
 
     let resp: Response;
@@ -650,7 +674,7 @@ export class AiClient {
     // out_tokens 正好等于该 purpose 的 max_tokens，就是这么来的。
     const reasoningText = readReasoning(ch0?.message);
     const outTokens = u.completion_tokens ?? null;
-    const budgetSpent = opts.maxTokens != null && outTokens != null && outTokens >= opts.maxTokens;
+    const budgetSpent = maxTokensThisCall != null && outTokens != null && outTokens >= maxTokensThisCall;
     const truncatedByReasoning = !hasText && (budgetSpent
       || (finish === 'length' && (reasoningText !== '' || (reasoningTokens ?? 0) > 0)));
 

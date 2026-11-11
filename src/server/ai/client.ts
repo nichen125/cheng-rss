@@ -794,25 +794,26 @@ export class AiClient {
       //
       // 顺序反了就会先降到 text 再换投递，多花一次请求，而且 text 模式下
       // 再切投递等于把"字段清单在提示词里"和"指令在 system 里"混着试，难归因。
-      if (failure.kind === 'bad-json' || failure.kind === 'empty') {
-        // 只有**当前真的在用 split** 才值得换投递。
-        // 画像说 dropped 时 deliveryFor 直接返回 merged，此时 mergedFor 里没有该 key，
-        // 不判这一下就会用一模一样的 messages 再发一遍 —— 一次请求白花，
-        // 而且失败原因完全没变，日志里还看不出是重复。
-        const swapped = this.deliveryFor(opts.model) === 'split'
-          && deliverySwitches < 1
-          && this.learnMerged(opts.model);
-        if (swapped) {
-          deliverySwitches++;
-          continue;
-        }
-        const next = nextFormat(mode);
-        if (next && formatDegrades < 2) {
-          formatDegrades++;
-          this.formatUnsupported.add(this.formatKey(opts.model, mode));
-          mode = next;
-          continue;
-        }
+      //
+      // 换投递要先确认当前真在用 split：画像说 dropped 时 deliveryFor 已返回
+      // merged，不判就会拿一模一样的 messages 再发一遍，白花一次还看不出重复。
+      if (
+        isAnswerMiss(failure)
+        && this.deliveryFor(opts.model) === 'split'
+        && deliverySwitches < 1
+        && this.learnMerged(opts.model)
+      ) {
+        deliverySwitches++;
+        continue;
+      }
+
+      // 投递这条路走完了，再问策略：降级链还有下一档没有。
+      const next = nextFormatOn(failure, mode, formatDegrades);
+      if (next) {
+        formatDegrades++;
+        this.formatUnsupported.add(this.formatKey(opts.model, mode));
+        mode = next;
+        continue;
       }
 
       // ③ 结构不合规：把 issues 回灌，重试一次
@@ -1492,6 +1493,39 @@ function nextFormat(mode: FormatMode): FormatMode | undefined {
   if (mode === 'json_schema') return 'json_object';
   if (mode === 'json_object') return 'text';
   return undefined;
+}
+
+/**
+ * "模型答非所问"：200 但正文是散文（bad-json）或干脆空着（empty）。
+ *
+ * 这两类值得先换投递、再降格式 —— 判据单独成函数是因为主干要按它分两级
+ * 处置，而两级的顺序不能反（见调用处的注释）；散在条件里最容易在某次
+ * 改动中悄悄合并成一级。
+ */
+function isAnswerMiss(failure: AiFailure): boolean {
+  return failure.kind === 'bad-json' || failure.kind === 'empty';
+}
+
+/**
+ * 格式降级策略：这次失败之后，还该不该换一种 response_format 再试。
+ *
+ * 单独抽成纯函数是为了让 `chatJson` 的主干读成「试一种格式 → 失败 →
+ * 问策略要下一种」：降级的**顺序**（schema → object → text）与触发条件是
+ * 一件事，改一处就该只改一处。它只回答"下一个是什么、还能不能降"，不碰
+ * 计数器与 formatUnsupported 记忆 —— 那些是主干的状态，"谁降过几次"
+ * 必须留在看得见所有分支的地方。
+ *
+ * 只对答非所问生效：4xx 报文有 `retryWithFormat` 单独一条路，其余失败
+ * （网络、限流、取消）换格式毫无意义。
+ */
+function nextFormatOn(
+  failure: AiFailure,
+  mode: FormatMode,
+  formatDegrades: number,
+): FormatMode | undefined {
+  if (!isAnswerMiss(failure)) return undefined;
+  if (formatDegrades >= 2) return undefined;
+  return nextFormat(mode);
 }
 
 /**

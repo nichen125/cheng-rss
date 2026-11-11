@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppContext, Variables } from '../app.ts';
+import type { EntryDetail, EntrySummary, ListResponse } from '../../shared/dto.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { readBody } from '../http/validate.ts';
 import { requireUserId } from '../auth/require-user.ts';
@@ -121,7 +122,8 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       const hits = searchKeyword(ctx.dbh.db, uid, q, 2000);
       const used = hits.length > 0 ? hits.map((h) => h.entryId) : searchLike(ctx.dbh.db, uid, q, 2000).map((h) => h.entryId);
       if (used.length === 0) {
-        return c.json({ items: [], total: 0, nextCursor: null });
+        const empty: ListResponse = { items: [], total: 0, nextCursor: null };
+        return c.json(empty);
       }
       ftsIds = used;
     }
@@ -179,25 +181,32 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     const hasMore = rows.length > limit;
     const page = rows.slice(0, limit);
 
-    const items = page.map((row) => ({
-      id: row.id,
-      title: row.title,
-      url: row.url,
-      author: row.author,
+    // 标成 EntrySummary 就是这次搬迁的意义：字段少一个、类型差一档，
+    // 编译器当场报错，而不是等前端渲染时才发现（历史接口缺 highlightCount
+    // 那次事故就是这么漏出去的）。
+    //
+    // 数据库驱动返回的是 `Record<string, unknown>`，所以字符串列要显式
+    // 收敛成 string|null（str 会同时把 undefined 归成 null）。这不是为了
+    // 讨好类型检查：SQL 里 LEFT JOIN 出来的列本来就是"可能没有"。
+    const items: EntrySummary[] = page.map((row) => ({
+      id: String(row.id),
+      title: String(row.title),
+      url: String(row.url),
+      author: strOrNull(row.author),
       publishedAt: Number(view === 'history' ? (row.last_read_at ?? row.published_at) : row.published_at),
-      excerpt: row.excerpt,
+      excerpt: strOrNull(row.excerpt),
       isRead: Boolean(row.is_read),
       isStarred: Boolean(row.is_starred),
-      tier: row.tier,
-      summary: row.summary,
-      siteName: row.site_name,
+      tier: strOrNull(row.tier),
+      summary: strOrNull(row.summary),
+      siteName: strOrNull(row.site_name),
       highlightCount: Number(row.highlight_count ?? 0),
-      faviconUrl: row.favicon_url,
-      thumbnailUrl: row.thumbnail_url,
-      wordCount: row.word_count === null ? null : Number(row.word_count),
+      faviconUrl: strOrNull(row.favicon_url),
+      thumbnailUrl: strOrNull(row.thumbnail_url),
+      wordCount: numOrNull(row.word_count),
       // 网页捕获的条目没有源，这两个字段为 null
-      feedId: row.feed_id ?? null,
-      feedTitle: row.feed_title ?? null,
+      feedId: strOrNull(row.feed_id),
+      feedTitle: strOrNull(row.feed_title),
     }));
 
     const last = page[page.length - 1];
@@ -213,7 +222,8 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       `SELECT COUNT(*) AS c FROM entries e WHERE ${baseWhere.join(' AND ')}`,
     ).get(...baseParams) as { c: number };
 
-    return c.json({ items, total: Number(totalRow.c), nextCursor });
+    const body: ListResponse = { items, total: Number(totalRow.c), nextCursor };
+    return c.json(body);
   });
 
   // ── 阅读历史（按日期分组，PLAN §7.4）───────────────────
@@ -343,36 +353,50 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
         }
       : null;
 
-    return c.json({
-      id: row.id,
-      title: row.title,
-      url: row.url,
-      author: row.author,
+    // 详情是 `SELECT e.*`，所以 favicon / 缩略图 / 字数列本来就在手里。
+    // 它们此前**没有**被放进响应 —— 而 EntryDetail 继承 EntrySummary，
+    // 契约上必须带这三个。类型标注第一次跑就指出了这处漏返回：
+    // 要么把基类字段标成可选（等于承认"详情不是摘要的超集"），要么补上。
+    // 这里选择补上，因为客户端阅读页虽然不画这些，但"详情接口返回的是
+    // 列表行字段的超集"是个有用的不变式，且零成本（列已在 SELECT 里）。
+    const entryFields: EntrySummary = {
+      id: String(row.id),
+      title: String(row.title),
+      url: String(row.url),
+      author: strOrNull(row.author),
       publishedAt: Number(row.published_at),
-      excerpt: row.excerpt,
+      excerpt: strOrNull(row.excerpt),
       isRead: Boolean(row.is_read),
       isStarred: Boolean(row.is_starred),
-      tier: row.tier,
-      summary: row.summary,
-      siteName: row.site_name,
-      // 源站首页（feed 的 site_url），用于阅读页的"去源站"出口（§15.11）。
-      // 网页捕获的条目没有 feed，这里是 null，前端据此不渲染入口。
-      feedSiteUrl: row.feed_site_url ?? null,
-      feedTitle: row.feed_title ?? null,
+      tier: strOrNull(row.tier),
+      summary: strOrNull(row.summary),
+      siteName: strOrNull(row.site_name),
+      highlightCount: Number(row.highlight_count ?? 0),
+      faviconUrl: strOrNull(row.favicon_url),
+      thumbnailUrl: strOrNull(row.thumbnail_url),
+      wordCount: numOrNull(row.word_count),
       // v1.17：阅读时要把"这篇所属的源/分组"的未读数就地减一（§15.14 修订），
       // 详情接口就得说清它属于谁。列表接口早就有这个字段（列表行要知道源名），
       // 详情此前只有 feedTitle —— 靠标题反查源 id 在改名或重名时会错。
-      feedId: row.feed_id ?? null,
-      highlightCount: Number(row.highlight_count ?? 0),
+      feedId: strOrNull(row.feed_id),
+      feedTitle: strOrNull(row.feed_title),
+    };
+
+    const body: EntryDetail = {
+      ...entryFields,
+      // 源站首页（feed 的 site_url），用于阅读页的"去源站"出口（§15.11）。
+      // 网页捕获的条目没有 feed，这里是 null，前端据此不渲染入口。
+      feedSiteUrl: strOrNull(row.feed_site_url),
       // 阅读历史三件套：读过几次 / 第一次读 / 读了多少
       readCount: Number(row.read_count ?? 0),
-      firstReadAt: row.first_read_at === null ? null : Number(row.first_read_at),
-      lastReadAt: row.last_read_at === null ? null : Number(row.last_read_at),
-      readProgress: row.read_progress === null ? null : Number(row.read_progress),
+      firstReadAt: numOrNull(row.first_read_at),
+      lastReadAt: numOrNull(row.last_read_at),
+      readProgress: numOrNull(row.read_progress),
       contentHtml: html,
       contentMarkdown: null,
       analysis,
-    });
+    };
+    return c.json(body);
   });
 
   // ── 把一个范围内的未读全部标为已读（§15.21，v1.17）──
@@ -682,4 +706,21 @@ function safeJsonArray(v: unknown): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * SQL 行里"可能是 null 的字符串" → `string | null`。
+ *
+ * 数据库驱动给的是 `unknown`，直接 `String(row.x)` 会把 null 变成字符串
+ * "null"（响应里就会出现一条 URL 叫 `null` 的条目）。这两个小函数只做
+ * 一件事：把 unknown 收敛到 DTO 允许的形状，顺便让类型标注真正有意义。
+ */
+function strOrNull(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  return String(v);
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  return Number(v);
 }

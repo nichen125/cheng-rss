@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { AppContext, Variables } from '../app.ts';
 import { badRequest, notFound } from '../errors.ts';
+import { readBody } from '../http/validate.ts';
 import { requireUserId } from '../auth/require-user.ts';
 import { searchKeyword, searchLike } from '../search/index.ts';
 import { queueStats } from '../jobs/queue.ts';
@@ -13,6 +15,37 @@ import { groupByDay } from '../entries/history.ts';
 //
 // M0 只做读取 + 已读标记 —— 足够支撑前端验收。
 // 抓取、分析、高亮在 M1~M4 落地。
+
+// ── 请求体 schema ──────────────────────────────────────────
+//
+// 就地定义而不是集中到一个 contracts 模块：这些形状只服务本文件的 handler，
+// 搬走之后读代码要来回跳两个文件，而收益只是"统一"。
+//
+// 一律 `.optional()` 而不是 `.default()`：下游用 `?? 默认值` / `=== true`
+// 表达缺省语义，schema 只负责"类型对、形状对"，不改变取值。
+//
+// 数值字段原先都写成 `Number(body.x)`，也就是容忍数字字符串。这里用
+// `numberish` 把这点保留下来 —— 收紧成纯 number 会把今天能用的请求变成 400。
+const numberish = z.union([z.number(), z.string()]);
+
+const markAllReadBody = z.object({
+  feedId: z.string().nullish(),
+  folderId: z.string().nullish(),
+});
+
+const forceBody = z.object({ force: z.boolean().optional() });
+
+const readIdsBody = z.object({
+  // 空数组要放到下面显式判（'需要 ids'），schema 只挡"不是字符串数组"
+  ids: z.array(z.string()).optional(),
+  // 进度范围（0~1）留给 handler：那里还有"条目不存在 → 404"的分支，
+  // 顺序不能变，否则 404 会变成 400
+  progress: numberish.nullish(),
+});
+
+const unreadBody = z.object({ ids: z.array(z.string()).optional() });
+
+const progressBody = z.object({ progress: numberish.nullish() });
 
 export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   const r = new Hono<{ Variables: Variables }>();
@@ -359,10 +392,7 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // 这个是"我不想看见它了"。
   r.post('/entries/mark-all-read', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as {
-      feedId?: string | null;
-      folderId?: string | null;
-    };
+    const body = await readBody(c, markAllReadBody);
     const feedId = typeof body.feedId === 'string' && body.feedId ? body.feedId : null;
     const folderId = typeof body.folderId === 'string' && body.folderId ? body.folderId : null;
     if (!feedId && !folderId) {
@@ -410,7 +440,7 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   r.post('/entries/:id/analyze', async (c) => {
     const uid = requireUserId(c);
     const id = c.req.param('id');
-    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+    const body = await readBody(c, forceBody);
 
     const row = ctx.dbh.db.prepare('SELECT id FROM entries WHERE id = ? AND user_id = ?')
       .get(id, uid) as { id: string } | undefined;
@@ -453,7 +483,7 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   r.post('/entries/:id/summary', async (c) => {
     const uid = requireUserId(c);
     const id = c.req.param('id');
-    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+    const body = await readBody(c, forceBody);
 
     const row = ctx.dbh.db.prepare('SELECT id FROM entries WHERE id = ? AND user_id = ?')
       .get(id, uid) as { id: string } | undefined;
@@ -508,10 +538,7 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
 
   r.post('/entries/read', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as {
-      ids?: string[];
-      progress?: number;
-    };
+    const body = await readBody(c, readIdsBody);
     const ids = Array.isArray(body.ids) ? body.ids : [];
     if (ids.length === 0) throw badRequest('需要 ids');
 
@@ -546,7 +573,7 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // 否则 unread 一次就把阅读历史抹了，「历史」页会凭空少一条。
   r.post('/entries/unread', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { ids?: string[] };
+    const body = await readBody(c, unreadBody);
     const ids = Array.isArray(body.ids) ? body.ids : [];
     if (ids.length === 0) throw badRequest('需要 ids');
 
@@ -573,7 +600,7 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   r.post('/entries/:id/progress', async (c) => {
     const uid = requireUserId(c);
     const id = c.req.param('id');
-    const body = await c.req.json().catch(() => ({})) as { progress?: number };
+    const body = await readBody(c, progressBody);
     const raw = Number(body.progress);
     if (!Number.isFinite(raw) || raw < 0 || raw > 1) {
       throw badRequest('progress 必须在 0~1 之间');

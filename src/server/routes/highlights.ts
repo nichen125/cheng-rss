@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { AppContext, Variables } from '../app.ts';
 import { requireUserId } from '../auth/require-user.ts';
 import { badRequest, notFound } from '../errors.ts';
+import { readBody } from '../http/validate.ts';
 import { makeAnchor, resolveAnchor, insertHighlight, toApi, type HighlightRow } from '../highlights/anchor.ts';
 import { generateInsight, sliceContext } from '../highlights/insight.ts';
 import { aiForUser, runtimeAiBase } from '../ai/service.ts';
@@ -21,6 +23,27 @@ import { htmlToText } from '../feeds/parse.ts';
 
 export const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue'] as const;
 export type HighlightColor = typeof HIGHLIGHT_COLORS[number];
+
+// ── 请求体 schema ────────────────────────────────────────────
+//
+// color 这里只校验"是不是字符串"，三个合法值仍交给 pickColor 判 ——
+// 那条报错文案（`color 只能是 yellow / green / blue`）是前端提示的一部分，
+// 换成 zod 生成的措辞属于无谓的行为变化。
+const createHighlightBody = z.object({
+  entryId: z.string().nullish(),
+  start: z.number().nullish(),
+  end: z.number().nullish(),
+  quote: z.string().nullish(),
+  color: z.string().nullish(),
+  note: z.string().nullish(),
+});
+
+const patchHighlightBody = z.object({
+  color: z.string().nullish(),
+  note: z.string().nullish(),
+});
+
+const forceBody = z.object({ force: z.boolean().nullish() });
 
 function pickColor(v: unknown): string | null {
   if (v === undefined || v === null || v === '') return null;
@@ -70,10 +93,7 @@ export function highlightRoutes(ctx: AppContext): Hono<{ Variables: Variables }>
 
   r.post('/highlights', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as {
-      entryId?: string; start?: number; end?: number; quote?: string;
-      color?: string; note?: string;
-    };
+    const body = await readBody(c, createHighlightBody);
     const entryId = String(body.entryId ?? '');
     if (!entryId) throw badRequest('缺少 entryId');
 
@@ -117,7 +137,7 @@ export function highlightRoutes(ctx: AppContext): Hono<{ Variables: Variables }>
   r.patch('/highlights/:id', async (c) => {
     const uid = requireUserId(c);
     const id = c.req.param('id');
-    const body = await c.req.json().catch(() => ({})) as { color?: string; note?: string };
+    const body = await readBody(c, patchHighlightBody);
 
     const cur = ctx.dbh.db.prepare(
       'SELECT * FROM highlights WHERE id = ? AND user_id = ?',
@@ -216,7 +236,7 @@ export function highlightRoutes(ctx: AppContext): Hono<{ Variables: Variables }>
   r.post('/highlights/:id/insight', async (c) => {
     const uid = requireUserId(c);
     const id = c.req.param('id');
-    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+    const body = await readBody(c, forceBody);
 
     const h = ctx.dbh.db.prepare(
       'SELECT * FROM highlights WHERE id = ? AND user_id = ?',

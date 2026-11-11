@@ -185,6 +185,11 @@ export interface FolderItem {
   unread: number;
 }
 
+/** GET /folders 的响应 */
+export interface FolderListResponse {
+  items: FolderItem[];
+}
+
 export interface FeedItem {
   id: string;
   url: string;
@@ -261,13 +266,31 @@ export interface HighlightItem {
   suffix: string | null;
   posStart: number | null;
   posEnd: number | null;
-  color: HighlightColor | null;
+  /**
+   * 读到的是任意字符串而不是 HighlightColor —— highlights 表的 color 只是
+   * `TEXT`，没有 CHECK 约束，三个合法值仅由写入路径（pickColor）把关，
+   * 库里可能存着历史值或其它写入口写进来的值。类型只描述"接口如实返回
+   * 库里的东西"，前端按 `?? 'yellow'` 兜底。
+   */
+  color: string | null;
   note: string | null;
   aiInsight: string | null;
   /** 原文已变化、无法定位。仍要在列表里显示（§11.1 不静默丢） */
   isOrphaned: boolean;
   createdAt: number;
   updatedAt: number;
+}
+
+/** 全局高亮列表的一行：toApi 的形状 + 所属条目的标题与来源（列表页要显示这两项） */
+export interface HighlightListItem extends HighlightItem {
+  entryTitle: string;
+  sourceName: string;
+}
+
+/** GET /highlights 的响应。游标是上一页最后一条的 createdAt */
+export interface HighlightListResponse {
+  items: HighlightListItem[];
+  nextCursor: string | null;
 }
 
 /**

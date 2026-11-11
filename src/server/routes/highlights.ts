@@ -9,6 +9,7 @@ import { generateInsight, sliceContext } from '../highlights/insight.ts';
 import { aiForUser, runtimeAiBase } from '../ai/service.ts';
 import { unpackText } from '../db/text-blob.ts';
 import { htmlToText } from '../feeds/parse.ts';
+import type { HighlightListItem, HighlightListResponse } from '../../shared/dto.ts';
 
 // 高亮 API（PLAN §11.2 / §19.6 M4 第四步）。
 //
@@ -214,14 +215,16 @@ export function highlightRoutes(ctx: AppContext): Hono<{ Variables: Variables }>
 
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
-    return c.json({
-      items: page.map((h) => ({
-        ...toApi(h),
-        entryTitle: h.entry_title,
-        sourceName: h.source_name,
-      })),
+    const items: HighlightListItem[] = page.map((h) => ({
+      ...toApi(h),
+      entryTitle: h.entry_title,
+      sourceName: h.source_name,
+    }));
+    const body: HighlightListResponse = {
+      items,
       nextCursor: hasMore ? String(page[page.length - 1]?.created_at ?? '') : null,
-    });
+    };
+    return c.json(body);
   });
 
   /**

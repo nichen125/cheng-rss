@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppContext, Variables } from '../app.ts';
-import type { FeedItem, FeedListResponse, FolderItem } from '../../shared/dto.ts';
+import type { FeedItem, FeedListResponse, FolderItem, FolderListResponse } from '../../shared/dto.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import { readBody } from '../http/validate.ts';
 import { requireUserId } from '../auth/require-user.ts';
@@ -156,7 +156,9 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // ── 分组 CRUD ───────────────────────────────────────────
   r.get('/folders', (c) => {
     const uid = requireUserId(c);
-    return c.json({ items: listFolders(ctx.dbh.db, uid) });
+    const items: FolderItem[] = listFolders(ctx.dbh.db, uid);
+    const body: FolderListResponse = { items };
+    return c.json(body);
   });
 
   r.post('/folders', async (c) => {

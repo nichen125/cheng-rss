@@ -328,42 +328,32 @@ function collectWindow(a: RunDigestArgs): WindowOutcome {
   return { finished: false, win, clusters, minClusters };
 }
 
-/** 主链本体。异常由 runDigest 统一兜底，这里只关心业务流程。 */
-async function runDigestInner(
-  ctx: AppContext,
+/** 阶段二的出口。`finished` 为真时 result 就是最终返回值（归纳后簇数不够） */
+type SummarizeOutcome =
+  | { finished: true; result: RunDigestResult }
+  | { finished: false; inputs: DigestClusterInput[]; done: number };
+
+/**
+ * 阶段二：逐簇归纳。
+ *
+ * 这一段是整条主链里唯一会**反复**调用模型、并且每调用一次就可能要中止的
+ * 地方：取消、超预算都从这里抛 CancelledError，由 runDigest 那层统一转成
+ * cancel 结果。抽出函数是为了让"逐簇循环 + 每次落库后的记账"成为一个能
+ * 单独解读的单位 —— 混在主干里，主干就同时装着三套循环变量的生命周期。
+ *
+ * `checkCancel` 由主干传入而不是在这里重新定义一个：它是闭包在 runDigest
+ * 的 runId/signal 上的，重定义一份就有了第二个取消口径。
+ */
+async function summarizeClusters(
   a: RunDigestArgs,
-): Promise<RunDigestResult> {
-  const { db, now, userId, kind, dayKey, cfg } = a;
-
-  // 每一处"即将再花一次钱"之前都先问它。抛 CancelledError 而不是返回，
-  // 理由见 CancelledError 的注释。
-  const checkCancel = (): void => {
-    if (!a.signal?.aborted) return;
-    throw new CancelledError(a.cancelReasonOf() ?? '已停止');
-  };
-
-  // 手工触发跳过"时间到没到 / 今天做过没"这两关，但**不跳过**"有内容没"。
-  if (!a.manual) {
-    const due = digestDue(db, userId, cfg, now);
-    if (!due.due) return { ...EMPTY, reason: due.reason };
-  }
-
-  checkCancel();
-
-  const { client, hasKey } = aiForUser(db, userId, runtimeAiBase(ctx.cfg));
-  if (!hasKey) {
-    const r = '没配置 API key，无法生成简报';
-    recordAttempt(db, userId, cfg, dayKey, false, r, now);
-    return { ...EMPTY, reason: r };
-  }
-
-  // ── 取窗口 + 聚类 ──────────────────────────────────────────
-  const w = collectWindow(a);
-  if (w.finished) return w.result;
-  const { win, clusters, minClusters } = w;
-
-  // ── 逐簇归纳 ───────────────────────────────────────────────
-  const toast = { userId, model: client.config.models.strong };
+  client: AiClient,
+  clusters: Cluster[],
+  toast: { userId: string; model: string },
+  checkCancel: () => void,
+  minClusters: number,
+  entryCount: number,
+): Promise<SummarizeOutcome> {
+  const { db, now, userId, cfg, dayKey } = a;
   const use = clusters.slice(0, 12);
 
   // 进度：聚类完才知道总数，UI 的"3/12"从这里开始才有意义
@@ -484,11 +474,61 @@ async function runDigestInner(
     recordSkip(db, userId, cfg, dayKey, r, now);
     // 簇归纳已经真花过钱，这条"没出简报"的路径同样要报实际花费。
     return {
-      ...EMPTY, reason: r,
-      clusterCount: inputs.length, entryCount: win.items.length,
-      costUsd: Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline),
+      finished: true,
+      result: {
+        ...EMPTY, reason: r,
+        clusterCount: inputs.length, entryCount,
+        costUsd: Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline),
+      },
     };
   }
+
+  return { finished: false, inputs, done };
+}
+
+/** 主链本体。异常由 runDigest 统一兜底，这里只关心业务流程。 */
+async function runDigestInner(
+  ctx: AppContext,
+  a: RunDigestArgs,
+): Promise<RunDigestResult> {
+  const { db, now, userId, kind, dayKey, cfg } = a;
+
+  // 每一处"即将再花一次钱"之前都先问它。抛 CancelledError 而不是返回，
+  // 理由见 CancelledError 的注释。
+  const checkCancel = (): void => {
+    if (!a.signal?.aborted) return;
+    throw new CancelledError(a.cancelReasonOf() ?? '已停止');
+  };
+
+  // 手工触发跳过"时间到没到 / 今天做过没"这两关，但**不跳过**"有内容没"。
+  if (!a.manual) {
+    const due = digestDue(db, userId, cfg, now);
+    if (!due.due) return { ...EMPTY, reason: due.reason };
+  }
+
+  checkCancel();
+
+  const { client, hasKey } = aiForUser(db, userId, runtimeAiBase(ctx.cfg));
+  if (!hasKey) {
+    const r = '没配置 API key，无法生成简报';
+    recordAttempt(db, userId, cfg, dayKey, false, r, now);
+    return { ...EMPTY, reason: r };
+  }
+
+  // ── 取窗口 + 聚类 ──────────────────────────────────────────
+  const w = collectWindow(a);
+  if (w.finished) return w.result;
+  const { win, clusters, minClusters } = w;
+
+  // ── 逐簇归纳 ───────────────────────────────────────────────
+  // 归纳与正文两段共用这一个 toast：各自拼一份的话，userId / model 一旦
+  // 不一致，费用就会记到另一个用户的账上。
+  const toast = { userId, model: client.config.models.strong };
+  const s = await summarizeClusters(
+    a, client, clusters, toast, checkCancel, minClusters, win.items.length,
+  );
+  if (s.finished) return s.result;
+  const { inputs, done } = s;
 
   // ── 生成简报正文 ───────────────────────────────────────────
   checkCancel();

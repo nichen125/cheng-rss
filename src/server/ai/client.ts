@@ -239,6 +239,23 @@ export interface ChatJsonOptions<S extends z.ZodTypeAny> {
   wrapUser?: boolean;
 }
 
+/**
+ * chat 的入参。与 `ChatJsonOptions` 分开而不是共用一个：纯文本路径没有
+ * schema，也没有 `wrapUser` / `signalName` —— 那些只在"要求结构化输出"
+ * 时有意义，混进来会让人以为文本模式也能降级成 JSON。
+ */
+export interface ChatOptions {
+  system: string;
+  user: string;
+  model: string;
+  purpose: string;
+  userId?: string;
+  temperature?: number;
+  maxTokens?: number;
+  /** 调用方的取消信号（简报「停止」用）。超时仍然由配置管 */
+  signal?: AbortSignal;
+}
+
 export interface AiClientOptions {
   config: AiConfig;
   /** null = 没配置；传 undefined 则从 config.apiKeyEnv 读环境变量 */
@@ -324,6 +341,38 @@ interface Attempt<T> {
   /** 该换格式再试一次（不算传输重试） */
   retryWithFormat?: FormatMode;
 }
+
+interface ChatAttemptOk {
+  ok: true;
+  /** 正文原样返回，不清洗；trim 由 chat 在返回给调用方时统一做 */
+  text: string;
+  usage: AiUsageRecord;
+  /** 本次实际用的投递方式 */
+  delivery: DeliveryMode;
+}
+
+interface ChatAttemptFail {
+  ok: false;
+  failure: AiFailure;
+  usage: AiUsageRecord;
+  delivery: DeliveryMode;
+  /** 失败是否值得再发一次（已吸收传输层与取消的语义） */
+  retryable: boolean;
+  /** 重发前把 max_tokens 翻倍（推理模型吃光预算） */
+  bumpBudget?: boolean;
+  /** 服务端给的 Retry-After，毫秒 */
+  retryAfterMs?: number;
+}
+
+/**
+ * chat 单次请求的结果。
+ *
+ * 与 `Attempt` 分开是因为纯文本路径还要报告两件策略层需要的事实：
+ * 这一次实际用了哪种投递方式（决定要不要换成 merged），以及要不要在
+ * 重发前翻倍预算。把它们塞进 `AiFailure` 会让"错在哪"与"下一步怎么办"
+ * 混成一件事。
+ */
+type ChatAttemptResult = ChatAttemptOk | ChatAttemptFail;
 
 export class AiClient {
   readonly config: AiConfig;
@@ -427,17 +476,7 @@ export class AiClient {
    *
    * 用途：单篇总结（返回 Markdown）、`POST /settings/ai/test`（探针）。
    */
-  async chat(opts: {
-    system: string;
-    user: string;
-    model: string;
-    purpose: string;
-    userId?: string;
-    temperature?: number;
-    maxTokens?: number;
-    /** 调用方的取消信号（简报「停止」用）。超时仍然由配置管 */
-    signal?: AbortSignal;
-  }): Promise<
+  async chat(opts: ChatOptions): Promise<
     { ok: true; text: string; usage: AiUsageRecord }
     | { ok: false; failure: AiFailure; usage: AiUsageRecord | null }
   > {
@@ -465,173 +504,213 @@ export class AiClient {
     // 混用一个计数器就会出现"少试一次或多试一次"，而两者都表现为钱花多了。
     let deliverySwitches = 0;
     for (let attempt = 0; attempt <= TRANSPORT_RETRIES; attempt++) {
-      await this.waitForRateLimit();
-      const t0 = this.now();
-      const url = `${this.config.baseURL.replace(/\/+$/, '')}/chat/completions`;
-      // 记下**本次实际用的**预算。重试会把它翻倍（§8.6b），所以不能在
-      // 错误信息里读 opts.maxTokens —— 那会报出翻倍后的值，而用户要的是
-      // "这次失败时用的是什么"，好据此判断该加多少。
-      const maxTokensThisCall = opts.maxTokens;
-      const delivery = this.deliveryFor(model);
-      const body: Record<string, unknown> = {
-        model,
-        messages: delivery === 'merged'
-          ? [{ role: 'user', content: mergedUserMessage(opts.system, opts.user) }]
-          : [
-            { role: 'system', content: opts.system },
-            { role: 'user', content: opts.user },
-          ],
-        temperature: opts.temperature ?? 0.3,
-        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
-      };
+      const att = await this.chatOnce(opts, model);
 
-      let resp: Response;
-      try {
-        resp = await this.fetchImpl(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
-          body: JSON.stringify(body),
-          signal: this.signalFor(opts.signal),
-        });
-      } catch (e) {
-        const latencyMs = this.now() - t0;
-        const failure = this.abortFailure(e, opts.signal);
-        const usage: AiUsageRecord = {
-          purpose: opts.purpose, model, userId: opts.userId,
-          inTokens: null, outTokens: null, costUsd: 0,
-          latencyMs, ok: false, error: `${failure.kind}: ${failure.message}`,
-        };
-        this.record(usage);
-        last = { ok: false, failure, usage };
-        if (!failure.retryable || attempt >= TRANSPORT_RETRIES) return last;
-        await this.sleep(this.backoffMs(attempt));
-        continue;
-      }
+      if (att.ok) return { ok: true, text: att.text.trim(), usage: att.usage };
 
-      const latencyMs = this.now() - t0;
-
-      if (!resp.ok) {
-        const text = await safeText(resp);
-        const status = resp.status;
-        const kind = classifyHttpFailure(status, text);
-        const failure: AiFailure = {
-          kind,
-          message: `HTTP ${status}: ${text.slice(0, 300)}`,
-          // 额度用尽也是"过一会儿/换个 key"就能好，所以照样可重试；
-          // 区别只在 kind，让用户与 retry-failed 能认出它。
-          retryable: status === 429 || status >= 500,
-          status,
-        };
-        const usage: AiUsageRecord = {
-          purpose: opts.purpose, model, userId: opts.userId,
-          inTokens: null, outTokens: null,
-          costUsd: estimateCost(this.config.pricing, model, null, null),
-          latencyMs, ok: false, error: `${failure.kind}: ${failure.message}`,
-        };
-        this.record(usage);
-        last = { ok: false, failure, usage };
-        if (!failure.retryable || attempt >= TRANSPORT_RETRIES) return last;
-        await this.sleep(this.backoffMs(attempt, parseRetryAfter(resp.headers.get('retry-after'))));
-        continue;
-      }
-
-      let json: Record<string, unknown>;
-      try {
-        json = (await resp.json()) as Record<string, unknown>;
-      } catch {
-        const failure: AiFailure = { kind: 'bad-json', message: '响应体不是 JSON', retryable: true };
-        const usage: AiUsageRecord = {
-          purpose: opts.purpose, model, userId: opts.userId,
-          inTokens: null, outTokens: null,
-          costUsd: estimateCost(this.config.pricing, model, null, null),
-          latencyMs, ok: false, error: `${failure.kind}: ${failure.message}`,
-        };
-        this.record(usage);
-        last = { ok: false, failure, usage };
-        if (attempt >= TRANSPORT_RETRIES) return last;
-        await this.sleep(this.backoffMs(attempt));
-        continue;
-      }
-
-      const choices = (json.choices ?? []) as {
-        message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; reasoning_details?: unknown };
-        finish_reason?: unknown;
-      }[];
-      const ch0 = choices[0];
-      const content = ch0?.message?.content;
-      const finish = String(ch0?.finish_reason ?? '');
-      const u = (json.usage ?? {}) as {
-        prompt_tokens?: number; completion_tokens?: number;
-        completion_tokens_details?: { reasoning_tokens?: number };
-      };
-      const reasoningTokens = u.completion_tokens_details?.reasoning_tokens ?? null;
-      const hasText = typeof content === 'string' && content.trim() !== '';
-
-      // 推理模型（§8.6b）：token 先花在「思考」上，预算不够时 `content` 是空串。
-      // 这与"模型无话可说"是两件事，处置也相反 —— 前者加预算就能救，后者
-      // 加多少都救不了。
-      //
-      // 判据不能只看 `finish_reason === 'length'`：线上网关（2026-11-09 实测）
-      // 截断时**根本不发 finish_reason**，`message` 甚至连 reasoning 字段都没有，
-      // 唯一痕迹是 `completion_tokens` 正好等于请求的 max_tokens。
-      // 只认 finish_reason 的后果是这类截断被判成 `empty`（不可重试），
-      // 一次都不加预算、直接记一次失败 —— 库里 224/231 条 empty 的
-      // out_tokens 正好等于该 purpose 的 max_tokens，就是这么来的。
-      const reasoningText = readReasoning(ch0?.message);
-      const outTokens = u.completion_tokens ?? null;
-      const budgetSpent = opts.maxTokens != null && outTokens != null && outTokens >= opts.maxTokens;
-      const truncatedByReasoning = !hasText && (budgetSpent
-        || (finish === 'length' && (reasoningText !== '' || (reasoningTokens ?? 0) > 0)));
-
-      const usage: AiUsageRecord = {
-        purpose: opts.purpose, model, userId: opts.userId,
-        inTokens: u.prompt_tokens ?? null, outTokens: u.completion_tokens ?? null,
-        costUsd: estimateCost(this.config.pricing, model, u.prompt_tokens, u.completion_tokens),
-        latencyMs, ok: hasText,
-        error: hasText ? undefined
-          : truncatedByReasoning
-            ? `reasoning-only: 思考消耗 ${reasoningTokens ?? '?'} token 后被 max_tokens=${
-              maxTokensThisCall ?? '未设'} 截断，未产出正文`
-            : 'empty: 模型返回空内容',
-      };
-      this.record(usage);
-
-      if (!hasText) {
-        if (truncatedByReasoning) {
-          // 可重试：把预算翻倍再问一次。原样重发只会再截断一次 ——
-          // 那正是修复前 379 次调用全失败却毫无进展的原因。
-          const failure: AiFailure = {
-            kind: 'reasoning-only',
-            message: `模型把 max_tokens 用在了思考上（reasoning_tokens=${
-              reasoningTokens ?? '?'}），正文为空。本次 max_tokens=${maxTokensThisCall ?? '未设'}`,
-            retryable: true,
-          };
-          last = { ok: false, failure, usage };
-          if (attempt >= TRANSPORT_RETRIES) return last;
-          // 翻倍而不是加固定值：思考长度随输入变，加 500 长短都不合适。
-          // 见 §8.6b。
-          if (opts.maxTokens) opts.maxTokens *= 2;
-          await this.sleep(this.backoffMs(attempt));
-          continue;
-        }
-        // 空内容不重试原样重发 —— 大概率还是空。
-        // 但**换投递方式**值得一次（§8.10）：网关丢弃 system 时，模型收到的
-        // 是一条没有任何指令的正文，回空是它最自然的反应，而不是"无话可说"。
-        if (delivery === 'split' && deliverySwitches < 1 && this.learnMerged(model)) {
+      // 空内容先想**投递方式**（§8.10）：网关丢弃 system 时，模型收到的是一条
+      // 没有任何指令的正文，回空是它最自然的反应，而不是"无话可说"。
+      // 换投递不写 last：空内容不是传输层失败，翻预算与退避都救不了它。
+      if (att.failure.kind === 'empty') {
+        if (att.delivery === 'split' && deliverySwitches < 1 && this.learnMerged(model)) {
           deliverySwitches++;
           continue;
         }
         // 空内容不重试：原样重发大概率还是空，而它常常意味着提示词
         // 让模型无话可说（例如要求总结一篇只有标题的文章）。
-        return { ok: false, usage, failure: { kind: 'empty', message: '模型返回空内容', retryable: false } };
+        return { ok: false, usage: att.usage, failure: att.failure };
       }
-      return { ok: true, text: content.trim(), usage };
+
+      last = { ok: false, failure: att.failure, usage: att.usage };
+      if (!att.retryable || attempt >= TRANSPORT_RETRIES) return last;
+
+      // 可重试：把预算翻倍再问一次。原样重发只会再截断一次 ——
+      // 那正是修复前 379 次调用全失败却毫无进展的原因（§8.6b）。
+      // 翻倍而不是加固定值：思考长度随输入变，加 500 长短都不合适。
+      if (att.bumpBudget && opts.maxTokens) opts.maxTokens *= 2;
+
+      // Retry-After 只在 HTTP 失败时有；其余由 backoffMs 给默认退避。
+      await this.waitBeforeRetry(attempt, att.retryAfterMs);
     }
 
     return last ?? {
       ok: false, usage: null,
       failure: { kind: 'network', message: '请求未发出', retryable: true },
     };
+  }
+
+  /**
+   * chat 的单次请求：限流 → 组装请求体 → fetch → 读出正文与用量。
+   *
+   * 只报告"这一次发生了什么"（正文、用量、失败类别、值不值得再试、要不要
+   * 翻预算），不睡、不重试、不动计数器 —— 重试与投递切换是策略，留在 chat
+   * 主干。混进这里的话，"为什么又发了一次、钱花在第几次"就散在两处，谁也
+   * 算不清总请求数。
+   */
+  private async chatOnce(opts: ChatOptions, model: string): Promise<ChatAttemptResult> {
+    await this.waitForRateLimit();
+    const t0 = this.now();
+    const url = `${this.config.baseURL.replace(/\/+$/, '')}/chat/completions`;
+    // 记下**本次实际用的**预算。重试会把它翻倍（§8.6b），所以不能在
+    // 错误信息里读 opts.maxTokens —— 那会报出翻倍后的值，而用户要的是
+    // "这次失败时用的是什么"，好据此判断该加多少。
+    const maxTokensThisCall = opts.maxTokens;
+    const delivery = this.deliveryFor(model);
+    const body: Record<string, unknown> = {
+      model,
+      messages: delivery === 'merged'
+        ? [{ role: 'user', content: mergedUserMessage(opts.system, opts.user) }]
+        : [
+          { role: 'system', content: opts.system },
+          { role: 'user', content: opts.user },
+        ],
+      temperature: opts.temperature ?? 0.3,
+      ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+    };
+
+    let resp: Response;
+    try {
+      resp = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+        body: JSON.stringify(body),
+        signal: this.signalFor(opts.signal),
+      });
+    } catch (e) {
+      const latencyMs = this.now() - t0;
+      const failure = this.abortFailure(e, opts.signal);
+      const usage = this.settleUsage({
+        purpose: opts.purpose, model, userId: opts.userId,
+        inTokens: null, outTokens: null,
+        latencyMs, ok: false, error: `${failure.kind}: ${failure.message}`,
+      });
+      return { ok: false, delivery, failure, usage, retryable: failure.retryable };
+    }
+
+    const latencyMs = this.now() - t0;
+
+    if (!resp.ok) {
+      const text = await safeText(resp);
+      const status = resp.status;
+      const failure: AiFailure = {
+        kind: classifyHttpFailure(status, text),
+        message: `HTTP ${status}: ${text.slice(0, 300)}`,
+        // 额度用尽也是"过一会儿/换个 key"就能好，所以照样可重试；
+        // 区别只在 kind，让用户与 retry-failed 能认出它。
+        retryable: status === 429 || status >= 500,
+        status,
+      };
+      const usage = this.settleUsage({
+        purpose: opts.purpose, model, userId: opts.userId,
+        inTokens: null, outTokens: null,
+        latencyMs, ok: false, error: `${failure.kind}: ${failure.message}`,
+      });
+      return {
+        ok: false, delivery, failure, usage, retryable: failure.retryable,
+        retryAfterMs: parseRetryAfter(resp.headers.get('retry-after')),
+      };
+    }
+
+    let json: Record<string, unknown>;
+    try {
+      json = (await resp.json()) as Record<string, unknown>;
+    } catch {
+      const failure: AiFailure = { kind: 'bad-json', message: '响应体不是 JSON', retryable: true };
+      const usage = this.settleUsage({
+        purpose: opts.purpose, model, userId: opts.userId,
+        inTokens: null, outTokens: null,
+        latencyMs, ok: false, error: `${failure.kind}: ${failure.message}`,
+      });
+      return { ok: false, delivery, failure, usage, retryable: true };
+    }
+
+    const choices = (json.choices ?? []) as {
+      message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; reasoning_details?: unknown };
+      finish_reason?: unknown;
+    }[];
+    const ch0 = choices[0];
+    const content = ch0?.message?.content;
+    const finish = String(ch0?.finish_reason ?? '');
+    const u = (json.usage ?? {}) as {
+      prompt_tokens?: number; completion_tokens?: number;
+      completion_tokens_details?: { reasoning_tokens?: number };
+    };
+    const reasoningTokens = u.completion_tokens_details?.reasoning_tokens ?? null;
+    const hasText = typeof content === 'string' && content.trim() !== '';
+
+    // 推理模型（§8.6b）：token 先花在「思考」上，预算不够时 `content` 是空串。
+    // 这与"模型无话可说"是两件事，处置也相反 —— 前者加预算就能救，后者
+    // 加多少都救不了。
+    //
+    // 判据不能只看 `finish_reason === 'length'`：线上网关（2026-11-09 实测）
+    // 截断时**根本不发 finish_reason**，`message` 甚至连 reasoning 字段都没有，
+    // 唯一痕迹是 `completion_tokens` 正好等于请求的 max_tokens。
+    // 只认 finish_reason 的后果是这类截断被判成 `empty`（不可重试），
+    // 一次都不加预算、直接记一次失败 —— 库里 224/231 条 empty 的
+    // out_tokens 正好等于该 purpose 的 max_tokens，就是这么来的。
+    const reasoningText = readReasoning(ch0?.message);
+    const outTokens = u.completion_tokens ?? null;
+    const budgetSpent = opts.maxTokens != null && outTokens != null && outTokens >= opts.maxTokens;
+    const truncatedByReasoning = !hasText && (budgetSpent
+      || (finish === 'length' && (reasoningText !== '' || (reasoningTokens ?? 0) > 0)));
+
+    const usage = this.settleUsage({
+      purpose: opts.purpose, model, userId: opts.userId,
+      inTokens: u.prompt_tokens ?? null, outTokens,
+      latencyMs, ok: hasText,
+      error: hasText ? undefined
+        : truncatedByReasoning
+          ? `reasoning-only: 思考消耗 ${reasoningTokens ?? '?'} token 后被 max_tokens=${
+            maxTokensThisCall ?? '未设'} 截断，未产出正文`
+          : 'empty: 模型返回空内容',
+    });
+
+    if (!hasText) {
+      if (truncatedByReasoning) {
+        // 预算被思考吃光：原样重发只会再截断一次，所以标上 bumpBudget，
+        // 由 chat 在重发前把 max_tokens 翻倍（§8.6b）。
+        const failure: AiFailure = {
+          kind: 'reasoning-only',
+          message: `模型把 max_tokens 用在了思考上（reasoning_tokens=${
+            reasoningTokens ?? '?'}），正文为空。本次 max_tokens=${maxTokensThisCall ?? '未设'}`,
+          retryable: true,
+        };
+        return { ok: false, delivery, failure, usage, retryable: true, bumpBudget: true };
+      }
+      return {
+        ok: false, delivery, usage, retryable: false,
+        failure: { kind: 'empty', message: '模型返回空内容', retryable: false },
+      };
+    }
+    return { ok: true, delivery, text: content, usage };
+  }
+
+  /**
+   * 记账收尾：补上单价算出的花费，再交给 `record` 落库。
+   *
+   * 单独抽出来是因为 chat 的每条出口（网络失败、HTTP 失败、体不是 JSON、
+   * 空内容、成功）都要记一笔，而记账公式必须只有一个 —— 分散在五处，
+   * 改价目表的人会漏掉其中一处，预算闸门就会按偏低的数字放行。
+   * 花费用本次的 token 算，缺 token 时按 0 计（`estimateCost` 的口径）。
+   */
+  private settleUsage(u: {
+    purpose: string;
+    model: string;
+    userId?: string;
+    inTokens: number | null;
+    outTokens: number | null;
+    latencyMs: number;
+    ok: boolean;
+    error?: string;
+  }): AiUsageRecord {
+    const usage: AiUsageRecord = {
+      purpose: u.purpose, model: u.model, userId: u.userId,
+      inTokens: u.inTokens, outTokens: u.outTokens,
+      costUsd: estimateCost(this.config.pricing, u.model, u.inTokens, u.outTokens),
+      latencyMs: u.latencyMs, ok: u.ok, error: u.error,
+    };
+    this.record(usage);
+    return usage;
   }
 
   /**
@@ -715,25 +794,26 @@ export class AiClient {
       //
       // 顺序反了就会先降到 text 再换投递，多花一次请求，而且 text 模式下
       // 再切投递等于把"字段清单在提示词里"和"指令在 system 里"混着试，难归因。
-      if (failure.kind === 'bad-json' || failure.kind === 'empty') {
-        // 只有**当前真的在用 split** 才值得换投递。
-        // 画像说 dropped 时 deliveryFor 直接返回 merged，此时 mergedFor 里没有该 key，
-        // 不判这一下就会用一模一样的 messages 再发一遍 —— 一次请求白花，
-        // 而且失败原因完全没变，日志里还看不出是重复。
-        const swapped = this.deliveryFor(opts.model) === 'split'
-          && deliverySwitches < 1
-          && this.learnMerged(opts.model);
-        if (swapped) {
-          deliverySwitches++;
-          continue;
-        }
-        const next = nextFormat(mode);
-        if (next && formatDegrades < 2) {
-          formatDegrades++;
-          this.formatUnsupported.add(this.formatKey(opts.model, mode));
-          mode = next;
-          continue;
-        }
+      //
+      // 换投递要先确认当前真在用 split：画像说 dropped 时 deliveryFor 已返回
+      // merged，不判就会拿一模一样的 messages 再发一遍，白花一次还看不出重复。
+      if (
+        isAnswerMiss(failure)
+        && this.deliveryFor(opts.model) === 'split'
+        && deliverySwitches < 1
+        && this.learnMerged(opts.model)
+      ) {
+        deliverySwitches++;
+        continue;
+      }
+
+      // 投递这条路走完了，再问策略：降级链还有下一档没有。
+      const next = nextFormatOn(failure, mode, formatDegrades);
+      if (next) {
+        formatDegrades++;
+        this.formatUnsupported.add(this.formatKey(opts.model, mode));
+        mode = next;
+        continue;
       }
 
       // ③ 结构不合规：把 issues 回灌，重试一次
@@ -811,7 +891,7 @@ export class AiClient {
         if (res.truncated && opts.maxTokens && attempt < TRANSPORT_RETRIES) {
           opts.maxTokens *= 2;
           last = { ok: false, failure: parsed.failure, usage };
-          await this.sleep(this.backoffMs(attempt));
+          await this.waitBeforeRetry(attempt);
           continue;
         }
         // 结构错不在这里重试 —— 它要的是回灌 issues，而不是原样再问一遍
@@ -856,6 +936,18 @@ export class AiClient {
   private backoffMs(attempt: number, retryAfterMs?: number): number {
     if (retryAfterMs !== undefined) return Math.min(retryAfterMs, 60_000);
     return attempt === 0 ? 1000 : 3000;
+  }
+
+  /**
+   * 重试之前等一会儿。
+   *
+   * 单独抽出来是因为"等待"本身要能被替换：测试注入 sleepImpl 之后，
+   * 如果决定睡多久的算式散落在各条重试分支里，每一处都得重复一遍
+   * "这次该不该等、等多久"，而漏掉一处就是一次没退避的重试。
+   * 这里只负责"按第几次尝试算出时长并睡下去"，睡不睡由调用方决定。
+   */
+  private async waitBeforeRetry(attempt: number, retryAfterMs?: number): Promise<void> {
+    await this.sleep(this.backoffMs(attempt, retryAfterMs));
   }
 
   /**
@@ -1401,6 +1493,39 @@ function nextFormat(mode: FormatMode): FormatMode | undefined {
   if (mode === 'json_schema') return 'json_object';
   if (mode === 'json_object') return 'text';
   return undefined;
+}
+
+/**
+ * "模型答非所问"：200 但正文是散文（bad-json）或干脆空着（empty）。
+ *
+ * 这两类值得先换投递、再降格式 —— 判据单独成函数是因为主干要按它分两级
+ * 处置，而两级的顺序不能反（见调用处的注释）；散在条件里最容易在某次
+ * 改动中悄悄合并成一级。
+ */
+function isAnswerMiss(failure: AiFailure): boolean {
+  return failure.kind === 'bad-json' || failure.kind === 'empty';
+}
+
+/**
+ * 格式降级策略：这次失败之后，还该不该换一种 response_format 再试。
+ *
+ * 单独抽成纯函数是为了让 `chatJson` 的主干读成「试一种格式 → 失败 →
+ * 问策略要下一种」：降级的**顺序**（schema → object → text）与触发条件是
+ * 一件事，改一处就该只改一处。它只回答"下一个是什么、还能不能降"，不碰
+ * 计数器与 formatUnsupported 记忆 —— 那些是主干的状态，"谁降过几次"
+ * 必须留在看得见所有分支的地方。
+ *
+ * 只对答非所问生效：4xx 报文有 `retryWithFormat` 单独一条路，其余失败
+ * （网络、限流、取消）换格式毫无意义。
+ */
+function nextFormatOn(
+  failure: AiFailure,
+  mode: FormatMode,
+  formatDegrades: number,
+): FormatMode | undefined {
+  if (!isAnswerMiss(failure)) return undefined;
+  if (formatDegrades >= 2) return undefined;
+  return nextFormat(mode);
 }
 
 /**

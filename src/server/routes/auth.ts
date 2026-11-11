@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { AppContext, Variables } from '../app.ts';
 import { badRequest, unauthorized } from '../errors.ts';
+import { readBody } from '../http/validate.ts';
 import { log } from '../logger.ts';
 import {
   clearSessionCookie, countUsers, createSession, deleteSession, ensureOwnerUser,
@@ -12,6 +14,37 @@ import { getUserId } from '../auth/require-user.ts';
 // 认证路由。分两组：
 //   /api/v1/auth/*   自有 API，标准错误体
 //   /api/auth/*      Huntly 插件兼容，响应形状按插件期待（见各 handler 注释）
+
+// ── 请求体 schema ────────────────────────────────────────────
+//
+// 这里的字段全都用 `.optional()` 而不是 `.default('')`：handler 里的
+// 判空（`!email || !password`）就是"缺省"的表达方式，schema 只负责挡住
+// "传了但不是字符串"这类真正越界的输入。若在这里塞默认值，
+// 缺字段会被悄悄变成空串，用户拿到的是 401（密码错误）而不是 400。
+const loginBody = z.object({
+  email: z.string().optional(),
+  password: z.string().optional(),
+});
+
+// setup 的 password 要区分"没传"（自动生成）与"传了空串"（也自动生成），
+// 所以只能是 optional，不能 default。
+const setupBody = z.object({
+  email: z.string().optional(),
+  password: z.string().optional(),
+});
+
+const passwordBody = z.object({
+  current: z.string().optional(),
+  next: z.string().optional(),
+});
+
+// 插件登录的字段名两套并存：username 是老插件用的，email 是新版。
+const compatLoginBody = z.object({
+  username: z.string().optional(),
+  email: z.string().optional(),
+  password: z.string().optional(),
+});
+
 
 export function authRoutes(ctx: AppContext): {
   v1: Hono<{ Variables: Variables }>;
@@ -29,7 +62,7 @@ export function authRoutes(ctx: AppContext): {
   // ══ 自有 API ═══════════════════════════════════════════════
 
   v1.post('/login', async (c) => {
-    const body = await c.req.json().catch(() => ({})) as { email?: string; password?: string };
+    const body = await readBody(c, loginBody);
     const email = (body.email ?? '').trim();
     const password = body.password ?? '';
     if (!email || !password) throw badRequest('需要 email 与 password');
@@ -78,9 +111,7 @@ export function authRoutes(ctx: AppContext): {
     if (countUsers(ctx.dbh.db) > 0) {
       throw badRequest('已存在用户，初始化接口已关闭');
     }
-    const body = await c.req.json().catch(() => ({})) as {
-      email?: string; password?: string;
-    };
+    const body = await readBody(c, setupBody);
     const email = (body.email ?? '').trim();
     if (!email) throw badRequest('需要 email');
     if (body.password !== undefined && body.password.length > 0 && body.password.length < 8) {
@@ -102,9 +133,7 @@ export function authRoutes(ctx: AppContext): {
   v1.post('/password', async (c) => {
     const uid = getUserId(c, ctx);
     if (!uid) throw unauthorized();
-    const body = await c.req.json().catch(() => ({})) as {
-      current?: string; next?: string;
-    };
+    const body = await readBody(c, passwordBody);
     if (!body.next || body.next.length < 8) throw badRequest('新密码至少 8 位');
     const stored = getPasswordHash(ctx.dbh.db, uid);
     if (stored) {
@@ -155,7 +184,7 @@ export function authRoutes(ctx: AppContext): {
     let password = '';
     const ct = c.req.header('content-type') ?? '';
     if (ct.includes('application/json')) {
-      const b = await c.req.json().catch(() => ({})) as { username?: string; email?: string; password?: string };
+      const b = await readBody(c, compatLoginBody);
       email = (b.email ?? b.username ?? '').trim();
       password = b.password ?? '';
     } else {

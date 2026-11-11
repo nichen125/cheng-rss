@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { AppContext, Variables } from '../app.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { requireUserId } from '../auth/require-user.ts';
+import { readBody } from '../http/validate.ts';
 import { log } from '../logger.ts';
 import {
   cacheInfo, clearMemoryCache, loadLibrary, previewRoute, readSettings,
@@ -13,6 +15,25 @@ import {
 // 四个端点，都不写条目数据 —— 它们只负责"帮用户找到可订阅的地址"。
 // 真正的订阅仍走 POST /feeds，这样"从搜索订阅"与"粘贴地址订阅"
 // 是同一条代码路径，不会各自演化出不同的校验。
+
+// ── 请求体 schema ────────────────────────────────────────────
+//
+// 两个字段都必须保持"可选"而非带默认值：writeSettings 用 `undefined`
+// 表示"这项别动"，若 schema 给个 '' 默认，改 accessKey 时会顺手把
+// baseUrl 清回默认地址。
+// 也不接受 null —— 下游 writeSettings 直接 .trim()，null 会崩成 500。
+const rsshubConfigBody = z.object({
+  baseUrl: z.string().optional(),
+  accessKey: z.string().optional(),
+});
+
+const rsshubPreviewBody = z.object({
+  path: z.string().nullish(),
+  route: z.string().nullish(),
+  // 只约束成"字符串到字符串"的映射：fillRoute 拿到的值会直接拼进 URL，
+  // 数字/对象混进来会被静默转成 "[object Object]"，生成的预览地址必然 404。
+  params: z.record(z.string()).nullish(),
+});
 
 export function rsshubRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   const r = new Hono<{ Variables: Variables }>();
@@ -32,9 +53,7 @@ export function rsshubRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // 表现是"搜到的路由预览 404"，很难查）。
   r.put('/rsshub/config', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as {
-      baseUrl?: string; accessKey?: string;
-    };
+    const body = await readBody(c, rsshubConfigBody);
     if (body.baseUrl !== undefined && typeof body.baseUrl !== 'string') {
       throw badRequest('baseUrl 必须是字符串');
     }
@@ -104,14 +123,10 @@ export function rsshubRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // ── 试订阅预览 ──────────────────────────────────────────
   r.post('/rsshub/preview', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as {
-      path?: string;
-      params?: Record<string, string>;
-      route?: string;
-    };
+    const body = await readBody(c, rsshubPreviewBody);
     const path = (body.path ?? body.route ?? '').trim();
     if (!path) throw badRequest('需要 path');
-    const params = body.params && typeof body.params === 'object' ? body.params : {};
+    const params = body.params ?? {};
 
     const s = readSettings(ctx.dbh.db, uid);
     try {

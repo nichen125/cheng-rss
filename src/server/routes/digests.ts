@@ -1,7 +1,14 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { AppContext, Variables } from '../app.ts';
 import { requireUserId } from '../auth/require-user.ts';
 import { notFound } from '../errors.ts';
+import { readBody } from '../http/validate.ts';
+
+// `force` 的语义是"忽略今日已生成的判断"，只接受真正的布尔值：
+// 旧代码 `Boolean(body.force)` 会把字符串 "false" 当成 true，
+// 那等于用户明确说"别重跑"却重跑了一遍、多花一份钱。
+const digestRunBody = z.object({ force: z.boolean().nullish() });
 
 // 简报的读取与手动生成（PLAN §18 / §19.5 3.4）。
 //
@@ -195,7 +202,7 @@ export function digestRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
    */
   r.post('/digests/run', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+    const body = await readBody(c, digestRunBody);
     const { liveRun, createRun, setRunJob } = await import('../digest/runs.ts');
     const { digestStatus, parseDigestConfig, localDayStart } = await import('../digest/schedule.ts');
     const { enqueue } = await import('../jobs/queue.ts');

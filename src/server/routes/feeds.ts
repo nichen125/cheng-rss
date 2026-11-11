@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { AppContext, Variables } from '../app.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
+import { readBody } from '../http/validate.ts';
 import { requireUserId } from '../auth/require-user.ts';
 import { log } from '../logger.ts';
 import { discoverFeed, fetchFeed, FetchError } from '../feeds/fetch.ts';
@@ -25,6 +27,96 @@ import {
 // 端点形状刻意保持简单：POST /feeds 接受一个 URL 就去发现并订阅，
 // 不需要前端先调"发现"再调"创建" —— 那会多一次往返，也要处理
 // "发现到了但用户又改了"的状态同步。
+
+// ── 请求体 schema ──────────────────────────────────────────
+//
+// 就地定义：这些形状只服务本文件的 handler，搬进公共模块只会让读代码
+// 多跳一次文件，换来的只是"看起来统一"。
+//
+// schema 只管**类型与形状**；下面 handler 里的业务校验（抓取间隔上下限、
+// 分组是否存在、BULK_MAX）保留 —— 它们带着特定的中文文案与顺序依赖，
+// 挪进 schema 会让"先判 A 还是先判 B"变得不可见。
+//
+// 一律 `.nullish()` 而非 `.optional()` 的地方，是因为原代码用 `?? 默认值`
+// 把 null 也当缺省处理；用 `.optional()` 会把今天能过的 null 变成 400。
+// 反过来，原代码对 null 会抛 TypeError 的字段（baseUrl / accessKey 之类）
+// 才用 `.optional()`。
+
+/** `Number(x)` 的宽容：数字字符串今天能用，收紧成纯 number 会误伤调用方 */
+const numberish = z.union([z.number(), z.string()]);
+
+/** 批量 id 的数组形状。空数组交给 bulkIds 报"不能为空"，文案保持原样 */
+const feedIdsArray = z.array(z.string(), {
+  required_error: '需要 feedIds 数组',
+  invalid_type_error: '需要 feedIds 数组',
+});
+
+const feedIdsBody = z.object({ feedIds: feedIdsArray });
+
+const bulkFolderBody = z.object({
+  feedIds: feedIdsArray,
+  folderId: z.string({ invalid_type_error: 'folderId 只能是字符串或 null' }).nullish(),
+});
+
+const statusField = z.enum(['active', 'paused'], {
+  // 枚举的默认英文提示（"Invalid enum value..."）不该出现在用户面前
+  errorMap: () => ({ message: 'status 只能是 active 或 paused' }),
+});
+
+const bulkStatusBody = z.object({ feedIds: feedIdsArray, status: statusField });
+
+// 这两个端点缺 feedIds 时原先是回落成 [] 再报「需要 feedIds」，
+// 所以这里只挡"不是数组"，文案交给 handler
+const softFeedIdsArray = z.array(z.string(), {
+  required_error: '需要 feedIds',
+  invalid_type_error: '需要 feedIds',
+});
+
+const softFeedIdsBody = z.object({ feedIds: softFeedIdsArray.nullish() });
+
+const folderNameBody = z.object({ name: z.string().nullish() });
+
+const folderReorderBody = z.object({
+  ids: z.array(z.string({ invalid_type_error: 'ids 里只能是分组 id' }).min(1, 'ids 里只能是分组 id'), {
+    required_error: '需要 ids 数组',
+    invalid_type_error: '需要 ids 数组',
+  }).min(1, 'ids 不能为空'),
+});
+
+// 调序/移组的 ids 报的是「订阅 id」，与分组那条措辞不同，故单独定义
+const arrangeBody = z.object({
+  folderId: z.string({ invalid_type_error: 'folderId 只能是字符串或 null' }).nullish(),
+  ids: z.array(z.string({ invalid_type_error: 'ids 里只能是订阅 id' }).min(1, 'ids 里只能是订阅 id'), {
+    required_error: '需要 ids 数组',
+    invalid_type_error: '需要 ids 数组',
+  }).min(1, 'ids 不能为空'),
+});
+
+const urlBody = z.object({
+  url: z.string({ invalid_type_error: '需要一个有效的 http(s) 订阅地址' }).nullish(),
+});
+
+const createFeedBody = z.object({
+  url: z.string().nullish(),
+  folderId: z.string().nullish(),
+  // 新建时不校验上下限（updateFeed 才 clamp），这里只管类型
+  fetchInterval: numberish.nullish(),
+});
+
+const patchFeedBody = z.object({
+  title: z.string().nullish(),
+  fetchInterval: numberish.nullish(),
+  status: statusField.optional(),
+  folderId: z.string().nullish(),
+});
+
+const editFeedBody = z.object({
+  title: z.string().nullish(),
+  folderId: z.string().nullish(),
+  fetchInterval: numberish.nullish(),
+});
+
+const importJsonBody = z.object({ opml: z.string().nullish() });
 
 export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   const r = new Hono<{ Variables: Variables }>();
@@ -70,7 +162,7 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
 
   r.post('/folders', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { name?: string };
+    const body = await readBody(c, folderNameBody);
     try {
       const folder = createFolder(ctx.dbh.db, uid, body.name ?? '');
       return c.json({ folder }, 201);
@@ -85,13 +177,9 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // `/feeds/bulk/refresh` 是同一类坑，那几个都还留着注释。
   r.patch('/folders/reorder', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { ids?: unknown };
-    if (!Array.isArray(body.ids)) throw badRequest('需要 ids 数组');
-    const ids = body.ids.filter((x): x is string => typeof x === 'string' && x.length > 0);
-    if (ids.length !== body.ids.length) throw badRequest('ids 里只能是分组 id');
-    if (ids.length === 0) throw badRequest('ids 不能为空');
+    const body = await readBody(c, folderReorderBody);
     try {
-      const items = reorderFolders(ctx.dbh.db, uid, ids);
+      const items = reorderFolders(ctx.dbh.db, uid, body.ids);
       return c.json({ items });
     } catch (e) {
       throw toAppError(e);
@@ -100,7 +188,7 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
 
   r.patch('/folders/:id', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { name?: string };
+    const body = await readBody(c, folderNameBody);
     try {
       const folder = renameFolder(ctx.dbh.db, uid, c.req.param('id'), body.name ?? '');
       return c.json({ folder });
@@ -121,8 +209,8 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // 移出分组的接口永远返回 404「分组不存在」。
   r.post('/folders/unfile/feeds', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { feedIds?: string[] };
-    const ids = Array.isArray(body.feedIds) ? body.feedIds : [];
+    const body = await readBody(c, softFeedIdsBody);
+    const ids = body.feedIds ?? [];
     if (ids.length === 0) throw badRequest('需要 feedIds');
     const moved = assignFeedsToFolder(ctx.dbh.db, uid, ids, null);
     return c.json({ ok: true, moved });
@@ -131,8 +219,8 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // 批量把订阅移进某个分组
   r.post('/folders/:id/feeds', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { feedIds?: string[] };
-    const ids = Array.isArray(body.feedIds) ? body.feedIds : [];
+    const body = await readBody(c, softFeedIdsBody);
+    const ids = body.feedIds ?? [];
     if (ids.length === 0) throw badRequest('需要 feedIds');
     try {
       const moved = assignFeedsToFolder(ctx.dbh.db, uid, ids, c.req.param('id'));
@@ -161,9 +249,7 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
 
   r.post('/feeds/bulk/folder', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as {
-      feedIds?: unknown; folderId?: string | null;
-    };
+    const body = await readBody(c, bulkFolderBody);
     const ids = bulkIds(body);
     const folderId = body.folderId ?? null;
     if (folderId !== null && !getFolder(ctx.dbh.db, uid, folderId)) {
@@ -174,20 +260,15 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
 
   r.post('/feeds/bulk/status', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as {
-      feedIds?: unknown; status?: string;
-    };
+    const body = await readBody(c, bulkStatusBody);
     const ids = bulkIds(body);
     const status = body.status;
-    if (status !== 'active' && status !== 'paused') {
-      throw badRequest('status 只能是 active 或 paused');
-    }
     return c.json(bulkSetStatus(ctx.dbh.db, uid, ids, status));
   });
 
   r.post('/feeds/bulk/delete', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { feedIds?: unknown };
+    const body = await readBody(c, feedIdsBody);
     return c.json(bulkDelete(ctx.dbh.db, uid, bulkIds(body)));
   });
 
@@ -203,19 +284,12 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // 语义是「这批源现在归 folderId，顺序就是 ids」—— 见 store.ts 的注释。
   r.post('/feeds/arrange', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { folderId?: unknown; ids?: unknown };
-    if (!Array.isArray(body.ids)) throw badRequest('需要 ids 数组');
-    const ids = body.ids.filter((x): x is string => typeof x === 'string' && x.length > 0);
-    if (ids.length !== body.ids.length) throw badRequest('ids 里只能是订阅 id');
-    if (ids.length === 0) throw badRequest('ids 不能为空');
-    if (ids.length > BULK_MAX) throw badRequest(`一次最多 ${BULK_MAX} 个`);
     // folderId 缺省/ null = 未分组（"移出分组"不是另一个接口）
-    const raw = body.folderId;
-    if (raw !== undefined && raw !== null && typeof raw !== 'string') {
-      throw badRequest('folderId 只能是字符串或 null');
-    }
+    const body = await readBody(c, arrangeBody);
+    const ids = body.ids;
+    if (ids.length > BULK_MAX) throw badRequest(`一次最多 ${BULK_MAX} 个`);
     try {
-      const moved = arrangeFeeds(ctx.dbh.db, uid, (raw as string | null | undefined) ?? null, ids);
+      const moved = arrangeFeeds(ctx.dbh.db, uid, body.folderId ?? null, ids);
       return c.json({ ok: true, moved });
     } catch (e) {
       if (e instanceof Error && e.message === 'NOT_FOUND_FOLDER') throw notFound('分组不存在');
@@ -227,7 +301,7 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
 
   r.post('/feeds/bulk/refresh', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { feedIds?: unknown };
+    const body = await readBody(c, feedIdsBody);
     const ids = bulkIds(body);
     const { existing, missing } = splitExisting(ctx.dbh.db, uid, ids);
     let done = 0;
@@ -248,7 +322,7 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // （主站 feed + 评论 feed），需要让他选，而不是替她随便挑一个。
   r.post('/feeds/discover', async (c) => {
     requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { url?: string };
+    const body = await readBody(c, urlBody);
     const url = normalizeInputUrl(body.url);
     if (!url) throw badRequest('需要一个有效的 http(s) 订阅地址');
 
@@ -286,9 +360,7 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   // ── 添加订阅 ────────────────────────────────────────────
   r.post('/feeds', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as {
-      url?: string; folderId?: string | null; fetchInterval?: number;
-    };
+    const body = await readBody(c, createFeedBody);
     const url = normalizeInputUrl(body.url);
     if (!url) throw badRequest('需要一个有效的 http(s) 订阅地址');
 
@@ -331,7 +403,10 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       siteUrl: parsed.siteUrl,
       iconUrl: parsed.iconUrl,
       folderId: body.folderId ?? null,
-      fetchInterval: body.fetchInterval,
+      // numberish 允许数字字符串（旧代码 `as number` 只是断言，运行时
+      // 字符串照样进库）；这里显式转成 number，避免 '7200' 变成
+      // 字符串写进 INTEGER 列。
+      fetchInterval: body.fetchInterval == null ? undefined : Number(body.fetchInterval),
       sourceKind: 'rss',
     });
 
@@ -365,12 +440,9 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   r.patch('/feeds/:id', async (c) => {
     const uid = requireUserId(c);
     const id = c.req.param('id');
-    const body = await c.req.json().catch(() => ({})) as {
-      title?: string | null;
-      fetchInterval?: number;
-      status?: string;
-      folderId?: string | null;
-    };
+    // 这里只校验「是什么类型」；300 秒下限是业务规则，留在 handler 里，
+    // 因为它和 updateFeed 的钳制逻辑成对出现，拆成两处反而难读。
+    const body = await readBody(c, patchFeedBody);
 
     const patch: Parameters<typeof updateFeed>[3] = {};
     if (body.title !== undefined) patch.title = body.title;
@@ -381,9 +453,6 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     }
     if (body.folderId !== undefined) patch.folderId = body.folderId;
     if (body.status !== undefined) {
-      if (!['active', 'paused'].includes(body.status)) {
-        throw badRequest('status 只能是 active 或 paused');
-      }
       patch.status = body.status as FeedStatus;
     }
 
@@ -404,11 +473,7 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     const cur = getFeed(ctx.dbh.db, uid, id);
     if (!cur) throw notFound('订阅不存在');
 
-    const body = await c.req.json().catch(() => ({})) as {
-      title?: string | null;
-      folderId?: string | null;
-      fetchInterval?: number;
-    };
+    const body = await readBody(c, editFeedBody);
 
     if (body.folderId !== undefined && body.folderId !== null) {
       if (!getFolder(ctx.dbh.db, uid, body.folderId)) throw badRequest('分组不存在');
@@ -524,7 +589,7 @@ export function feedRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
 
     let xml: string;
     if (ct.includes('application/json')) {
-      const body = await c.req.json().catch(() => ({})) as { opml?: string };
+      const body = await readBody(c, importJsonBody);
       xml = body.opml ?? '';
     } else {
       xml = await c.req.text();

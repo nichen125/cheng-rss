@@ -8,6 +8,7 @@ import {
   type RuntimeConfig,
 } from './server/config.ts';
 import { log, setLogLevel } from './server/logger.ts';
+import { scheduleTask } from './server/util/timers.ts';
 import { JobRunner } from './server/jobs/runner.ts';
 import { buildHandlers } from './server/jobs/handlers.ts';
 import { sweepDueFeeds } from './server/routes/feeds.ts';
@@ -392,15 +393,14 @@ async function cmdServe(args: Args): Promise<void> {
   // 定时 sweep：每分钟把到期的订阅入队（PLAN §7.1 L0）。
   // 为什么不靠每个源自己的 setTimeout：源可能有几百个，
   // 定时器方案要么几百个 timer 要么一次全打出去；单表扫一遍更简单。
-  const sweepTimer = setInterval(() => {
-    try {
+  const stopSweep = scheduleTask({
+    name: 'sweep',
+    everyMs: 60_000,
+    run: () => {
       const n = sweepDueFeeds(appCtx);
       if (n > 0) log.debug(`sweep: ${n} 个订阅已入队`);
-    } catch (e) {
-      log.warn('sweep 失败', { err: (e as Error).message });
-    }
-  }, 60_000);
-  sweepTimer.unref?.();
+    },
+  });
 
   // 补录孤儿提取任务（PLAN §7.5，v1.17）。
   //
@@ -418,22 +418,21 @@ async function cmdServe(args: Args): Promise<void> {
   // 稳态成本：正常运行时这个查询 0 命中，0.16ms。它比一次抓取便宜三个
   // 数量级，所以"跑得勤"不构成性能问题 —— 真正的成本是命中时的抓取，
   // 而命中意味着确实有活没干。
-  const backfill = () => {
-    try {
+  //
+  // 启动 30 秒后先跑一轮：积压不该等一个周期
+  const stopBackfill = scheduleTask({
+    name: '补录待提取条目',
+    failMessage: '补录待提取条目失败',
+    everyMs: 5 * 60_000,
+    firstRunDelayMs: 30_000,
+    run: () => {
       const n = enqueueOrphanExtracts(h.db);
       const left = countOrphanPending(h.db);
       if (n > 0 || left > 0) {
         log.info(`补录 ${n} 条待提取条目`, { remaining: left });
       }
-    } catch (e) {
-      log.warn('补录待提取条目失败', { err: (e as Error).message });
-    }
-  };
-  // 启动 30 秒后先跑一轮：积压不该等一个周期
-  const firstBackfill = setTimeout(backfill, 30_000);
-  firstBackfill.unref?.();
-  const backfillTimer = setInterval(backfill, 5 * 60_000);
-  backfillTimer.unref?.();
+    },
+  });
 
   // 补录孤儿**分析**任务（PLAN §5.7 P2，v2.0）。
   //
@@ -460,20 +459,18 @@ async function cmdServe(args: Args): Promise<void> {
     }
   };
 
-  const analyzeBackfill = () => {
-    if (!hasUsableKey()) return;
-    try {
+  const stopAnalyzeBackfill = scheduleTask({
+    name: '补录待分析条目',
+    failMessage: '补录待分析条目失败',
+    everyMs: 5 * 60_000,
+    firstRunDelayMs: 20_000,
+    run: () => {
+      if (!hasUsableKey()) return;
       const n = enqueueOrphanAnalyze(h.db);
       const left = countOrphanAnalyze(h.db);
       if (n > 0) log.info(`补录 ${n} 条待分析条目`, { remaining: left });
-    } catch (e) {
-      log.warn('补录待分析条目失败', { err: (e as Error).message });
-    }
-  };
-  const firstAnalyzeBackfill = setTimeout(analyzeBackfill, 20_000);
-  firstAnalyzeBackfill.unref?.();
-  const analyzeBackfillTimer = setInterval(analyzeBackfill, 5 * 60_000);
-  analyzeBackfillTimer.unref?.();
+    },
+  });
 
   // 启动横幅（§8.8）：没配 key 时说**一次**「N 篇待分析 + 去哪儿填」。
   //
@@ -493,18 +490,16 @@ async function cmdServe(args: Args): Promise<void> {
   // 判重只看近 14 天的候选，更早的向量永远读不到，但一条 1KB × 10 万条
   // = 100MB。放在启动后 5 分钟跑一次再每 24h 一次：不在启动关键路径上，
   // 也不依赖外部 cron（NAS 用户不会配）。
-  const pruneVectors = () => {
-    try {
+  const stopPruneVectors = scheduleTask({
+    name: '清理去重向量',
+    failMessage: '清理去重向量失败',
+    everyMs: 24 * 3600_000,
+    firstRunDelayMs: 5 * 60_000,
+    run: () => {
       const n = pruneOldVectors(h.db);
       if (n > 0) log.info(`清理了 ${n} 条过期的去重向量`);
-    } catch (e) {
-      log.warn('清理去重向量失败', { err: (e as Error).message });
-    }
-  };
-  const firstPrune = setTimeout(pruneVectors, 5 * 60_000);
-  firstPrune.unref?.();
-  const pruneTimer = setInterval(pruneVectors, 24 * 3600_000);
-  pruneTimer.unref?.();
+    },
+  });
 
   // 简报调度（PLAN §9.1 / §19.5 3.4）。
   //
@@ -515,8 +510,12 @@ async function cmdServe(args: Args): Promise<void> {
   // 三种否决状态都由 digestDue 判定（未到点 / 今天已做 / 今天已跳过 /
   // 失败退避中 / 今天失败次数用完），它们各自有持久痕迹，所以这个查询
   // 每分钟跑一次不会重复触发任何工作 —— 稳态成本就是三条索引查询。
-  const sweepDigests = () => {
-    try {
+  const stopSweepDigests = scheduleTask({
+    name: '简报调度',
+    failMessage: '简报调度失败',
+    everyMs: 60_000,
+    firstRunDelayMs: 20_000,
+    run: () => {
       const users = listUsersForDigest(h.db);
       let queued = 0;
       for (const u of users) {
@@ -535,14 +534,8 @@ async function cmdServe(args: Args): Promise<void> {
         if (id !== null) queued++;
       }
       if (queued > 0) log.debug(`简报调度: ${queued} 个用户已入队`);
-    } catch (e) {
-      log.warn('简报调度失败', { err: (e as Error).message });
-    }
-  };
-  const firstDigestSweep = setTimeout(sweepDigests, 20_000);
-  firstDigestSweep.unref?.();
-  const digestTimer = setInterval(sweepDigests, 60_000);
-  digestTimer.unref?.();
+    },
+  });
 
   let runner: JobRunner | null = null;
   if (inlineWorker) {
@@ -571,11 +564,11 @@ async function cmdServe(args: Args): Promise<void> {
 
   const shutdown = async (sig: string) => {
     log.info(`收到 ${sig}，正在关闭`);
-    clearInterval(sweepTimer);
-    clearTimeout(firstPrune);
-    clearInterval(pruneTimer);
-    clearTimeout(firstBackfill);
-    clearInterval(backfillTimer);
+    stopSweep();
+    stopBackfill();
+    stopAnalyzeBackfill();
+    stopPruneVectors();
+    stopSweepDigests();
     try {
       if (runner) await runner.stop();
     } catch { /* runner 已停 */ }

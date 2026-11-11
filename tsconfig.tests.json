@@ -1,0 +1,40 @@
+{
+  // 单测专用的类型检查配置。
+  //
+  // 为什么不直接用根 tsconfig.json：那份 exclude 了 src/client，而
+  // tests/ 里既有引服务端模块的（url-dedupe.test.ts 引 src/server/dedupe/url.ts），
+  // 也有引前端模块的（latest.test.ts 引 src/client/lib/latest.ts、
+  // arrange.test.ts 引 src/client/arrange.ts）。两边都不放进来，测试文件
+  // 就等于没被类型检查过 —— 改了个签名，测试照旧能跑起来再在运行时炸。
+  //
+  // 这里用 NodeNext + @types/node（测试跑在 node --test 里，要有 node:test、
+  // node:assert 的类型），DOM lib 只为让前端那几个纯 TS 模块能编译 ——
+  // 不引 jsx，所以组件 .tsx 依然由 tsconfig.client.json 负责。
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    "types": ["node"]
+  },
+  "include": ["tests/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

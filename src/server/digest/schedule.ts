@@ -148,10 +148,15 @@ export function digestDue(
     return { due: false, reason: `今天已跳过：${skip.reason}`, dayKey, triggerAt };
   }
 
-  // 今天失败过 → 按退避再试，超过上限就放弃
+  // 今天**失败**过 → 按退避再试，超过上限就放弃。
+  //
+  // `ok = 0` 不能省：成功路径（run.ts 的 recordAttempt(..., true, null)）
+  // 也往这张表写一行，把这些行算成失败次数的话，"今天成功了 3 次"就会被
+  // 读成"失败 3 次"，于是在 digests 行缺失（重建/清理过）时永远不再重生成。
   const failed = db.prepare(`
     SELECT COUNT(*) c, MAX(created_at) last
-      FROM digest_attempts WHERE user_id = ? AND kind = ? AND day_key = ?
+      FROM digest_attempts
+     WHERE user_id = ? AND kind = ? AND day_key = ? AND ok = 0
   `).get(userId, cfg.kind, dayKey) as { c: number; last: number | null };
 
   const attempts = Number(failed.c ?? 0);

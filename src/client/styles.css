@@ -1255,6 +1255,11 @@ input::placeholder { color: var(--fg-faint); }
    一屏十条，每条都挂一条下划线就变成十条横线，比没有层级更难扫。
    可点击由整行的悬停底色表达，标题只用颜色变化回应。 */
 .entry-title:hover { color: var(--accent); text-decoration: none; }
+/* 焦点环挂在标题上，而不是整行：行不再是可聚焦按钮之后，标题链接就是
+   键盘在这行里唯一的停靠点，焦点提示必须跟着它走 —— 否则 Tab 到一行
+   时，眼睛只能看到悬停底色，分不清焦点在第几行。
+   描边参数与 .btn / .icon-btn / .nav-item 保持一致，不另造一套。 */
+.entry-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* hover 才出现的行内操作（收藏 / 新标签打开原文）。
    常驻会让每行多两个图标的视觉噪声，而列表页的任务是"扫过去"（§15.2）。 */

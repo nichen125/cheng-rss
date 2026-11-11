@@ -443,11 +443,15 @@ if (!browser) {
         opsCount: document.querySelectorAll('.entry-item .entry-ops a, .entry-item .entry-ops button').length,
       };
     })()`);
-    check('列表行是 div[role=button] 而不是 button（否则里面放不了 <a>）', () => ok(
-      rowInfo?.rowTag === 'DIV' && rowInfo?.rowRole === 'button',
+    // 整行不再冒充 button。原来的 div[role=button] 里嵌着真正的 <button>
+    // （星标）和 <a>（标题 / 外链），读屏会把一行念成一个按钮、行内星标反而
+    // 念不出来；tabindex=0 又让每行都成了 Tab 停靠点。现在行是纯容器，
+    // 键盘入口收口到标题链接 —— 所以这里断言的是"没有"。
+    check('列表行是纯容器，不再挂 role=button / tabindex', () => ok(
+      rowInfo?.rowTag === 'DIV'
+      && rowInfo?.rowRole === null
+      && rowInfo?.rowTabIndex === null,
       JSON.stringify(rowInfo)));
-    check('列表行有 tabindex=0（键盘能 Tab 到）', () => ok(
-      String(rowInfo?.rowTabIndex) === '0', String(rowInfo?.rowTabIndex)));
     check('列表标题是真 <a> 且 href 指向原文', () => ok(
       rowInfo?.titleTag === 'A' && String(rowInfo?.titleHref).startsWith('http'),
       JSON.stringify(rowInfo)));
@@ -458,20 +462,26 @@ if (!browser) {
     check('每行有 2 个行内操作（收藏 + 新标签原文）', () => ok(
       rowInfo?.opsCount >= 2, String(rowInfo?.opsCount)));
 
-    // Enter 键能开条目（role=button 的键盘语义是手工补的，必须验）
+    // Enter 键能开条目。键盘入口现在是标题链接上的 onKeyDown：
+    // 全局那条「Enter 打开一条」只认 items[0]，焦点在第 2 行时用它就会开错
+    // 一条，所以这里特意挑第 2 行，并核对打开的确实是这一条。
     const enterWorks = await evaluate(`(async () => {
       // 先回到列表
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       await new Promise((r) => setTimeout(r, 500));
       const row = document.querySelectorAll('.entry-item')[1];
-      if (!row) return { ok: false };
-      row.focus();
-      row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      const title = row?.querySelector('.entry-title');
+      if (!title) return { ok: false, why: '第 2 条没有 .entry-title' };
+      const expected = (title.textContent || '').trim().slice(0, 12);
+      title.focus();
+      title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       await new Promise((r) => setTimeout(r, 1200));
-      return { ok: Boolean(document.querySelector('.article-body')) };
+      const opened = (document.querySelector('.reader-title')?.textContent || '').trim().slice(0, 12);
+      return { ok: Boolean(document.querySelector('.article-body')), expected, opened };
     })()`);
-    check('列表行按 Enter 能在阅读区打开（role=button 的键盘语义）', () => ok(
-      enterWorks?.ok === true, JSON.stringify(enterWorks)));
+    check('标题链接按 Enter 打开的是这一条（不是第 1 条）', () => ok(
+      enterWorks?.ok === true && enterWorks?.expected === enterWorks?.opened,
+      JSON.stringify(enterWorks)));
 
     // ── 快捷键 ──
     const shortcut = await evaluate(`(async () => {

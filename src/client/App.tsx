@@ -2740,8 +2740,11 @@ function PrefsPanel(props: {
  * 尾段（已读）用的是同一个组件，所以不存在"分割线上下行距差 2px"这种
  * 只有肉眼能发现的问题。历史视图也用同一份 `meta` 插槽换掉时间语义。
  *
- * 保留 `role=button` + `div` 而不是 `<button>`（§15.11）：`<a>` 不能嵌在
- * `<button>` 里，而"标题可中键/Ctrl+点击在新标签打开"必须是一个真 `<a>`。
+ * 行是纯容器，不再挂 `role=button` + `tabIndex`：行内本来就嵌着收藏按钮
+ * 和外链，再给整行一个按钮角色，读屏会把一行念成"按钮里套按钮"，星标
+ * 反而读不出来。键盘入口收口到标题那个真链接 —— 它才是"打开这篇"的动作。
+ * 也不能改成 `<button>`：`<a>` 不能嵌在 `<button>` 里，而"标题可中键/
+ * Ctrl+点击在新标签打开"必须是一个真 `<a>`。
  */
 function EntryRow(props: {
   it: EntrySummary | HistoryEntry;
@@ -2760,18 +2763,13 @@ function EntryRow(props: {
   const highlights = 'highlightCount' in it ? it.highlightCount : 0;
   return (
     <li>
+      {/* 纯展示容器：onClick 只是鼠标便利（点摘要、点空白仍然打开），
+          不再声明 role/tabIndex —— 一行里已经有真按钮和真链接，再给整行
+          一个按钮角色就是交互元素嵌套。 */}
       <div
-        role="button"
-        tabIndex={0}
         className={`entry-item ${it.isRead ? 'read' : ''} ${props.active ? 'active' : ''}`}
         data-tier={it.tier ?? 'normal'}
         onClick={props.onOpen}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            props.onOpen();
-          }
-        }}
       >
         {props.day && (
           <span className="day-mark" data-month-start={props.day.monthStart ? '' : undefined}>
@@ -2824,9 +2822,17 @@ function EntryRow(props: {
             </a>
           </span>
         </div>
-        {/* 标题是真链接：左键拦截掉（走阅读区），中键与 Ctrl+点击交给浏览器。
-            必须 stopPropagation：行本身也有 onClick，不拦就会调用两次 open()
-            （第一次标已读减角标，第二次拿到"已读过"再减一次 —— 实测 2 → 0）。 */}
+        {/* 标题是这行唯一合理的键盘入口：整行不再是可聚焦按钮之后，读屏和
+            Tab 都只停在标题这个真链接上，Enter 必须仍然打开这一条。
+
+            所以这里显式接住 Enter（并 stopPropagation）：全局快捷键里还有
+            一条「Enter 打开一条」，它只认 items[0]，焦点在第 3 行时会开错
+            条目，而且它 preventDefault 会掐掉链接自己的原生激活。先接住就
+            只开一次、开对一条。
+
+            click 仍要 stopPropagation：行本身也有 onClick，不拦就会调用两次
+            open()（第一次标已读减角标，第二次拿到"已读过"再减一次 —— 实测
+            2 → 0）。中键与 Ctrl/Shift+点击不拦，交给浏览器开新标签。 */}
         <a
           className="entry-title"
           href={it.url}
@@ -2838,6 +2844,12 @@ function EntryRow(props: {
               e.stopPropagation();
               props.onOpen();
             }
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+            e.preventDefault();
+            e.stopPropagation();
+            props.onOpen();
           }}
         >
           {it.title}

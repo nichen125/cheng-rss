@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import type {
+  DigestCluster, DigestDetail, DigestListResponse, DigestSummary, DigestWorthReading,
+} from '../../shared/dto.ts';
 import type { AppContext, Variables } from '../app.ts';
 import { requireUserId } from '../auth/require-user.ts';
 import { notFound } from '../errors.ts';
@@ -29,23 +32,30 @@ export function digestRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
         ORDER BY day_key DESC, created_at DESC LIMIT ?
     `).all(uid, limit) as Record<string, unknown>[];
 
-    return c.json({
-      items: rows.map((x) => ({
-        id: x.id,
-        title: x.title,
-        intro: String(x.intro ?? '').split('\n').filter(Boolean),
-        periodStart: x.period_start,
-        periodEnd: x.period_end,
-        dayKey: x.day_key,
-        entryCount: x.entry_count,
-        clusterCount: x.cluster_count,
-        model: x.model,
-        costUsd: x.cost_usd,
-        deliveredAt: x.delivered_at,
-        createdAt: x.created_at,
-        citeCount: parseJsonArray<unknown>(x.cites).length,
-      })),
-    });
+    // 标注成 DigestSummary[]：列表是详情页左栏的唯一数据源，
+    // 字段少一个（比如 citeCount）编译器当场报错，而不是等页面少显示一行。
+    const items: DigestSummary[] = rows.map((x) => ({
+      id: String(x.id),
+      title: String(x.title),
+      intro: String(x.intro ?? '').split('\n').filter(Boolean),
+      // 四列在 0001_init.sql 里都是可空（INTEGER 没加 NOT NULL），
+      // 但每一行都由 saveDigest 写入、实际都有值。DTO 要求 number，
+      // 客户端也是直接拼文案（`${d.entryCount} 篇`）——
+      // 这里 null → 0，宁可显示"0 篇"，也不要把 null 印到页面上。
+      periodStart: Number(x.period_start),
+      periodEnd: Number(x.period_end),
+      dayKey: numOrNull(x.day_key),
+      entryCount: Number(x.entry_count ?? 0),
+      clusterCount: Number(x.cluster_count ?? 0),
+      model: strOrNull(x.model),
+      costUsd: numOrNull(x.cost_usd),
+      deliveredAt: numOrNull(x.delivered_at),
+      createdAt: Number(x.created_at),
+      citeCount: parseJsonArray<unknown>(x.cites).length,
+    }));
+
+    const body: DigestListResponse = { items };
+    return c.json(body);
   });
 
   r.get('/digests/latest', (c) => {
@@ -144,7 +154,11 @@ export function digestRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
 
     // 簇被整窗重算清掉后，cites 里仍有标题（saveDigest 时存了快照）——
     // 这时给一条只有标题的条目，脚注不会变成空号。
-    const clusters = cites.map((x) => {
+    //
+    // entry_count / source_count / heat 走 numOrNull（而不是把 unknown 直接
+    // 塞进去）：DTO 里这三列是 `number | null`，簇表虽然 NOT NULL DEFAULT 0，
+    // 但"缺详细数据"那条分支本来就给 null，两边都得收敛到同一形状。
+    const clusters: DigestCluster[] = cites.map((x) => {
       const row2 = byId.get(x.id);
       if (!row2) {
         return {
@@ -162,28 +176,35 @@ export function digestRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
         // conflicts 有两种历史形状：字符串数组，或 {claim, sources} 对象数组
         consensus: parseJsonArray<string>(row2.consensus),
         conflicts: parseJsonArray<{ claim: string; sources: string[] }>(row2.conflicts),
-        entry_count: row2.entry_count,
-        source_count: row2.source_count,
-        heat: row2.heat,
+        entry_count: numOrNull(row2.entry_count),
+        source_count: numOrNull(row2.source_count),
+        heat: numOrNull(row2.heat),
         missing: false,
       };
     });
 
     // 「值得一读」：模型给的是 id，要换成标题才可读
-    const wr = wrIds.map((id) => {
+    const wr: DigestWorthReading[] = wrIds.map((id) => {
       const hit = byId.get(id) ?? null;
       const cite = cites.find((x) => x.id === id);
       return {
         id,
         title: hit ? String(hit.title) : (cite?.title ?? id),
         summary: hit && hit.summary !== null ? String(hit.summary) : null,
-        entryCount: hit?.entry_count ?? null,
-        sourceCount: hit?.source_count ?? null,
-        heat: hit?.heat ?? null,
+        entryCount: numOrNull(hit?.entry_count),
+        sourceCount: numOrNull(hit?.source_count),
+        heat: numOrNull(hit?.heat),
       };
     });
 
-    return c.json({ ...shape(row), clusters, worthReading: wr });
+    // 详情 = 摘要字段的超集 + 正文 + 引用簇 + 值得一读。
+    //
+    // 标上 DigestDetail 后第一次跑就报错：shape() 把 `row.body_md` 原样
+    // 塞出来，驱动给的是 unknown，而契约要求 bodyMd: string。
+    // 换句话说，之前那些 `x.id` / `x.entry_count` 之类的裸列值没有任何
+    // 收敛，注解一加才暴露出来 —— 修法见文件末尾的 shape()。
+    const body: DigestDetail = { ...shape(row), clusters, worthReading: wr };
+    return c.json(body);
   });
 
   /**
@@ -280,22 +301,42 @@ function parseJsonArray<T>(raw: unknown): T[] {
   }
 }
 
-function shape(row: Record<string, unknown>) {
+/**
+ * 一行 digests 记录 → 对外形状：摘要字段 + 正文。
+ *
+ * 返回值刻意标成 `DigestSummary & { bodyMd: string }` 而不是笼统对象：
+ * - `GET /digests/:id` 要 `DigestDetail`，它继承 DigestSummary 且多一个 bodyMd，
+ *   展开这个类型正好凑齐，编译器会核对摘要那一半；
+ * - 列表端点不要 bodyMd（正文是几十 KB，列表只画日期与条数），所以列表
+ *   自己 map 一遍而不是复用这里。
+ */
+function shape(row: Record<string, unknown>): DigestSummary & { bodyMd: string } {
   return {
-    id: row.id,
-    title: row.title,
+    id: String(row.id),
+    title: String(row.title),
     intro: String(row.intro ?? '').split('\n').filter(Boolean),
-    bodyMd: row.body_md,
-    periodStart: row.period_start,
-    periodEnd: row.period_end,
-    dayKey: row.day_key,
-    entryCount: row.entry_count,
-    clusterCount: row.cluster_count,
-    model: row.model,
-    costUsd: row.cost_usd,
-    deliveredAt: row.delivered_at,
-    createdAt: row.created_at,
+    bodyMd: String(row.body_md ?? ''),
+    periodStart: Number(row.period_start),
+    periodEnd: Number(row.period_end),
+    dayKey: numOrNull(row.day_key),
+    entryCount: Number(row.entry_count ?? 0),
+    clusterCount: Number(row.cluster_count ?? 0),
+    model: strOrNull(row.model),
+    costUsd: numOrNull(row.cost_usd),
+    deliveredAt: numOrNull(row.delivered_at),
+    createdAt: Number(row.created_at),
     // 引用条数：页面上"3 个事件"这类概括文案要用，不必先拉全量详情
     citeCount: parseJsonArray<unknown>(row.cites).length,
   };
+}
+
+/** SQL 行里"可能是 null 的字符串" → `string | null`（null 不能变成 "null"） */
+function strOrNull(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  return String(v);
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  return Number(v);
 }

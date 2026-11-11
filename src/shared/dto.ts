@@ -250,6 +250,17 @@ export interface DigestSummary {
   citeCount?: number;
 }
 
+/**
+ * `GET /digests` 的响应。
+ *
+ * 只有 items，**没有** total / hasMore：服务端是 `LIMIT ?` 截断，
+ * 并不数总数，客户端也没在用这样的数。这里如实只写 items ——
+ * 若凭空补一个 total，以后的人会以为它是真的。
+ */
+export interface DigestListResponse {
+  items: DigestSummary[];
+}
+
 /** 高亮的颜色：只有三种（§11.3 明确不做调色盘） */
 export type HighlightColor = 'yellow' | 'green' | 'blue';
 

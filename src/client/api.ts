@@ -5,7 +5,7 @@
 
 import type {
   ApiError, BulkResult, DiscoverCandidate, DiscoverResponse, DigestCluster,
-  DigestDetail, DigestRunPhase, DigestRunStatus, DigestRunView, DigestSummary,
+  DigestDetail, DigestListResponse, DigestRunPhase, DigestRunStatus, DigestRunView, DigestSummary,
   DigestWorthReading, EntryDetail, EntrySummary, FeedItem, FeedListResponse,
   FolderItem, HealthResponse, HighlightColor, HighlightItem, HistoryBucket,
   HistoryEntry, HistoryGroup, HistoryResponse, ListResponse, RsshubConfigResponse,
@@ -25,6 +25,7 @@ export type {
   DiscoverResponse,
   DigestCluster,
   DigestDetail,
+  DigestListResponse,
   DigestRunPhase,
   DigestRunStatus,
   DigestRunView,
@@ -441,7 +442,7 @@ export const api = {
   }>('/digests/status'),
 
   listDigests: (limit = 20, signal?: AbortSignal) =>
-    request<{ items: DigestSummary[] }>(`/digests?limit=${limit}`, { signal }),
+    request<DigestListResponse>(`/digests?limit=${limit}`, { signal }),
 
   /**
    * 触发一次生成。**立刻返回**，不等生成跑完（202 + runId）。

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppContext, Variables } from '../app.ts';
-import type { EntryDetail, EntrySummary, ListResponse } from '../../shared/dto.ts';
+import type { EntryDetail, EntrySummary, HistoryEntry, HistoryResponse, ListResponse } from '../../shared/dto.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { readBody } from '../http/validate.ts';
 import { requireUserId } from '../auth/require-user.ts';
@@ -273,28 +273,31 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
     const hasMore = rows.length > limit;
     const page = rows.slice(0, limit);
 
-    const items = page.map((row) => ({
-      id: row.id,
-      title: row.title,
-      url: row.url,
-      author: row.author,
+    // 与列表一样标成 `HistoryEntry[]`：数据库驱动给的是 unknown，历史接口
+    // 又要多发 readAt / readCount 这组字段，不标就没人核对"SELECT 里查了
+    // 一列、响应里漏了一列"（列表那次 highlightCount 事故的同类问题）。
+    const items: HistoryEntry[] = page.map((row) => ({
+      id: String(row.id),
+      title: String(row.title),
+      url: String(row.url),
+      author: strOrNull(row.author),
       publishedAt: Number(row.published_at),
       // readAt 与 publishedAt 分开给：历史页的时间轴用 readAt，
       // 而卡片上仍要显示"原文发表于何时"。混成一个字段就没法区分了。
       readAt: Number(row.last_read_at),
-      firstReadAt: row.first_read_at === null ? null : Number(row.first_read_at),
+      firstReadAt: numOrNull(row.first_read_at),
       readCount: Number(row.read_count ?? 0),
-      readProgress: row.read_progress === null ? null : Number(row.read_progress),
+      readProgress: numOrNull(row.read_progress),
       isRead: Boolean(row.is_read),
       isStarred: Boolean(row.is_starred),
-      excerpt: row.excerpt,
-      siteName: row.site_name,
-      summary: row.summary,
-      tier: row.tier,
-      faviconUrl: row.favicon_url,
-      wordCount: row.word_count === null ? null : Number(row.word_count),
-      feedId: row.feed_id ?? null,
-      feedTitle: row.feed_title ?? null,
+      excerpt: strOrNull(row.excerpt),
+      siteName: strOrNull(row.site_name),
+      summary: strOrNull(row.summary),
+      tier: strOrNull(row.tier),
+      faviconUrl: strOrNull(row.favicon_url),
+      wordCount: numOrNull(row.word_count),
+      feedId: strOrNull(row.feed_id),
+      feedTitle: strOrNull(row.feed_title),
     }));
 
     const last = page[page.length - 1];
@@ -308,12 +311,13 @@ export function entryRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
       `SELECT COUNT(*) AS c FROM entries e WHERE ${baseWhere.join(' AND ')}`,
     ).get(...baseParams) as { c: number };
 
-    return c.json({
+    const body: HistoryResponse = {
       groups: groupByDay(items, (x) => x.readAt),
       count: items.length,
       total: Number(totalRow.c),
       nextCursor,
-    });
+    };
+    return c.json(body);
   });
 
   // ── 详情 ────────────────────────────────────────────────

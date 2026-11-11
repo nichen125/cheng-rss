@@ -504,7 +504,7 @@ export class AiClient {
         this.record(usage);
         last = { ok: false, failure, usage };
         if (!failure.retryable || attempt >= TRANSPORT_RETRIES) return last;
-        await this.sleep(this.backoffMs(attempt));
+        await this.waitBeforeRetry(attempt);
         continue;
       }
 
@@ -549,7 +549,7 @@ export class AiClient {
         this.record(usage);
         last = { ok: false, failure, usage };
         if (attempt >= TRANSPORT_RETRIES) return last;
-        await this.sleep(this.backoffMs(attempt));
+        await this.waitBeforeRetry(attempt);
         continue;
       }
 
@@ -611,7 +611,7 @@ export class AiClient {
           // 翻倍而不是加固定值：思考长度随输入变，加 500 长短都不合适。
           // 见 §8.6b。
           if (opts.maxTokens) opts.maxTokens *= 2;
-          await this.sleep(this.backoffMs(attempt));
+          await this.waitBeforeRetry(attempt);
           continue;
         }
         // 空内容不重试原样重发 —— 大概率还是空。
@@ -811,7 +811,7 @@ export class AiClient {
         if (res.truncated && opts.maxTokens && attempt < TRANSPORT_RETRIES) {
           opts.maxTokens *= 2;
           last = { ok: false, failure: parsed.failure, usage };
-          await this.sleep(this.backoffMs(attempt));
+          await this.waitBeforeRetry(attempt);
           continue;
         }
         // 结构错不在这里重试 —— 它要的是回灌 issues，而不是原样再问一遍
@@ -856,6 +856,18 @@ export class AiClient {
   private backoffMs(attempt: number, retryAfterMs?: number): number {
     if (retryAfterMs !== undefined) return Math.min(retryAfterMs, 60_000);
     return attempt === 0 ? 1000 : 3000;
+  }
+
+  /**
+   * 重试之前等一会儿。
+   *
+   * 单独抽出来是因为"等待"本身要能被替换：测试注入 sleepImpl 之后，
+   * 如果决定睡多久的算式散落在各条重试分支里，每一处都得重复一遍
+   * "这次该不该等、等多久"，而漏掉一处就是一次没退避的重试。
+   * 这里只负责"按第几次尝试算出时长并睡下去"，睡不睡由调用方决定。
+   */
+  private async waitBeforeRetry(attempt: number, retryAfterMs?: number): Promise<void> {
+    await this.sleep(this.backoffMs(attempt, retryAfterMs));
   }
 
   /**

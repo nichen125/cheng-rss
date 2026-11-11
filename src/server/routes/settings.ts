@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { AppContext, Variables } from '../app.ts';
 import { requireUserId } from '../auth/require-user.ts';
 import { badRequest } from '../errors.ts';
+import { readBody } from '../http/validate.ts';
 
 // AI 配置读写（PLAN §8.1 / §18 的 GET /settings、PATCH /settings 的子集）。
 //
@@ -12,6 +14,15 @@ import { badRequest } from '../errors.ts';
 //   2. GET 返回合成后的视图而不是数据库里的原始 JSON。用户要看的是
 //      "现在实际连的是哪个地址、用的哪个模型"，而原始 JSON 只知道自己
 //      覆盖了哪些字段，其余全是"不知道"。
+
+// ── 请求体 schema ────────────────────────────────────────────
+//
+// 这三个端点的语义是"白名单里的键，值交给各自的模块解释"，逐字段建
+// schema 会把校验规则复制两份（这里的和 ALLOWED 集合），日后必然有一份
+// 先腐坏。所以只保证**最外层是个对象** —— 传 [] 或字符串时别再一路
+// 走到 Object.keys/JSON.stringify 上。
+const objectBody = z.record(z.unknown());
+const modelsBody = z.object({ models: z.array(z.unknown()).nullish() });
 
 export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> {
   const r = new Hono<{ Variables: Variables }>();
@@ -58,7 +69,7 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
    *   · 拒绝路径要能给出"该用哪个接口"的明确指引
    */
   r.patch('/settings/ai/key', async (c) => {
-    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const body = await readBody(c, objectBody);
     if (!('apiKey' in body)) {
       throw badRequest('需要 apiKey 字段。传空串表示删除、回落到环境变量。');
     }
@@ -223,14 +234,13 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
    */
   r.post('/settings/ai/bench', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as { models?: unknown };
+    const body = await readBody(c, modelsBody);
     const { aiForUser, runtimeAiBase } = await import('../ai/service.ts');
     const { benchModels, BENCH_RUNS } = await import('../ai/bench.ts');
     const { client } = aiForUser(ctx.dbh.db, uid, runtimeAiBase(ctx.cfg));
 
-    const asked = Array.isArray(body.models)
-      ? body.models.filter((m): m is string => typeof m === 'string' && m.trim() !== '')
-      : [];
+    const asked = (body.models ?? [])
+      .filter((m): m is string => typeof m === 'string' && m.trim() !== '');
     const models = [...new Set(asked.length > 0
       ? asked
       : [client.config.models.fast, client.config.models.strong])];
@@ -243,7 +253,7 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
 
   r.patch('/settings/ai', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const body = await readBody(c, objectBody);
 
     if ('apiKey' in body || 'api_key' in body) {
       // v2.0：key 现在可以填了，但**不是在这个接口**。指向专门的那个，
@@ -326,7 +336,7 @@ export function settingsRoutes(ctx: AppContext): Hono<{ Variables: Variables }> 
    */
   r.patch('/settings/digest', async (c) => {
     const uid = requireUserId(c);
-    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const body = await readBody(c, objectBody);
 
     const ALLOWED = new Set(['at', 'enabled', 'kind', 'maxCostUsd']);
     const bad = Object.keys(body).filter((k) => !ALLOWED.has(k));

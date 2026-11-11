@@ -8,6 +8,7 @@ import {
 } from './index.ts';
 import {
   clusterVectors, loadClusterWindow, thresholdFor, CLUSTER_WINDOW_HOURS,
+  type Cluster,
 } from '../cluster/index.ts';
 import {
   summarizeCluster, saveCluster, clearWindowClusters, type ClusterMember,
@@ -246,54 +247,61 @@ function readCancelReason(db: DatabaseSync, runId: string): string | null {
     : null;
 }
 
-/** 主链本体。异常由 runDigest 统一兜底，这里只关心业务流程。 */
-async function runDigestInner(
-  ctx: AppContext,
-  a: {
-    db: DatabaseSync; now: number; userId: string; kind: string;
-    dayKey: number; cfg: ReturnType<typeof parseDigestConfig> & { kind: string };
-    manual: boolean; allowSingle: boolean;
-    /** 有值时写进度；没有则整条链不碰 digest_runs（验收脚本直接调时就是这样） */
-    runId?: string;
-    signal?: AbortSignal;
-    /** 库里那个"已请求取消"的原因（没有则 null） */
-    cancelReasonOf: () => string | null;
-    /** 花费统计的起点与开跑时的基线（由 runDigest 统一算好传下来） */
-    since: number;
-    spendBaseline: number;
-    maxCostUsd: number;
-  },
-): Promise<RunDigestResult> {
-  const { db, now, userId, kind, dayKey, cfg } = a;
+/**
+ * 主链三个阶段共用的入参。
+ *
+ * 由 runDigest 一次性解析/算好后整份传下去：`since` 与 `spendBaseline` 只要
+ * 在哪一段里重算一次，"这次花了多少"的口径就会在簇阶段与正文阶段之间漂移，
+ * 而这笔钱同时写进 digest_runs 的进度与返回值，漂了就是账单对不上进度条。
+ */
+interface RunDigestArgs {
+  db: DatabaseSync; now: number; userId: string; kind: string;
+  dayKey: number; cfg: ReturnType<typeof parseDigestConfig> & { kind: string };
+  manual: boolean; allowSingle: boolean;
+  /** 有值时写进度；没有则整条链不碰 digest_runs（验收脚本直接调时就是这样） */
+  runId?: string;
+  signal?: AbortSignal;
+  /** 库里那个"已请求取消"的原因（没有则 null） */
+  cancelReasonOf: () => string | null;
+  /** 花费统计的起点与开跑时的基线（由 runDigest 统一算好传下来） */
+  since: number;
+  spendBaseline: number;
+  maxCostUsd: number;
+}
 
-  // 每一处"即将再花一次钱"之前都先问它。抛 CancelledError 而不是返回，
-  // 理由见 CancelledError 的注释。
-  const checkCancel = (): void => {
-    if (!a.signal?.aborted) return;
-    throw new CancelledError(a.cancelReasonOf() ?? '已停止');
-  };
+/**
+ * 取窗口的结果。`loadClusterWindow` 的返回原样保留 —— 下游只读 items 与
+ * source，但 semanticCoverage 是它已经算出来的东西，在这里再拆一次只是
+ * 多一层要跟着改的字段清单。
+ */
+type DigestWindow = ReturnType<typeof loadClusterWindow>;
 
-  // 手工触发跳过"时间到没到 / 今天做过没"这两关，但**不跳过**"有内容没"。
-  if (!a.manual) {
-    const due = digestDue(db, userId, cfg, now);
-    if (!due.due) return { ...EMPTY, reason: due.reason };
-  }
+/**
+ * 阶段一的出口。
+ *
+ * `finished` 为真时 result 就是 runDigest 的最终返回值：这一段的"没内容"
+ * 与"簇不够"都是**正常结束**，不是失败。它们与主干那条异常兜底必须分开 ——
+ * 主干落 digest_attempts（会触发退避重试），这里落 digest_skips（跳过）。
+ */
+type WindowOutcome =
+  | { finished: true; result: RunDigestResult }
+  | { finished: false; win: DigestWindow; clusters: Cluster[]; minClusters: number };
 
-  checkCancel();
+/**
+ * 阶段一：取窗口 + 聚类。
+ *
+ * 单独抽出来，是因为它有两条"这段流程到此为止"的正常出口，各自要按不同
+ * 原因写 digest_skips；留在主干里，主干的 return 就同时承担"今天没内容"
+ * 与"取消/异常"两种语义，而这两类在库里的记录必须分开。
+ */
+function collectWindow(a: RunDigestArgs): WindowOutcome {
+  const { db, now, userId, cfg, dayKey } = a;
 
-  const { client, hasKey } = aiForUser(db, userId, runtimeAiBase(ctx.cfg));
-  if (!hasKey) {
-    const r = '没配置 API key，无法生成简报';
-    recordAttempt(db, userId, cfg, dayKey, false, r, now);
-    return { ...EMPTY, reason: r };
-  }
-
-  // ── 取窗口 + 聚类 ──────────────────────────────────────────
   const win = loadClusterWindow(db, userId, a.since, now);
   if (win.items.length === 0) {
     const r = '最近 24 小时没有新条目';
     recordSkip(db, userId, cfg, dayKey, r, now);
-    return { ...EMPTY, reason: r };
+    return { finished: true, result: { ...EMPTY, reason: r } };
   }
 
   const clusters = clusterVectors(
@@ -308,11 +316,44 @@ async function runDigestInner(
   if (clusters.length < minClusters) {
     const r = `只有 ${clusters.length} 个事件，不足以构成简报`;
     recordSkip(db, userId, cfg, dayKey, r, now);
-    return { ...EMPTY, reason: r, clusterCount: clusters.length, entryCount: win.items.length };
+    return {
+      finished: true,
+      result: {
+        ...EMPTY, reason: r,
+        clusterCount: clusters.length, entryCount: win.items.length,
+      },
+    };
   }
 
-  // ── 逐簇归纳 ───────────────────────────────────────────────
-  const toast = { userId, model: client.config.models.strong };
+  return { finished: false, win, clusters, minClusters };
+}
+
+/** 阶段二的出口。`finished` 为真时 result 就是最终返回值（归纳后簇数不够） */
+type SummarizeOutcome =
+  | { finished: true; result: RunDigestResult }
+  | { finished: false; inputs: DigestClusterInput[]; done: number };
+
+/**
+ * 阶段二：逐簇归纳。
+ *
+ * 这一段是整条主链里唯一会**反复**调用模型、并且每调用一次就可能要中止的
+ * 地方：取消、超预算都从这里抛 CancelledError，由 runDigest 那层统一转成
+ * cancel 结果。抽出函数是为了让"逐簇循环 + 每次落库后的记账"成为一个能
+ * 单独解读的单位 —— 混在主干里，主干就同时装着三套循环变量的生命周期。
+ *
+ * `checkCancel` 由主干传入而不是在这里重新定义一个：它是闭包在 runDigest
+ * 的 runId/signal 上的，重定义一份就有了第二个取消口径。
+ */
+async function summarizeClusters(
+  a: RunDigestArgs,
+  client: AiClient,
+  clusters: Cluster[],
+  toast: { userId: string; model: string },
+  checkCancel: () => void,
+  minClusters: number,
+  entryCount: number,
+): Promise<SummarizeOutcome> {
+  const { db, now, userId, cfg, dayKey } = a;
   const use = clusters.slice(0, 12);
 
   // 进度：聚类完才知道总数，UI 的"3/12"从这里开始才有意义
@@ -433,13 +474,37 @@ async function runDigestInner(
     recordSkip(db, userId, cfg, dayKey, r, now);
     // 簇归纳已经真花过钱，这条"没出简报"的路径同样要报实际花费。
     return {
-      ...EMPTY, reason: r,
-      clusterCount: inputs.length, entryCount: win.items.length,
-      costUsd: Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline),
+      finished: true,
+      result: {
+        ...EMPTY, reason: r,
+        clusterCount: inputs.length, entryCount,
+        costUsd: Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline),
+      },
     };
   }
 
-  // ── 生成简报正文 ───────────────────────────────────────────
+  return { finished: false, inputs, done };
+}
+
+/**
+ * 阶段三：生成简报正文并落库。
+ *
+ * 单独抽出来，是因为 phase 的最后两跳（generating → saving）就发生在这里，
+ * 而 saving 必须在 saveDigest **之前**写：那段包含写引用表与写当天要点，
+ * 是前端唯一能看到的一次尾部停顿。和主干混在一起时，这个先后关系靠的
+ * 是行序，抽出后靠的是函数边界 —— 前者容易被"顺手调整"弄丢。
+ */
+async function composeBody(
+  a: RunDigestArgs,
+  client: AiClient,
+  toast: { userId: string; model: string },
+  checkCancel: () => void,
+  inputs: DigestClusterInput[],
+  done: number,
+  entryCount: number,
+): Promise<RunDigestResult> {
+  const { db, now, userId, kind, dayKey, cfg } = a;
+
   checkCancel();
 
   // 上限在正文前也要再判一次：正文那一次是**单次最贵**的调用（2000 token），
@@ -468,7 +533,7 @@ async function runDigestInner(
     }
     const r = `简报生成失败：${gen.failure ?? '未知原因'}`;
     recordAttempt(db, userId, cfg, dayKey, false, r, now);
-    return { ...EMPTY, reason: r, costUsd, clusterCount: inputs.length, entryCount: win.items.length };
+    return { ...EMPTY, reason: r, costUsd, clusterCount: inputs.length, entryCount };
   }
 
   // 模型一个引用都没写 → 用兜底脚注（正文不动，那是它的原样输出）
@@ -509,7 +574,7 @@ async function runDigestInner(
   const id = saveDigest(db, {
     userId, kind, body,
     periodStart: dayKey, periodEnd: now,
-    entryCount: win.items.length, clusterCount: inputs.length,
+    entryCount, clusterCount: inputs.length,
     model: client.config.models.strong, costUsd, now,
     citations: cited,
     worthReading: gen.body.worth_reading,
@@ -522,11 +587,61 @@ async function runDigestInner(
     digestId: id,
     reason: null,
     clusterCount: inputs.length,
-    entryCount: win.items.length,
+    entryCount,
     costUsd,
     invalidCites: gen.rendered?.invalid.length ?? 0,
     strippedUrls: gen.rendered?.strippedUrls.length ?? 0,
   };
+}
+
+/** 主链本体。异常由 runDigest 统一兜底，这里只关心业务流程。 */
+async function runDigestInner(
+  ctx: AppContext,
+  a: RunDigestArgs,
+): Promise<RunDigestResult> {
+  const { db, now, userId, dayKey, cfg } = a;
+
+  // 每一处"即将再花一次钱"之前都先问它。抛 CancelledError 而不是返回，
+  // 理由见 CancelledError 的注释。
+  const checkCancel = (): void => {
+    if (!a.signal?.aborted) return;
+    throw new CancelledError(a.cancelReasonOf() ?? '已停止');
+  };
+
+  // 手工触发跳过"时间到没到 / 今天做过没"这两关，但**不跳过**"有内容没"。
+  if (!a.manual) {
+    const due = digestDue(db, userId, cfg, now);
+    if (!due.due) return { ...EMPTY, reason: due.reason };
+  }
+
+  checkCancel();
+
+  const { client, hasKey } = aiForUser(db, userId, runtimeAiBase(ctx.cfg));
+  if (!hasKey) {
+    const r = '没配置 API key，无法生成简报';
+    recordAttempt(db, userId, cfg, dayKey, false, r, now);
+    return { ...EMPTY, reason: r };
+  }
+
+  // ── 取窗口 + 聚类 ──────────────────────────────────────────
+  const w = collectWindow(a);
+  if (w.finished) return w.result;
+  const { win, clusters, minClusters } = w;
+
+  // ── 逐簇归纳 ───────────────────────────────────────────────
+  // 归纳与正文两段共用这一个 toast：各自拼一份的话，userId / model 一旦
+  // 不一致，费用就会记到另一个用户的账上。
+  const toast = { userId, model: client.config.models.strong };
+  const s = await summarizeClusters(
+    a, client, clusters, toast, checkCancel, minClusters, win.items.length,
+  );
+  if (s.finished) return s.result;
+  const { inputs, done } = s;
+
+  // ── 生成简报正文 ───────────────────────────────────────────
+  return composeBody(
+    a, client, toast, checkCancel, inputs, done, win.items.length,
+  );
 }
 
 function safeJson(s: string | undefined): unknown {

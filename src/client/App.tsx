@@ -15,6 +15,7 @@ import { HighlightToolbar, HighlightList } from './highlights/HighlightUI.tsx';
 import { SettingsModal, type SettingsSection } from './settings/SettingsModal.tsx';
 import { ToastHost, type ToastSpec } from './Toasts.tsx';
 import { useConfirm } from './components/ConfirmDialog.tsx';
+import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { useArrange } from './useArrange.ts';
 import { createLatest, isAbortError } from './lib/latest.ts';
 import {
@@ -1873,18 +1874,27 @@ function Main(props: { user: User; onLogout: () => void }) {
           </div>
         )}
         {openId && (
-          <Reader
-            loading={detailLoading}
-            detail={detail}
-            prefs={prefs}
-            prefsOpen={prefsOpen}
-            onTogglePrefsOpen={() => setPrefsOpen((v) => !v)}
-            onPrefs={setPrefs}
-            onBack={() => { setOpenId(null); setDetail(null); }}
-            onStar={() => void toggleStar(openId)}
-            onToggleRead={() => void toggleRead(openId)}
-            onOpenOriginal={() => openOriginal()}
-          />
+          // 阅读区单独兜底：正文解析、目录生成、surroundContents 包高亮都在
+          // Reader 里，是全局最容易抛异常的一段。根部边界一触发就换掉整个
+          // App，列表和筛选跟着没了；这里炸只丢这一栏，onReset 复用列表行
+          // 本来就有的返回动作，列表原样还在。
+          <ErrorBoundary
+            label="阅读区"
+            onReset={() => { setOpenId(null); setDetail(null); }}
+          >
+            <Reader
+              loading={detailLoading}
+              detail={detail}
+              prefs={prefs}
+              prefsOpen={prefsOpen}
+              onTogglePrefsOpen={() => setPrefsOpen((v) => !v)}
+              onPrefs={setPrefs}
+              onBack={() => { setOpenId(null); setDetail(null); }}
+              onStar={() => void toggleStar(openId)}
+              onToggleRead={() => void toggleRead(openId)}
+              onOpenOriginal={() => openOriginal()}
+            />
+          </ErrorBoundary>
         )}
       </section>
       </>

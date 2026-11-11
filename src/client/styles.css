@@ -2023,3 +2023,61 @@ input::placeholder { color: var(--fg-faint); }
 }
 
 /* 响应式规则见 mobile.css —— 集中一处，避免两套断点互相打架 */
+
+/* 错误边界的兜底面板（components/ErrorBoundary.tsx）。
+ *
+ * 同一套样式要撑两种父容器：根部（#root，普通块）和阅读区（.reader-pane，
+ * flex 列）。所以 flex:1 给后者，height:100% 给前者——块级父容器里 flex
+ * 属性无效，正好由 height 接管，不必再出一个变体类。
+ * 背景固定用 --bg-sunken：阅读区可能正处在暗色/纸张主题的 --desk-bg 上，
+ * 这里要明确"这不是正文"，所以不复用父级变量。 */
+.crash {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 40px 28px;
+  text-align: center;
+  background: var(--bg-sunken);
+  color: var(--fg);
+}
+.crash h2 {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--fg);
+  margin: 0;
+}
+.crash p {
+  max-width: 42ch;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.62;
+  color: var(--fg-dim);
+}
+/* 异常原文：等宽、可换行、限宽，长堆栈不会把面板撑出屏幕 */
+.crash-detail {
+  max-width: min(60ch, 100%);
+  max-height: 4.5em;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--bg-elev2);
+  color: var(--err);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.crash-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}

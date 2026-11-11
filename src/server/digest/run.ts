@@ -486,6 +486,114 @@ async function summarizeClusters(
   return { finished: false, inputs, done };
 }
 
+/**
+ * 阶段三：生成简报正文并落库。
+ *
+ * 单独抽出来，是因为 phase 的最后两跳（generating → saving）就发生在这里，
+ * 而 saving 必须在 saveDigest **之前**写：那段包含写引用表与写当天要点，
+ * 是前端唯一能看到的一次尾部停顿。和主干混在一起时，这个先后关系靠的
+ * 是行序，抽出后靠的是函数边界 —— 前者容易被"顺手调整"弄丢。
+ */
+async function composeBody(
+  a: RunDigestArgs,
+  client: AiClient,
+  toast: { userId: string; model: string },
+  checkCancel: () => void,
+  inputs: DigestClusterInput[],
+  done: number,
+  entryCount: number,
+): Promise<RunDigestResult> {
+  const { db, now, userId, kind, dayKey, cfg } = a;
+
+  checkCancel();
+
+  // 上限在正文前也要再判一次：正文那一次是**单次最贵**的调用（2000 token），
+  // 只在簇间检查意味着它总会再花一笔才停。
+  const beforeGen = Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline);
+  if (beforeGen > a.maxCostUsd) {
+    throw new CancelledError(
+      `超过单次上限 $${a.maxCostUsd}（本次已花 $${beforeGen.toFixed(4)}）`,
+    );
+  }
+
+  if (a.runId) setPhase(db, a.runId, { phase: 'generating' });
+
+  const gen = await generateDigestBody(client, inputs, { ...toast, signal: a.signal });
+  // 「这一次运行花了多少」= 簇归纳 + 正文，不是只算正文。
+  //
+  // 只算正文有一个当场能看见的毛病：簇归纳阶段进度条已经报到 $0.088，
+  // 正文写完 finishRun 又把 run 行写成 $0.036 —— 数字在"完成"那一刻变小，
+  // 而用户实付的是两者之和（12 簇 $0.088 + 正文 $0.036）。
+  const costUsd = Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline);
+
+  if (!gen.ok || !gen.body) {
+    // 正文生成被取消：不记 attempt（它是"人不要了"，不是"这份简报坏了"）
+    if (gen.failure?.startsWith('cancelled:')) {
+      throw new CancelledError(a.cancelReasonOf() ?? '已停止');
+    }
+    const r = `简报生成失败：${gen.failure ?? '未知原因'}`;
+    recordAttempt(db, userId, cfg, dayKey, false, r, now);
+    return { ...EMPTY, reason: r, costUsd, clusterCount: inputs.length, entryCount };
+  }
+
+  // 模型一个引用都没写 → 用兜底脚注（正文不动，那是它的原样输出）
+  let md = gen.rendered?.md ?? gen.body.body_md;
+  if ((gen.rendered?.citations.length ?? 0) === 0) {
+    const fb = fallbackCitations(inputs);
+    if (fb.length > 0) {
+      md += '\n\n---\n\n**今日事件索引**\n' +
+        fb.map((f) => `${f.index}. ${f.title}`).join('\n');
+    }
+  }
+
+  // 「你今天标记的要点」（§11.4 / M4）。
+  //
+  // 原文照列，**不交给模型**：这一节的判据是"我今天标了什么"，而模型会
+  // 概括、会漏、会改措辞，对不上用户记忆里的那一段。位置放在引用索引
+  // 之后、保存之前 —— 追加的是 Markdown 尾部，不影响正文的引用编号。
+  const dayHl = listDayHighlights(db, userId, dayKey, now);
+  md += renderDigestHighlightSection(dayHl);
+
+  // 引用表必须**显式**存下来（§15.4 的脚注点开要看到"第 1 条是哪件事"）。
+  //
+  // body_md 里的 {{cite:cl_x}} 已经被 renderCitations 换成了 [1]，
+  // 所以从正文反查簇 id 是不可能的 —— 之前 GET /digests/:id 就是这么做的，
+  // clusters 恒为空、脚注点了没反应，而接口返回 200 一切正常。
+  //
+  // 兜底路径（模型一个引用都没写）也要存：那时脚注是程序补的"今日事件索引"，
+  // 用户同样要能点开看是哪几件事。
+  const cited = (gen.rendered?.citations.length ?? 0) > 0
+    ? gen.rendered!.citations
+    : fallbackCitations(inputs);
+
+  const body = { ...gen.body, body_md: md };
+  // 「落库」这一步也要报：它包含写引用表与写当天要点，在前端是一条
+  // 可能停顿一两百毫秒的尾部。没有它，正文写完之后进度会停在
+  // "写简报 12/12"不动，看起来又像卡住了。
+  if (a.runId) setPhase(db, a.runId, { phase: 'saving', doneClusters: done });
+  const id = saveDigest(db, {
+    userId, kind, body,
+    periodStart: dayKey, periodEnd: now,
+    entryCount, clusterCount: inputs.length,
+    model: client.config.models.strong, costUsd, now,
+    citations: cited,
+    worthReading: gen.body.worth_reading,
+  });
+
+  recordAttempt(db, userId, cfg, dayKey, true, null, now);
+
+  return {
+    ok: true,
+    digestId: id,
+    reason: null,
+    clusterCount: inputs.length,
+    entryCount,
+    costUsd,
+    invalidCites: gen.rendered?.invalid.length ?? 0,
+    strippedUrls: gen.rendered?.strippedUrls.length ?? 0,
+  };
+}
+
 /** 主链本体。异常由 runDigest 统一兜底，这里只关心业务流程。 */
 async function runDigestInner(
   ctx: AppContext,
@@ -531,93 +639,9 @@ async function runDigestInner(
   const { inputs, done } = s;
 
   // ── 生成简报正文 ───────────────────────────────────────────
-  checkCancel();
-
-  // 上限在正文前也要再判一次：正文那一次是**单次最贵**的调用（2000 token），
-  // 只在簇间检查意味着它总会再花一笔才停。
-  const beforeGen = Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline);
-  if (beforeGen > a.maxCostUsd) {
-    throw new CancelledError(
-      `超过单次上限 $${a.maxCostUsd}（本次已花 $${beforeGen.toFixed(4)}）`,
-    );
-  }
-
-  if (a.runId) setPhase(db, a.runId, { phase: 'generating' });
-
-  const gen = await generateDigestBody(client, inputs, { ...toast, signal: a.signal });
-  // 「这一次运行花了多少」= 簇归纳 + 正文，不是只算正文。
-  //
-  // 只算正文有一个当场能看见的毛病：簇归纳阶段进度条已经报到 $0.088，
-  // 正文写完 finishRun 又把 run 行写成 $0.036 —— 数字在"完成"那一刻变小，
-  // 而用户实付的是两者之和（12 簇 $0.088 + 正文 $0.036）。
-  const costUsd = Math.max(0, digestSpendUsd(db, userId, a.since) - a.spendBaseline);
-
-  if (!gen.ok || !gen.body) {
-    // 正文生成被取消：不记 attempt（它是"人不要了"，不是"这份简报坏了"）
-    if (gen.failure?.startsWith('cancelled:')) {
-      throw new CancelledError(a.cancelReasonOf() ?? '已停止');
-    }
-    const r = `简报生成失败：${gen.failure ?? '未知原因'}`;
-    recordAttempt(db, userId, cfg, dayKey, false, r, now);
-    return { ...EMPTY, reason: r, costUsd, clusterCount: inputs.length, entryCount: win.items.length };
-  }
-
-  // 模型一个引用都没写 → 用兜底脚注（正文不动，那是它的原样输出）
-  let md = gen.rendered?.md ?? gen.body.body_md;
-  if ((gen.rendered?.citations.length ?? 0) === 0) {
-    const fb = fallbackCitations(inputs);
-    if (fb.length > 0) {
-      md += '\n\n---\n\n**今日事件索引**\n' +
-        fb.map((f) => `${f.index}. ${f.title}`).join('\n');
-    }
-  }
-
-  // 「你今天标记的要点」（§11.4 / M4）。
-  //
-  // 原文照列，**不交给模型**：这一节的判据是"我今天标了什么"，而模型会
-  // 概括、会漏、会改措辞，对不上用户记忆里的那一段。位置放在引用索引
-  // 之后、保存之前 —— 追加的是 Markdown 尾部，不影响正文的引用编号。
-  const dayHl = listDayHighlights(db, userId, dayKey, now);
-  md += renderDigestHighlightSection(dayHl);
-
-  // 引用表必须**显式**存下来（§15.4 的脚注点开要看到"第 1 条是哪件事"）。
-  //
-  // body_md 里的 {{cite:cl_x}} 已经被 renderCitations 换成了 [1]，
-  // 所以从正文反查簇 id 是不可能的 —— 之前 GET /digests/:id 就是这么做的，
-  // clusters 恒为空、脚注点了没反应，而接口返回 200 一切正常。
-  //
-  // 兜底路径（模型一个引用都没写）也要存：那时脚注是程序补的"今日事件索引"，
-  // 用户同样要能点开看是哪几件事。
-  const cited = (gen.rendered?.citations.length ?? 0) > 0
-    ? gen.rendered!.citations
-    : fallbackCitations(inputs);
-
-  const body = { ...gen.body, body_md: md };
-  // 「落库」这一步也要报：它包含写引用表与写当天要点，在前端是一条
-  // 可能停顿一两百毫秒的尾部。没有它，正文写完之后进度会停在
-  // "写简报 12/12"不动，看起来又像卡住了。
-  if (a.runId) setPhase(db, a.runId, { phase: 'saving', doneClusters: done });
-  const id = saveDigest(db, {
-    userId, kind, body,
-    periodStart: dayKey, periodEnd: now,
-    entryCount: win.items.length, clusterCount: inputs.length,
-    model: client.config.models.strong, costUsd, now,
-    citations: cited,
-    worthReading: gen.body.worth_reading,
-  });
-
-  recordAttempt(db, userId, cfg, dayKey, true, null, now);
-
-  return {
-    ok: true,
-    digestId: id,
-    reason: null,
-    clusterCount: inputs.length,
-    entryCount: win.items.length,
-    costUsd,
-    invalidCites: gen.rendered?.invalid.length ?? 0,
-    strippedUrls: gen.rendered?.strippedUrls.length ?? 0,
-  };
+  return composeBody(
+    a, client, toast, checkCancel, inputs, done, win.items.length,
+  );
 }
 
 function safeJson(s: string | undefined): unknown {

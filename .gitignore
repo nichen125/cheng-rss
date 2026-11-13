@@ -11,6 +11,12 @@
 .superpowers/
 docs/superpowers/
 
+# impeccable 设计评审的原始报告（.impeccable/critique/<时间>__<目标>.md）。
+# 与上面同性质：它记录"当时看到了什么问题"，是改版的起点证据，
+# 不是"应该怎样"的规格 —— 结论已经沉淀进 docs/specs/design-ui.md 的变更记录。
+# 留着有用（能回答"当初为什么改"），但不该被当成会被引用的文档。
+.impeccable/
+
 # 依赖与构建产物
 node_modules/
 dist/

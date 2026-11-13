@@ -272,7 +272,7 @@ export function Reader(props: {
   return (
     <div className="reader-wrap">
       <div className="reader-bar">
-        <button className="icon-btn" onClick={props.onBack} title="返回（Esc）">
+        <button className="icon-btn" onClick={props.onBack} title="返回（Esc）" aria-label="返回列表">
           <IconArrowLeft size={17} />
         </button>
         <div className="grow" />
@@ -310,6 +310,7 @@ export function Reader(props: {
         {hasSite && (
           <a
             className="icon-btn reader-site"
+            aria-label="访问源站"
             href={detail.feedSiteUrl ?? undefined}
             target="_blank"
             rel="noopener noreferrer"
@@ -320,6 +321,7 @@ export function Reader(props: {
         )}
         <a
           className="icon-btn"
+          aria-label="在新标签打开原文"
           href={detail.url}
           target="_blank"
           rel="noopener noreferrer"
@@ -330,6 +332,7 @@ export function Reader(props: {
         <button
           className="icon-btn"
           onClick={props.onTogglePrefsOpen}
+          aria-label="阅读设置"
           title="阅读设置（字号 / 宽度 / 主题）"
           aria-expanded={props.prefsOpen}
         >
@@ -338,6 +341,8 @@ export function Reader(props: {
         <button
           className="icon-btn"
           onClick={props.onToggleRead}
+          aria-pressed={detail.isRead}
+          aria-label={detail.isRead ? '标为未读' : '标为已读'}
           title={detail.isRead ? '标为未读（m）' : '标为已读（m）'}
         >
           {detail.isRead ? <IconCircle size={16} /> : <IconCheck size={16} />}
@@ -345,6 +350,8 @@ export function Reader(props: {
         <button
           className={`icon-btn ${detail.isStarred ? 'on' : ''}`}
           onClick={props.onStar}
+          aria-pressed={detail.isStarred}
+          aria-label={detail.isStarred ? '取消收藏' : '收藏'}
           title={detail.isStarred ? '取消收藏' : '收藏（s）'}
         >
           <IconStar size={17} filled={detail.isStarred} />
@@ -532,8 +539,10 @@ export function Reader(props: {
           </section>
 
           {/* 文末出口：读完之后最常见的两个动作 */}
+          {/* 文末出口（v3.0）：主次分明。读完之后只有一件事是继续走，
+              就是去原文；「访问源站」是退路，用幽灵按钮。 */}
           <div className="reader-foot">
-            <a className="btn" href={detail.url} target="_blank" rel="noopener noreferrer">
+            <a className="btn ink" href={detail.url} target="_blank" rel="noopener noreferrer">
               <IconExternal size={14} /> 打开原文
             </a>
             {hasSite && (

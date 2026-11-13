@@ -257,8 +257,16 @@ const density = await evaluate(`(() => {
   return {
     visible, itemHeight: Math.round(h), total: items.length,
     hasTitle: Boolean(first?.querySelector('.entry-title')?.textContent?.trim()),
+    // v6.6：类名从 .entry-top 改为 .entry-meta，且它现在是**可见的**
+    // （默认「标准」密度）。compact 档才把它裁成 1px。
     hasSummary: Boolean(first?.querySelector('.entry-summary')?.textContent?.trim()),
-    hasMeta: Boolean(first?.querySelector('.entry-top')?.textContent?.trim()),
+    hasMeta: Boolean(first?.querySelector('.entry-meta')?.textContent?.trim()),
+    metaHidden: (() => {
+      const m = first?.querySelector('.entry-meta');
+      if (!m) return false;
+      const r = m.getBoundingClientRect();
+      return r.width <= 2 && r.height <= 2;
+    })(),
     clamped: getComputedStyle(first?.querySelector('.entry-title') ?? document.body).webkitLineClamp,
     // 元信息行必须**永远是单行**。时间与分级是定长信息，一旦允许换行，
     // 「13 小时前」会从中间空格处折成两行，整行高度 22 → 62px，
@@ -271,12 +279,15 @@ const density = await evaluate(`(() => {
   };
 })()`);
 
-check('列表项高度在 70~130px（一屏 8~10 条）', () => {
-  return ok(density.itemHeight >= 70 && density.itemHeight <= 130,
+// v6.6：默认密度是「标准」（标题 + 一行摘要 + 元信息），行高 78~98。
+// 三档密度各自的区间由 m1-26-list-density 单独验，这里只守默认档 ——
+// 两条断言量同一件事会互相打架。
+check('列表项高度在 70~120px（默认「标准」密度）', () => {
+  return ok(density.itemHeight >= 70 && density.itemHeight <= 120,
     `实际 ${density.itemHeight}px，一屏可见 ${density.visible} 条`);
 });
-check('列表项含标题 + 一行摘要 + 元信息', () => {
-  return ok(density.hasTitle && density.hasSummary && density.hasMeta,
+check('列表项含标题 + 摘要 + 元信息（默认档全部可见）', () => {
+  return ok(density.hasTitle && density.hasSummary && density.hasMeta && !density.metaHidden,
     JSON.stringify(density));
 });
 // 这条必须**主动加压**才有意义：演示数据里的站名都很短（`源0`），

@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>按钮体系 v4.0 · 澄</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --bg-sunken: #eceff4;
+  --bg-hover: #f1f3f7;
+  --bg-active: #e8ecf2;
+  --fg: #14171c;
+  --fg-dim: #58616e;
+  --fg-faint: #636d7b;
+  --border: #e4e8ee;
+  --border-soft: #eef1f5;
+  --noise: #d8dde5;
+  --accent: #0f766e;
+  --accent-hover: #0d6a63;
+  --accent-fg: #ffffff;
+  --must: #c2410c;
+  --err: #b42318;
+  --worth: #a16207;
+  --paper-bg: #ffffff;
+  color-scheme: light;
+}
+[data-brand='blue'] { --accent: #2f6bf5; --accent-hover: #245ad8; --accent-fg: #ffffff; }
+[data-theme='dark'] {
+  --bg: #15171c; --bg-sunken: #0b0d10; --bg-hover: #22262e; --bg-active: #2a2f38;
+  --fg: #e9ecf1; --fg-dim: #a4adba; --fg-faint: #8b95a2;
+  --border: #2a2f38; --border-soft: #20242b; --noise: #333a45;
+  --paper-bg: #1a1d23; --accent-fg: #0f1115;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 40px 28px 80px;
+  background: var(--bg-sunken); color: var(--fg);
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, system-ui, sans-serif;
+  font-size: 14px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 920px; margin: 0 auto; }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 6px; letter-spacing: 0.01em; }
+.sub { color: var(--fg-faint); margin: 0 0 28px; font-size: 13px; }
+.card {
+  background: var(--bg); border: 1px solid var(--border-soft);
+  border-radius: 14px; padding: 20px 22px; margin: 0 0 18px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+.card h2 { font-size: 13px; font-weight: 600; margin: 0 0 4px; letter-spacing: 0.02em; }
+.card .note { color: var(--fg-faint); font-size: 12.5px; margin: 0 0 16px; }
+.row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.row + .row { margin-top: 14px; }
+.tag { font-size: 11.5px; color: var(--fg-faint); width: 76px; flex-shrink: 0; }
+.toolbar {
+  position: sticky; top: 0; z-index: 9; margin: 0 0 20px; padding: 10px 0;
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  background: var(--bg-sunken);
+}
+/* ── 按钮体系（v4.0：从"能用"到"有质感"）──────────────────────
+ *
+ * 质感来自四件事，缺一件就退回平涂：
+ *   ① 顶部 1px 内高光 —— 模拟受光的按键上沿，实体感的来源
+ *   ② 极克制的纵向微渐变（亮 88% → 主色 → 暗 88%）—— 色块有厚度
+ *   ③ 多层阴影，其中一层是**品牌色投影** —— 按钮才像浮在页面上
+ *   ④ hover 抬 1px、active 压回缩 2% —— 位移比换色更能说明"按得动"
+ *
+ * 结构只有一套 .btn，变体只用 CSS 变量覆盖：
+ *   .btn.primary  实心（主按钮，一屏一个）
+ *   .btn          描边（次要动作）
+ *   .btn.ghost    无框（低频操作）
+ *   .btn.ink      墨底（纸面语境：阅读区正文尾部）
+ *   .btn.danger   文字红；.btn.danger.solid 实心红（仅确认弹窗）
+ *
+ * 尺寸 36 / 40 / 48，圆角 10px，左右内边距 20px。
+ */
+
+:root {
+  --btn-h: 36px;
+  --btn-h-lg: 40px;
+  --btn-h-xl: 48px;
+  --btn-px: 20px;
+  --btn-px-lg: 24px;
+  --btn-px-xl: 28px;
+  --btn-radius: 10px;
+  --btn-fs: 14px;
+  --btn-fs-lg: 14.5px;
+  --btn-fs-xl: 15px;
+  /* 品牌色：换主题只改 --accent 一处（想用 #2f6bf5 就设 --accent: #2f6bf5） */
+  --btn-brand: var(--accent);
+  --btn-brand-dark: var(--accent-hover);
+  --btn-ring: color-mix(in srgb, var(--btn-brand) 30%, transparent);
+  --btn-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --btn-t: 180ms;
+  --btn-glow: 0.42;
+}
+
+.btn {
+  /* ── 可覆盖变量：变体只改这一段 ── */
+  --btn-bg: transparent;
+  --btn-bg-img: none;
+  --btn-bg-hover: var(--bg-hover);
+  --btn-fg: var(--fg-dim);
+  --btn-bd: var(--border);
+  --btn-hi: inset 0 1px 0 rgba(255, 255, 255, 0.60);
+  --btn-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --btn-loading-fg: var(--btn-fg);
+
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: var(--btn-h);
+  padding: 0 var(--btn-px);
+  font-family: inherit;
+  font-size: var(--btn-fs);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  color: var(--btn-fg);
+  background-color: var(--btn-bg);
+  background-image: var(--btn-bg-img);
+  border: 1px solid var(--btn-bd);
+  border-radius: var(--btn-radius);
+  box-shadow: var(--btn-hi), var(--btn-shadow);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+  transition:
+    background-color var(--btn-t) var(--btn-ease),
+    border-color var(--btn-t) var(--btn-ease),
+    color var(--btn-t) var(--btn-ease),
+    box-shadow var(--btn-t) var(--btn-ease),
+    transform var(--btn-t) var(--btn-ease);
+}
+.btn > svg { flex-shrink: 0; transition: transform var(--btn-t) var(--btn-ease); }
+
+/* hover：抬 1px + 换底 + 阴影加深 */
+.btn:hover:not(:disabled):not([aria-busy='true']) {
+  background-color: var(--btn-bg-hover);
+  border-color: var(--noise);
+  color: var(--fg);
+  transform: translateY(-1px);
+  box-shadow:
+    var(--btn-hi),
+    0 2px 4px rgba(16, 24, 40, 0.08),
+    0 8px 16px -6px rgba(16, 24, 40, 0.12);
+}
+.btn:hover:not(:disabled) > svg { transform: translateY(-0.5px); }
+
+/* active：压回并缩 2%，过渡缩到 60ms —— 按下必须比松开"更快" */
+.btn:active:not(:disabled):not([aria-busy='true']) {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 60ms;
+  box-shadow: var(--btn-hi), 0 1px 1px rgba(16, 24, 40, 0.06);
+}
+
+/* focus-visible：3px 品牌色光环。这里写 outline: none 不是"抹掉焦点"，
+   焦点被 box-shadow 环接住了；鼠标点击不会触发（:focus-visible 本身
+   就排除了指针操作）。 */
+.btn:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--btn-hi),
+    0 0 0 3px var(--btn-ring),
+    0 2px 6px rgba(16, 24, 40, 0.10);
+}
+
+/* disabled：压到 .45，去掉位移与阴影 —— 它不该再浮起来 */
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  filter: saturate(0.75);
+}
+
+/* loading：aria-busy 驱动。文字与图标转透明但**仍占位**，
+   所以宽度、高度、内边距都不变，不会有布局跳动。 */
+.btn[aria-busy='true'] {
+  pointer-events: none;
+  cursor: progress;
+  color: transparent;
+  transform: none;
+  box-shadow: var(--btn-hi), var(--btn-shadow);
+  /* 不能用 180ms 过渡：文字在淡出的这 180ms 里会和 spinner 叠在一起。
+     加载态是「瞬间切换」，不是「渐变切换」。 */
+  transition-property: none;
+}
+.btn[aria-busy='true'] > svg { opacity: 0; }
+.btn[aria-busy='true']::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px solid var(--btn-loading-fg);
+  border-right-color: transparent;
+  animation: btn-spin 640ms linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* ── 主按钮：微渐变 + 内高光 + 彩色投影 ─────────────────── */
+.btn.primary {
+  --btn-bg: var(--btn-brand);
+  --btn-bg-img: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--btn-brand) 86%, #ffffff) 0%,
+    var(--btn-brand) 52%,
+    color-mix(in srgb, var(--btn-brand) 88%, #000000) 100%
+  );
+  --btn-bg-hover: var(--btn-brand-dark);
+  --btn-fg: var(--accent-fg);
+  --btn-bd: transparent;
+  --btn-hi: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  --btn-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.10),
+    0 4px 12px -2px color-mix(in srgb, var(--btn-brand) calc(var(--btn-glow) * 100%), transparent);
+  --btn-loading-fg: var(--accent-fg);
+  font-weight: 500;
+  color: var(--btn-fg);
+}
+.btn.primary:hover:not(:disabled):not([aria-busy='true']) {
+  border-color: transparent;
+  color: var(--accent-fg);
+  box-shadow:
+    var(--btn-hi),
+    0 2px 4px rgba(16, 24, 40, 0.12),
+    0 10px 22px -6px color-mix(in srgb, var(--btn-brand) 58%, transparent);
+}
+.btn.primary:active:not(:disabled):not([aria-busy='true']) {
+  box-shadow: var(--btn-hi), 0 1px 2px rgba(16, 24, 40, 0.16);
+}
+
+/* ── 纸面主按钮：墨底 ─────────────────────────────────────
+   阅读区的整张纸是衬线墨字，一块饱和青绿会跳出来抢正文；
+   「强调色只表达 AI 判断」这条原则也不允许它出现在"去原文"上。 */
+.btn.ink {
+  --btn-bg: var(--fg);
+  --btn-bg-img: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--fg) 90%, #ffffff) 0%,
+    var(--fg) 58%,
+    color-mix(in srgb, var(--fg) 94%, #000000) 100%
+  );
+  --btn-bg-hover: var(--fg);
+  --btn-fg: var(--paper-bg);
+  --btn-bd: transparent;
+  --btn-hi: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --btn-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.10),
+    0 4px 12px -2px rgba(16, 24, 40, 0.20);
+  --btn-loading-fg: var(--paper-bg);
+  color: var(--btn-fg);
+}
+.btn.ink:hover:not(:disabled):not([aria-busy='true']) {
+  border-color: transparent;
+  color: var(--paper-bg);
+}
+
+/* ── 幽灵：无框无底 ───────────────────────────────────────
+   低频操作必须存在，但不该和前进动作抢重量。 */
+.btn.ghost {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--bg-hover);
+  --btn-fg: var(--fg-dim);
+  --btn-bd: transparent;
+  --btn-hi: none;
+  --btn-shadow: none;
+}
+.btn.ghost:hover:not(:disabled):not([aria-busy='true']) {
+  transform: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--fg);
+}
+.btn.ghost:active:not(:disabled):not([aria-busy='true']) {
+  transform: scale(0.98);
+  box-shadow: none;
+}
+.btn.ghost:focus-visible {
+  box-shadow: 0 0 0 3px var(--btn-ring);
+}
+
+/* ── 切换态：按下去了 ─────────────────────────────────────
+   组件早就写了 className="btn active"，但样式从未定义 ——
+   进管理模式后按钮毫无变化，用户以为没点上。 */
+.btn.active,
+.btn[aria-pressed='true'] {
+  background-color: var(--bg-active);
+  border-color: var(--border);
+  color: var(--fg);
+  box-shadow: var(--btn-hi), var(--btn-shadow);
+}
+
+.btn.block { width: 100%; }
+
+/* ── 尺寸档：36 / 40 / 48 ───────────────────────────────── */
+.btn.lg {
+  height: var(--btn-h-lg);
+  padding: 0 var(--btn-px-lg);
+  font-size: var(--btn-fs-lg);
+}
+.btn.xl {
+  height: var(--btn-h-xl);
+  padding: 0 var(--btn-px-xl);
+  font-size: var(--btn-fs-xl);
+  border-radius: 12px;
+}
+/* 紧凑档：表格行内与批量栏用。36 以下不做成通用档 ——
+   只有这一档，且只在密集列表里出现（设计方案 §6 的密度要求）。 */
+.btn.tiny {
+  height: 30px;
+  padding: 0 12px;
+  gap: 5px;
+  font-size: 12.5px;
+  border-radius: 8px;
+}
+
+/* ── 危险动作 ─────────────────────────────────────────────
+   行内删除只染文字；弹窗里"确认删除"才是实心红。
+   两者是不同重量的事件，不该长得一样。 */
+.btn.danger {
+  --btn-fg: var(--must);
+  --btn-bd: color-mix(in srgb, var(--err) 22%, var(--border));
+  --btn-bg-hover: color-mix(in srgb, var(--err) 8%, transparent);
+  color: var(--must);
+}
+.btn.danger:hover:not(:disabled):not([aria-busy='true']) {
+  color: var(--must);
+  border-color: color-mix(in srgb, var(--err) 36%, transparent);
+}
+.btn.danger.solid {
+  --btn-bg: var(--err);
+  --btn-bg-img: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--err) 84%, #ffffff) 0%,
+    var(--err) 55%,
+    color-mix(in srgb, var(--err) 90%, #000000) 100%
+  );
+  --btn-bg-hover: var(--err);
+  --btn-fg: #ffffff;
+  --btn-bd: transparent;
+  --btn-hi: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  --btn-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.10),
+    0 4px 12px -2px color-mix(in srgb, var(--err) 42%, transparent);
+  --btn-loading-fg: #ffffff;
+  color: #ffffff;
+}
+.btn.danger.solid:hover:not(:disabled):not([aria-busy='true']) {
+  color: #ffffff;
+  border-color: transparent;
+}
+
+/* ── 图标按钮 ─────────────────────────────────────────────
+ * 视觉 36×36，可点区域用伪元素撑到 44×44：
+ * 视觉上不占地方，手指与触屏上不难点。
+ * 局部 .tiny 收敛到 22×22（列表行内），命中区仍是 44。 */
+.icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--btn-radius);
+  background: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color var(--btn-t) var(--btn-ease),
+    color var(--btn-t) var(--btn-ease),
+    border-color var(--btn-t) var(--btn-ease),
+    transform var(--btn-t) var(--btn-ease);
+}
+/* 命中区：伪元素属于按钮本身，点它等同点按钮 */
+.icon-btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+  transform: translateY(-1px);
+}
+.icon-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+  transition-duration: 60ms;
+}
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--btn-ring);
+}
+.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.icon-btn.on { color: var(--worth); }
+.icon-btn.tiny {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
+/* loading 的文字隐形要**压过变体**：.btn.primary 自己也写了 color，
+   同特异度下后写的赢，所以这里补一条更高特异度的收口。
+   文字仍占位 → 宽度不变；只有 ::before 的 spinner 可见。 */
+.btn[aria-busy='true'],
+.btn.primary[aria-busy='true'],
+.btn.ink[aria-busy='true'],
+.btn.ghost[aria-busy='true'],
+.btn.danger[aria-busy='true'],
+.btn.danger.solid[aria-busy='true'] {
+  color: transparent;
+}
+
+/* ── 暗色：只覆盖变量，不动结构 ─────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* 暗底上彩色投影要收，否则按钮周围一圈雾 */
+    --btn-glow: 0.30;
+    --btn-ring: color-mix(in srgb, var(--btn-brand) 42%, transparent);
+  }
+  .btn {
+    --btn-hi: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    --btn-shadow: 0 1px 2px rgba(0, 0, 0, 0.40);
+  }
+  .btn.primary { --btn-hi: inset 0 1px 0 rgba(255, 255, 255, 0.18); }
+  .btn.ink { --btn-hi: inset 0 1px 0 rgba(255, 255, 255, 0.10); }
+}
+
+/* ── 减少动效：只留颜色变化，去掉所有位移 ─────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .icon-btn,
+  .btn > svg { transition-duration: 1ms; }
+  .btn:hover:not(:disabled),
+  .btn:active:not(:disabled),
+  .icon-btn:hover:not(:disabled),
+  .icon-btn:active:not(:disabled),
+  .btn:hover:not(:disabled) > svg { transform: none; }
+  .btn[aria-busy='true']::before { animation-duration: 1ms; }
+}
+
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="toolbar">
+    <button class="btn tiny" onclick="var r=document.documentElement;r.dataset.brand = r.dataset.brand === &quot;blue&quot; ? &quot;&quot; : &quot;blue&quot;">切换品牌色 #2f6bf5</button>
+    <button class="btn tiny" onclick="var r=document.documentElement;r.dataset.theme = r.dataset.theme === &quot;dark&quot; ? &quot;&quot; : &quot;dark&quot;">切换暗色</button>
+    <span class="tag" style="width:auto">hover / active / focus 都是真状态，直接用鼠标和 Tab 试</span>
+  </div>
+
+  <h1>按钮体系 v4.0</h1>
+  <p class="sub">36 / 40 / 48 三档 · 圆角 10px · 顶部内高光 + 品牌色投影 · 全部由 CSS 变量驱动</p>
+
+  <div class="card">
+    <h2>主按钮 .btn.primary</h2>
+    <p class="note">一屏只该有一个。微渐变 + 1px 内高光 + 品牌色投影。</p>
+    <div class="row"><span class="tag">默认</span>
+      <button class="btn primary">+ 添加订阅</button>
+      <button class="btn primary">新建分组</button>
+    </div>
+    <div class="row"><span class="tag">disabled</span><button class="btn primary" disabled>不可用</button></div>
+    <div class="row"><span class="tag">loading</span>
+      <button class="btn primary" aria-busy="true">保存中</button>
+      <button class="btn primary" onclick="var b=this;b.setAttribute(&quot;aria-busy&quot;,&quot;true&quot;);setTimeout(function(){b.removeAttribute(&quot;aria-busy&quot;)},1800)">点我试 loading（宽度不变）</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>次要按钮 .btn</h2>
+    <p class="note">透明底 + 1px 淡描边。需要被看见，但不与主按钮抢重量。</p>
+    <div class="row"><span class="tag">默认</span>
+      <button class="btn">重试失效源 · 2</button>
+      <button class="btn">取消</button>
+      <button class="btn" disabled>导出 OPML</button>
+    </div>
+    <div class="row"><span class="tag">切换态</span>
+      <button class="btn active" aria-pressed="true">退出管理</button>
+      <button class="btn">管理</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>幽灵按钮 .btn.ghost</h2>
+    <p class="note">只有文字，悬停才给淡底。低频操作必须存在，但不该抢注意力。</p>
+    <div class="row"><span class="tag">默认</span>
+      <button class="btn ghost">导出 OPML</button>
+      <button class="btn ghost">导入 OPML</button>
+      <button class="btn ghost" disabled>不可用</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>墨底按钮 .btn.ink（纸面专用）</h2>
+    <p class="note">用在阅读区正文尾部。纸是衬线墨字，饱和色会跳出来抢正文。</p>
+    <div class="row"><span class="tag">默认</span>
+      <a class="btn ink" href="#demo">打开原文</a>
+      <a class="btn" href="#demo">访问源站</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>危险动作</h2>
+    <p class="note">行内删除只染文字；弹窗里「确认删除」才是实心红。两者是不同重量的事件。</p>
+    <div class="row"><span class="tag">行内</span>
+      <button class="btn danger">取消订阅</button>
+      <button class="btn tiny danger">删除</button>
+    </div>
+    <div class="row"><span class="tag">确认弹窗</span>
+      <button class="btn danger solid">确认删除</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>尺寸档</h2>
+    <p class="note">36（默认）/ 40（.lg）/ 48（.xl）。高度变了，内边距与字号一起变。</p>
+    <div class="row">
+      <button class="btn primary">36 · 默认</button>
+      <button class="btn primary lg">40 · .lg</button>
+      <button class="btn primary xl">48 · .xl</button>
+    </div>
+    <div class="row">
+      <button class="btn">36 · 默认</button>
+      <button class="btn lg">40 · .lg</button>
+      <button class="btn xl">48 · .xl</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>图标按钮 .icon-btn</h2>
+    <p class="note">视觉 36×36，命中区用伪元素撑到 44×44。行内迷你版视觉 22×22，命中区仍是 44。</p>
+    <div class="row">
+      <button class="icon-btn" aria-label="刷新">↻</button>
+      <button class="icon-btn" aria-label="收藏">☆</button>
+      <button class="icon-btn on" aria-label="已收藏">★</button>
+      <button class="icon-btn" aria-label="禁用" disabled>✕</button>
+      <span style="width:1px;height:22px;background:var(--border);margin:0 4px"></span>
+      <button class="icon-btn tiny" aria-label="行内迷你">✕</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>焦点环</h2>
+    <p class="note">按 Tab 走一遍：光环 3px、品牌色 30%，鼠标点击不出现。</p>
+    <div class="row">
+      <button class="btn">Tab 到这里</button>
+      <button class="btn primary">再按一次</button>
+      <button class="btn ghost">还有这里</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

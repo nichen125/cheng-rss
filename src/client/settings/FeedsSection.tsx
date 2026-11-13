@@ -377,6 +377,7 @@ export function FeedsSection(props: { onClose: () => void }) {
             className={`btn ${bulkMode ? 'active' : ''}`}
             onClick={() => (bulkMode ? exitBulk() : enterBulk())}
             disabled={feeds.length === 0}
+            aria-pressed={bulkMode}
           >
             {bulkMode ? '退出管理' : '管理'}
           </button>
@@ -676,21 +677,21 @@ export function FeedsSection(props: { onClose: () => void }) {
                 </div>
                 <div className="feed-ops">
                   {f.unread > 0 && <span className="feed-unread">{f.unread}</span>}
-                  <button className="icon-btn" title="编辑" onClick={() => startEdit(f)}>
+                  <button className="icon-btn sm" title="编辑" onClick={() => startEdit(f)}>
                     <IconEdit size={15} />
                   </button>
-                  <button className="icon-btn" title="立即刷新" onClick={() => void refreshOne(f.id)}>
+                  <button className="icon-btn sm" title="立即刷新" onClick={() => void refreshOne(f.id)}>
                     <IconRefresh size={15} />
                   </button>
-                  <button className="icon-btn" title={f.status === 'paused' ? '恢复抓取' : '暂停抓取'} onClick={() => void togglePause(f)}>
+                  <button className="icon-btn sm" title={f.status === 'paused' ? '恢复抓取' : '暂停抓取'} onClick={() => void togglePause(f)}>
                     {f.status === 'paused' ? <IconPlay size={15} /> : <IconPause size={15} />}
                   </button>
                   {f.siteUrl && (
-                    <a className="icon-btn" href={f.siteUrl} target="_blank" rel="noreferrer" title="访问网站">
+                    <a className="icon-btn sm" href={f.siteUrl} target="_blank" rel="noreferrer" title="访问网站">
                       <IconExternal size={15} />
                     </a>
                   )}
-                  <button className="icon-btn danger" title="取消订阅" onClick={() => void remove(f)}>
+                  <button className="icon-btn sm danger" title="取消订阅" onClick={() => void remove(f)}>
                     <IconTrash size={15} />
                   </button>
                 </div>

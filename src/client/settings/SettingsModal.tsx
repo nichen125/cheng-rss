@@ -86,7 +86,7 @@ export function SettingsModal(props: {
           <div className="settings-nav-head">
             <span>配置</span>
             <button
-              className="icon-btn tiny"
+              className="icon-btn sm"
               onClick={props.onClose}
               title="关闭（Esc）"
               aria-label="关闭配置"

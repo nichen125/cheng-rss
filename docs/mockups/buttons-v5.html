@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>按钮体系 v5.0 · Apple 风格</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --bg-sunken: #eceff4;
+  --bg-hover: #f1f3f7;
+  --bg-active: #e8ecf2;
+  --fg: #14171c;
+  --fg-dim: #58616e;
+  --fg-faint: #636d7b;
+  --border: #e4e8ee;
+  --border-soft: #eef1f5;
+  --noise: #d8dde5;
+  --accent: #0066cc;
+  --accent-hover: #0057ad;
+  --accent-soft: #e8f1fd;
+  --accent-fg: #ffffff;
+  --must: #c2410c;
+  --err: #b42318;
+  --worth: #a16207;
+  --paper-bg: #ffffff;
+  --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  color-scheme: light;
+}
+[data-brand='teal'] { --accent: #0f766e; --accent-hover: #0d6a63; --accent-soft: #e7f3f1; }
+[data-brand='sysblue'] { --accent: #0071e3; --accent-hover: #0062c4; --accent-soft: #e6f0fd; }
+[data-theme='dark'] {
+  --bg: #15171c; --bg-sunken: #0b0d10; --bg-hover: #22262e; --bg-active: #2a2f38;
+  --fg: #e9ecf1; --fg-dim: #a4adba; --fg-faint: #8b95a2;
+  --border: #2a2f38; --border-soft: #20242b; --noise: #333a45;
+  --accent: #409cff; --accent-hover: #5cb0ff; --accent-soft: rgba(64,156,255,.14);
+  --paper-bg: #1a1d23; --accent-fg: #0f1115;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 40px 28px 90px;
+  background: var(--bg-sunken); color: var(--fg);
+  font-family: var(--sans); font-size: 15px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 940px; margin: 0 auto; }
+h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.02em; }
+.sub { color: var(--fg-faint); margin: 0 0 26px; font-size: 14px; }
+.card {
+  background: var(--bg); border: 0.5px solid color-mix(in srgb, var(--fg) 10%, transparent);
+  border-radius: 18px; padding: 22px 24px; margin: 0 0 18px;
+  box-shadow: 0 0.5px 1px rgba(0,0,0,.04), 0 2px 10px rgba(0,0,0,.05);
+}
+.card h2 { font-size: 14px; font-weight: 600; margin: 0 0 5px; letter-spacing: -0.01em; }
+.card .note { color: var(--fg-faint); font-size: 13px; margin: 0 0 18px; line-height: 1.55; }
+.row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.row + .row { margin-top: 16px; }
+.tag { font-size: 12px; color: var(--fg-faint); width: 74px; flex-shrink: 0; }
+.toolbar {
+  position: sticky; top: 0; z-index: 9; margin: 0 0 22px; padding: 12px 0;
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  background: color-mix(in srgb, var(--bg-sunken) 88%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+}
+/* ── 按钮体系（v5.0：Apple 设计语言）──────────────────────────
+ *
+ * 参照 Apple HIG 的四条：
+ *   ① **材质**优先于描边。次要按钮是半透明填充 + 背景模糊（vibrancy），
+ *      不是"白底 + 1px 灰边"。0.5px 发丝线只在需要界定轮廓时出现。
+ *   ② **明暗层次靠系统色阶**：fill / fillSecondary / separator，而不是
+ *      自己调灰。fill = 前景色 8% 叠在底上，深浅自动跟随主题。
+ *   ③ **动效是弹簧，不是线性位移**。按下缩到 .97、松手用带回弹的曲线
+ *      回到 1；hover 不抬升 —— Apple 的控件是"压一下"，不是"浮起来"。
+ *   ④ **字体是系统字体**：SF / Segoe UI Variable / 苹方，15px，
+ *      semibold 600，字距 -0.01em。
+ *
+ * 变体只覆盖变量，结构只有一套 .btn：
+ *   .btn.primary  实心 tint（主按钮）
+ *   .btn          半透明填充（次要）
+ *   .btn.ghost    无底（低频）
+ *   .btn.ink      墨底（纸面语境）
+ *   .btn.danger / .btn.danger.solid
+ *   .btn.pill     胶囊（登录、空态这类独占一行的 CTA）
+ */
+
+:root {
+  /* ── 尺寸 ── */
+  --btn-h: 36px;
+  --btn-h-lg: 40px;
+  --btn-h-xl: 48px;
+  --btn-h-tiny: 30px;
+  --btn-px: 18px;
+  --btn-px-lg: 22px;
+  --btn-px-xl: 26px;
+  --btn-px-tiny: 11px;
+  /* Apple 的连续圆角在 Web 上用 12px 近似；胶囊用近乎无穷的半径 */
+  --btn-radius: 12px;
+  --btn-radius-sm: 9px;
+  --btn-radius-pill: 980px;
+  --btn-fs: 15px;
+  --btn-fs-lg: 15px;
+  --btn-fs-xl: 16px;
+  --btn-fs-tiny: 13px;
+
+  /* ── 材质（系统色阶）── */
+  --fill: color-mix(in srgb, var(--fg) 7%, transparent);
+  --fill-hover: color-mix(in srgb, var(--fg) 11%, transparent);
+  --fill-press: color-mix(in srgb, var(--fg) 16%, transparent);
+  --fill-strong: color-mix(in srgb, var(--fg) 14%, transparent);
+  /* 0.5px 发丝线：比 1px 更接近 Apple 的分隔线，在高 DPI 上更细 */
+  --hairline: 0.5px;
+  --sep: color-mix(in srgb, var(--fg) 14%, transparent);
+
+  /* ── 品牌：跟随 --accent（截图里的主按钮就是它的颜色）── */
+  --btn-brand: var(--accent);
+  --btn-brand-hover: var(--accent-hover);
+  --btn-brand-press: color-mix(in srgb, var(--accent) 88%, #000000);
+  --btn-ring: color-mix(in srgb, var(--btn-brand) 30%, transparent);
+
+  /* ── 动效：进得干脆，回弹带回弹 ── */
+  --btn-ease-in: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --btn-ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --btn-t: 220ms;
+  --btn-t-fast: 110ms;
+}
+
+.btn {
+  /* 可覆盖变量 —— 变体只碰这一段 */
+  --btn-bg: var(--fill);
+  --btn-bg-hover: var(--fill-hover);
+  --btn-bg-press: var(--fill-press);
+  --btn-fg: var(--fg);
+  --btn-bd: color-mix(in srgb, var(--fg) 10%, transparent);
+  --btn-hi: inset 0 0.5px 0 rgba(255, 255, 255, 0.55);
+  --btn-shadow:
+    0 0.5px 1px rgba(0, 0, 0, 0.04),
+    0 1px 3px rgba(0, 0, 0, 0.06);
+  --btn-blur: none;
+  --btn-loading-fg: var(--btn-fg);
+
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--btn-h);
+  padding: 0 var(--btn-px);
+  font-family: var(--sans);
+  font-size: var(--btn-fs);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  color: var(--btn-fg);
+  background-color: var(--btn-bg);
+  border: var(--hairline) solid var(--btn-bd);
+  border-radius: var(--btn-radius);
+  box-shadow: var(--btn-hi), var(--btn-shadow);
+  -webkit-backdrop-filter: var(--btn-blur);
+  backdrop-filter: var(--btn-blur);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+  /* 只列具体属性 */
+  transition:
+    background-color var(--btn-t) var(--btn-ease-out),
+    border-color var(--btn-t) var(--btn-ease-out),
+    color var(--btn-t) var(--btn-ease-out),
+    box-shadow var(--btn-t) var(--btn-ease-out),
+    transform var(--btn-t) var(--btn-ease-out),
+    filter var(--btn-t) var(--btn-ease-out);
+  -webkit-tap-highlight-color: transparent;
+}
+.btn > svg { flex-shrink: 0; }
+
+/* hover：只换底色与阴影，**不抬升** —— Apple 的悬停是"点亮"，不是"浮起" */
+.btn:hover:not(:disabled):not([aria-busy='true']) {
+  background-color: var(--btn-bg-hover);
+  box-shadow:
+    var(--btn-hi),
+    0 0.5px 1px rgba(0, 0, 0, 0.05),
+    0 2px 6px rgba(0, 0, 0, 0.07);
+}
+
+/* active：压到 97%，用快曲线；松手时由上面 220ms 的回弹曲线接手 */
+.btn:active:not(:disabled):not([aria-busy='true']) {
+  background-color: var(--btn-bg-press);
+  transform: scale(0.97);
+  transition-duration: var(--btn-t-fast);
+  transition-timing-function: var(--btn-ease-in);
+  box-shadow: var(--btn-hi);
+}
+
+/* focus-visible：Apple 风格是"一圈柔光"，4px、tint 28%，不是硬描边 */
+.btn:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--btn-hi),
+    0 0 0 4px var(--btn-ring);
+}
+
+/* disabled：压到 .35 并去掉一切材质与阴影 */
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  filter: saturate(0.4);
+}
+
+/* loading：aria-busy 驱动。文字与图标转透明但**仍占位** → 宽度零跳变 */
+.btn[aria-busy='true'] {
+  pointer-events: none;
+  cursor: progress;
+  color: transparent;
+  transform: none;
+  box-shadow: var(--btn-hi), var(--btn-shadow);
+  /* 加载是瞬间切换，不是渐变：否则文字与 spinner 会叠一瞬 */
+  transition-property: none;
+}
+.btn[aria-busy='true'] > svg { opacity: 0; }
+.btn[aria-busy='true']::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 15px;
+  height: 15px;
+  margin: -7.5px 0 0 -7.5px;
+  border-radius: 50%;
+  border: 1.8px solid var(--btn-loading-fg);
+  border-right-color: color-mix(in srgb, var(--btn-loading-fg) 22%, transparent);
+  animation: btn-spin 760ms linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* ── 主按钮：实心 tint ────────────────────────────────────
+   只是一层极淡的顶部高光 + 一圈同色柔光。Apple 的实心按钮几乎是平的，
+   它的"立体"来自圆角、字重与投影，不来自渐变。 */
+.btn.primary {
+  --btn-bg: var(--btn-brand);
+  --btn-bg-hover: color-mix(in srgb, var(--btn-brand) 92%, #ffffff);
+  --btn-bg-press: var(--btn-brand-press);
+  --btn-fg: #ffffff;
+  --btn-bd: transparent;
+  --btn-hi: inset 0 0.5px 0 rgba(255, 255, 255, 0.24);
+  --btn-shadow:
+    0 0.5px 1px rgba(0, 0, 0, 0.08),
+    0 2px 8px -1px color-mix(in srgb, var(--btn-brand) 38%, transparent);
+  --btn-blur: none;
+  --btn-loading-fg: #ffffff;
+  font-weight: 600;
+  color: #ffffff;
+}
+.btn.primary:hover:not(:disabled):not([aria-busy='true']) {
+  color: #ffffff;
+  box-shadow:
+    var(--btn-hi),
+    0 1px 2px rgba(0, 0, 0, 0.10),
+    0 4px 14px -2px color-mix(in srgb, var(--btn-brand) 46%, transparent);
+}
+.btn.primary:active:not(:disabled):not([aria-busy='true']) {
+  color: #ffffff;
+  box-shadow: var(--btn-hi), 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+/* ── 次要：半透明填充 + 背景模糊（vibrancy）─────────────────
+   Apple 的 secondary 是 systemFill 叠在材质上，能隐约透出背后的内容。 */
+.btn.vibrant {
+  --btn-bg: color-mix(in srgb, var(--bg) 70%, transparent);
+  --btn-bg-hover: color-mix(in srgb, var(--bg) 82%, transparent);
+  --btn-bg-press: color-mix(in srgb, var(--fg) 12%, transparent);
+  --btn-blur: saturate(180%) blur(20px);
+}
+
+/* ── 墨底：纸面语境（阅读区尾部）────────────────────────────
+   纸是衬线墨字，饱和色会跳出来抢正文；「强调色只表达 AI 判断」
+   也不允许它出现在"去原文"上。 */
+.btn.ink {
+  --btn-bg: var(--fg);
+  --btn-bg-hover: color-mix(in srgb, var(--fg) 92%, #ffffff);
+  --btn-bg-press: var(--fg);
+  --btn-fg: var(--paper-bg);
+  --btn-bd: transparent;
+  --btn-hi: inset 0 0.5px 0 rgba(255, 255, 255, 0.16);
+  --btn-shadow:
+    0 0.5px 1px rgba(0, 0, 0, 0.08),
+    0 2px 8px -2px rgba(0, 0, 0, 0.22);
+  --btn-loading-fg: var(--paper-bg);
+  color: var(--btn-fg);
+}
+.btn.ink:hover:not(:disabled):not([aria-busy='true']) { color: var(--paper-bg); }
+
+/* ── 幽灵：无底无框，只换文字色 ────────────────────────── */
+.btn.ghost {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--fill);
+  --btn-bg-press: var(--fill-press);
+  --btn-fg: var(--fg-dim);
+  --btn-bd: transparent;
+  --btn-hi: none;
+  --btn-shadow: none;
+}
+.btn.ghost:hover:not(:disabled):not([aria-busy='true']) { color: var(--fg); }
+.btn.ghost:active:not(:disabled):not([aria-busy='true']) { transform: scale(0.97); }
+.btn.ghost:focus-visible { box-shadow: 0 0 0 4px var(--btn-ring); }
+
+/* ── 切换态 ────────────────────────────────────────────────
+   组件早就写了 className="btn active"，但样式从未定义 ——
+   进管理模式后按钮毫无变化，用户以为没点上。 */
+.btn.active,
+.btn[aria-pressed='true'] {
+  background-color: var(--fill-strong);
+  border-color: var(--sep);
+  color: var(--fg);
+  box-shadow: var(--btn-hi), var(--btn-shadow);
+}
+.btn.ghost.active,
+.btn.ghost[aria-pressed='true'] {
+  border-color: transparent;
+}
+
+/* ── 胶囊 / 全宽 ─────────────────────────────────────────── */
+.btn.pill { border-radius: var(--btn-radius-pill); padding: 0 calc(var(--btn-px) + 6px); }
+.btn.block { width: 100%; }
+/* 独占一行的主按钮用胶囊：登录、空态、文末出口 —— Apple 的这类 CTA 都是胶囊 */
+.btn.primary.block { border-radius: var(--btn-radius-pill); }
+
+/* ── 尺寸档 ──────────────────────────────────────────────── */
+.btn.lg {
+  height: var(--btn-h-lg);
+  padding: 0 var(--btn-px-lg);
+  font-size: var(--btn-fs-lg);
+}
+.btn.xl {
+  height: var(--btn-h-xl);
+  padding: 0 var(--btn-px-xl);
+  font-size: var(--btn-fs-xl);
+  border-radius: 14px;
+}
+.btn.tiny {
+  height: var(--btn-h-tiny);
+  padding: 0 var(--btn-px-tiny);
+  gap: 4px;
+  font-size: var(--btn-fs-tiny);
+  border-radius: var(--btn-radius-sm);
+  font-weight: 500;
+}
+
+/* ── 危险动作 ────────────────────────────────────────────── */
+.btn.danger {
+  --btn-fg: var(--err);
+  --btn-bd: color-mix(in srgb, var(--err) 18%, transparent);
+  --btn-bg: color-mix(in srgb, var(--err) 7%, transparent);
+  --btn-bg-hover: color-mix(in srgb, var(--err) 12%, transparent);
+  --btn-bg-press: color-mix(in srgb, var(--err) 18%, transparent);
+  color: var(--err);
+}
+.btn.danger:hover:not(:disabled):not([aria-busy='true']) { color: var(--err); }
+.btn.danger.solid {
+  --btn-bg: var(--err);
+  --btn-bg-hover: color-mix(in srgb, var(--err) 90%, #ffffff);
+  --btn-bg-press: color-mix(in srgb, var(--err) 88%, #000000);
+  --btn-fg: #ffffff;
+  --btn-bd: transparent;
+  --btn-hi: inset 0 0.5px 0 rgba(255, 255, 255, 0.20);
+  --btn-shadow:
+    0 0.5px 1px rgba(0, 0, 0, 0.08),
+    0 2px 8px -1px color-mix(in srgb, var(--err) 36%, transparent);
+  --btn-loading-fg: #ffffff;
+  color: #ffffff;
+}
+.btn.danger.solid:hover:not(:disabled):not([aria-busy='true']) { color: #ffffff; }
+
+/* ── 图标按钮：圆形 ───────────────────────────────────────
+ * Apple 的工具栏图标按钮是**圆形**的（macOS 新工具栏、iOS 导航栏都如此）。
+ * 视觉 36，命中区用伪元素撑到 44。 */
+.icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: var(--hairline) solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--btn-t) var(--btn-ease-out),
+    color var(--btn-t) var(--btn-ease-out),
+    transform var(--btn-t) var(--btn-ease-out);
+}
+/* 命中区 44×44：视觉不占地，手指点得准 */
+.icon-btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--fill);
+  color: var(--fg);
+}
+.icon-btn:active:not(:disabled) {
+  background: var(--fill-press);
+  transform: scale(0.94);
+  transition-duration: var(--btn-t-fast);
+}
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--btn-ring);
+}
+.icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.icon-btn.on { color: var(--worth); }
+.icon-btn.tiny {
+  width: 26px;
+  height: 26px;
+}
+
+/* ── 分段控件：Apple Segmented Control ────────────────────
+   外层是 fill 底、内层选中项是白底小卡片 + 一道极浅投影。
+   这是 Apple 体系里最容易辨认的一个控件。 */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--fill);
+  border: none;
+  border-radius: var(--btn-radius-sm);
+}
+.seg-btn {
+  padding: 4px 11px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--fg-dim);
+  font-family: var(--sans);
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  cursor: pointer;
+  transition:
+    background-color var(--btn-t) var(--btn-ease-out),
+    color var(--btn-t) var(--btn-ease-out),
+    box-shadow var(--btn-t) var(--btn-ease-out);
+}
+.seg-btn:hover:not(.on) { color: var(--fg); }
+.seg-btn.on {
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.04),
+    0 3px 8px rgba(0, 0, 0, 0.08);
+}
+.seg-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--btn-ring);
+}
+
+/* ── loading 的文字隐形要压过变体 ─────────────────────────── */
+.btn[aria-busy='true'],
+.btn.primary[aria-busy='true'],
+.btn.ink[aria-busy='true'],
+.btn.ghost[aria-busy='true'],
+.btn.danger[aria-busy='true'],
+.btn.danger.solid[aria-busy='true'] {
+  color: transparent;
+}
+
+/* ── 暗色：只覆盖变量 ────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fill: color-mix(in srgb, var(--fg) 10%, transparent);
+    --fill-hover: color-mix(in srgb, var(--fg) 15%, transparent);
+    --fill-press: color-mix(in srgb, var(--fg) 22%, transparent);
+    --fill-strong: color-mix(in srgb, var(--fg) 18%, transparent);
+    --sep: color-mix(in srgb, var(--fg) 18%, transparent);
+    --btn-ring: color-mix(in srgb, var(--btn-brand) 40%, transparent);
+  }
+  .btn {
+    --btn-hi: inset 0 0.5px 0 rgba(255, 255, 255, 0.07);
+    --btn-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.30), 0 1px 3px rgba(0, 0, 0, 0.36);
+  }
+  .btn.primary { --btn-hi: inset 0 0.5px 0 rgba(255, 255, 255, 0.16); }
+  .btn.ink { --btn-hi: inset 0 0.5px 0 rgba(255, 255, 255, 0.08); }
+  .seg-btn.on { box-shadow: 0 1px 1px rgba(0, 0, 0, 0.30), 0 3px 8px rgba(0, 0, 0, 0.40); }
+}
+
+/* ── 减少动效 ────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .icon-btn,
+  .seg-btn { transition-duration: 1ms; }
+  .btn:hover:not(:disabled),
+  .btn:active:not(:disabled),
+  .icon-btn:hover:not(:disabled),
+  .icon-btn:active:not(:disabled) { transform: none; }
+  .btn[aria-busy='true']::before { animation-duration: 1ms; }
+}
+
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="toolbar">
+    <button class="btn tiny" onclick="var r=document.documentElement;var o=[&quot;&quot;,&quot;teal&quot;,&quot;sysblue&quot;];var i=o.indexOf(r.dataset.brand||&quot;&quot;);r.dataset.brand=o[(i+1)%3];this.textContent=&quot;品牌色：&quot;+({&quot;&quot;:&quot;点击蓝 #0066cc&quot;,&quot;teal&quot;:&quot;青墨 #0f766e&quot;,&quot;sysblue&quot;:&quot;系统蓝 #0071e3&quot;})[r.dataset.brand]">品牌色：点击蓝 #0066cc</button>
+    <button class="btn tiny" onclick="var r=document.documentElement;r.dataset.theme=r.dataset.theme===&quot;dark&quot;?&quot;&quot;:&quot;dark&quot;">切换暗色</button>
+    <span class="tag" style="width:auto">hover / active / focus 都是真状态，用鼠标和 Tab 试</span>
+  </div>
+
+  <h1>按钮体系 v5.0 · Apple 设计语言</h1>
+  <p class="sub">材质优先于描边 · 系统字体 15px semibold · 圆角 12px · 按下缩放回弹</p>
+
+  <div class="card">
+    <h2>主按钮 .btn.primary</h2>
+    <p class="note">实心 tint + 顶部 0.5px 内高光 + 同色柔光。Apple 的实心按钮几乎是平的，立体感来自圆角、字重与投影。</p>
+    <div class="row"><span class="tag">默认</span>
+      <button class="btn primary">添加订阅</button>
+      <button class="btn primary">保存</button>
+    </div>
+    <div class="row"><span class="tag">胶囊</span>
+      <button class="btn primary pill">开始使用</button>
+      <button class="btn primary pill">继续</button>
+    </div>
+    <div class="row"><span class="tag">disabled</span><button class="btn primary" disabled>不可用</button></div>
+    <div class="row"><span class="tag">loading</span>
+      <button class="btn primary" aria-busy="true">保存中</button>
+      <button class="btn primary" onclick="var b=this;b.setAttribute(&quot;aria-busy&quot;,&quot;true&quot;);setTimeout(function(){b.removeAttribute(&quot;aria-busy&quot;)},1800)">点我试 loading</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>次要按钮 .btn</h2>
+    <p class="note">半透明填充（systemFill 7%）+ 0.5px 发丝线。不是白底黑框 —— 那种组合看起来像表单控件。</p>
+    <div class="row"><span class="tag">默认</span>
+      <button class="btn">重试失效源</button>
+      <button class="btn">取消</button>
+      <button class="btn" disabled>导出</button>
+    </div>
+    <div class="row"><span class="tag">vibrant</span>
+      <button class="btn vibrant">背景模糊 + 半透明</button>
+      <span class="tag" style="width:auto;font-size:12px">（用在图片/彩色底上时）</span>
+    </div>
+    <div class="row"><span class="tag">切换态</span>
+      <button class="btn active" aria-pressed="true">退出管理</button>
+      <button class="btn">管理</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>幽灵按钮 .btn.ghost</h2>
+    <p class="note">没有底，hover 才浮出 7% 填充。</p>
+    <div class="row"><span class="tag">默认</span>
+      <button class="btn ghost">导出 OPML</button>
+      <button class="btn ghost">导入 OPML</button>
+      <button class="btn ghost" disabled>不可用</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>墨底按钮 .btn.ink（纸面专用）</h2>
+    <p class="note">阅读区尾部。纸是衬线墨字，饱和色会抢正文。</p>
+    <div class="row"><span class="tag">默认</span>
+      <a class="btn ink" href="#demo">打开原文</a>
+      <a class="btn" href="#demo">访问源站</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>危险动作</h2>
+    <p class="note">行内是淡红底 + 红字；确认弹窗里才是实心红。</p>
+    <div class="row"><span class="tag">行内</span>
+      <button class="btn danger">取消订阅</button>
+      <button class="btn tiny danger">删除</button>
+    </div>
+    <div class="row"><span class="tag">确认弹窗</span>
+      <button class="btn danger solid">确认删除</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>尺寸档</h2>
+    <p class="note">36（默认）/ 40（.lg）/ 48（.xl）/ 30（.tiny）。</p>
+    <div class="row">
+      <button class="btn primary">36 · 默认</button>
+      <button class="btn primary lg">40 · .lg</button>
+      <button class="btn primary xl">48 · .xl</button>
+      <button class="btn primary tiny">30 · .tiny</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>图标按钮 .icon-btn（圆形）</h2>
+    <p class="note">Apple 的工具栏图标按钮是圆的。视觉 36，命中区 44。</p>
+    <div class="row">
+      <button class="icon-btn" aria-label="刷新">↻</button>
+      <button class="icon-btn" aria-label="收藏">☆</button>
+      <button class="icon-btn on" aria-label="已收藏">★</button>
+      <button class="icon-btn" aria-label="禁用" disabled>✕</button>
+      <span style="width:1px;height:22px;background:var(--border);margin:0 6px"></span>
+      <button class="icon-btn tiny" aria-label="行内迷你">✕</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>分段控件 .seg（Apple Segmented Control）</h2>
+    <p class="note">外层 systemFill 底，选中项是白底小卡片 + 一道极浅投影。</p>
+    <div class="row">
+      <div class="seg">
+        <button class="seg-btn on">全部</button>
+        <button class="seg-btn">未读</button>
+      </div>
+      <div class="seg">
+        <button class="seg-btn">小</button>
+        <button class="seg-btn on">中</button>
+        <button class="seg-btn">大</button>
+        <button class="seg-btn">特大</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>焦点环</h2>
+    <p class="note">按 Tab 走一遍：4px 柔光，品牌色 30%，鼠标点击不出现。</p>
+    <div class="row">
+      <button class="btn">Tab 到这里</button>
+      <button class="btn primary">再按一次</button>
+      <button class="btn ghost">还有这里</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

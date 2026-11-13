@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>企业简洁风 · 组件预览</title>
+<style>
+:root {
+  --bg: #ffffff; --bg-sunken: #f8fafc; --bg-elev: #ffffff; --bg-elev2: #f1f5f9;
+  --bg-hover: #f1f5f9; --bg-active: #e2e8f0; --bg-selected: #eff6ff;
+  --fg: #0f172a; --fg-dim: #334155; --fg-faint: #64748b; --fg-soft: #475569;
+  --border: #e5e7eb; --border-soft: #f1f5f9; --border-input: #d1d5db;
+  --accent: #1e40af; --accent-hover: #1e3a8a; --accent-soft: #eff6ff; --accent-fg: #ffffff;
+  --focus-ring: #3b82f6; --ring-offset: #f8fafc;
+  --ok: #10b981; --warn: #d97706; --err: #dc2626; --must: #1e40af; --worth: #64748b;
+  --radius-xs: 6px; --radius-sm: 8px; --radius: 12px; --radius-lg: 16px; --radius-pill: 999px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --card-padding: 24px; --sp-16: 16px;
+  color-scheme: light;
+}
+[data-theme='dark'] {
+  --bg: #1e293b; --bg-sunken: #0f172a; --bg-elev: #1e293b; --bg-elev2: #243245;
+  --bg-hover: #243245; --bg-active: #2f3f57; --bg-selected: #1e3a5f;
+  --fg: #f1f5f9; --fg-dim: #cbd5e1; --fg-faint: #94a3b8; --fg-soft: #e2e8f0;
+  --border: #334155; --border-soft: #243245; --border-input: #475569;
+  --accent: #60a5fa; --accent-hover: #93c5fd; --accent-soft: rgba(96,165,250,.14);
+  --focus-ring: #3b82f6; --ring-offset: #0f172a;
+  --err: #f87171; --ok: #34d399;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.35); --shadow: 0 4px 12px rgba(0,0,0,.45);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,.55);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0;
+  background: var(--bg-sunken); color: var(--fg);
+  font-family: var(--font-sans); font-size: 16px; line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+.topnav {
+  height: 64px; display: flex; align-items: center; gap: 24px;
+  padding: 0 32px; background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.wordmark { font-size: 18px; font-weight: 600; color: var(--fg); letter-spacing: -0.01em; }
+.topnav a { font-size: 14px; font-weight: 500; color: var(--fg-faint); text-decoration: none; transition: color 150ms ease-out, transform 150ms ease-out; }
+.topnav a:hover { color: var(--fg); transform: translateY(-1px); }
+.topnav .spacer { flex: 1; }
+.page { max-width: 1120px; margin: 0 auto; padding: 48px 32px 96px; }
+h1.hero { font-size: 36px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; margin: 0 0 8px; }
+.lede { color: var(--fg-faint); font-size: 18px; line-height: 1.65; margin: 0 0 40px; max-width: 70ch; }
+.card {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: var(--card-padding); box-shadow: var(--shadow-sm);
+  transition: box-shadow 150ms ease-out, transform 150ms ease-out, border-color 150ms ease-out;
+}
+.card:hover { box-shadow: var(--shadow); transform: translateY(-2px); border-color: #dbe1e9; }
+.card h2 { font-size: 20px; font-weight: 600; line-height: 1.4; margin: 0 0 4px; }
+.card p { font-size: 14px; line-height: 1.6; color: var(--fg-faint); margin: 0; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin-bottom: 40px; }
+.icon-box {
+  width: 40px; height: 40px; border-radius: var(--radius); background: var(--accent-soft);
+  display: flex; align-items: center; justify-content: center; color: var(--accent);
+  margin-bottom: 16px; transition: background 150ms ease-out, color 150ms ease-out, transform 150ms ease-out;
+  font-size: 18px;
+}
+.card:hover .icon-box { background: var(--accent); color: #fff; transform: scale(1.1); }
+.section { margin: 0 0 48px; }
+.section > h3 { font-size: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-faint); margin: 0 0 16px; }
+.row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.row + .row { margin-top: 16px; }
+.tag { font-size: 12px; color: var(--fg-faint); width: 82px; flex-shrink: 0; }
+.panel { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow-sm); }
+.badge {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px;
+  border-radius: var(--radius-pill); font-size: 12px; font-weight: 500; line-height: 1.4;
+  background: var(--accent-soft); color: var(--accent);
+}
+.badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.badge.ok { background: #ecfdf5; color: #047857; }
+.badge.warn { background: #fffbeb; color: #b45309; }
+.badge.hint { background: transparent; border: 1px solid var(--border); color: var(--fg-faint); }
+.label { display: block; font-size: 14px; font-weight: 500; color: var(--fg-dim); margin-bottom: 6px; }
+.help { font-size: 12px; color: var(--fg-faint); margin-top: 6px; }
+input.demo { width: 100%; font-family: inherit; font-size: 16px; color: var(--fg); background: var(--bg); }
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.sw { border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border); }
+.sw .chip { height: 48px; }
+.sw .nm { padding: 8px 10px; font-size: 12px; background: var(--bg); color: var(--fg-faint); line-height: 1.4; }
+.sw .nm b { display: block; color: var(--fg); font-weight: 500; }
+.type td { padding: 8px 12px 8px 0; vertical-align: baseline; }
+.type .meta { font-size: 12px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+/* ── 按钮体系（v6.0：企业简洁风）─────────────────────────────
+ *
+ * 一条规则决定所有按钮的长相：**只用一种蓝**。
+ *   .btn.primary  实心 #1e40af，白字，无描边 —— 主行动，一屏一个
+ *   .btn          白底 + 1px #d1d5db + 深灰字 —— 次要动作
+ *   .btn.ghost    无底无框 —— 低频集合级操作
+ *   .btn.ink      墨底 —— 纸面语境（阅读区正文尾部）
+ *   .btn.danger   红字（行内）/ .danger.solid 实心红（确认弹窗）
+ *
+ * 交互只做两件事，与规格一致：
+ *   hover  —— 上浮 2px + 阴影升到 0 4px 12px
+ *   active —— 缩放 0.98 并取消上浮
+ * 动效 150ms ease-out，超过 200ms 开始显得轻浮。
+ *
+ * 焦点环必须带 2px offset（0 0 0 2px 画布色, 0 0 0 4px #3b82f6）：
+ * 没有 offset 的焦点环会贴在描边上，等于没有。这是无障碍底线。
+ */
+
+:root {
+  --btn-h: 36px;
+  --btn-h-lg: 40px;
+  --btn-h-xl: 48px;
+  --btn-h-tiny: 30px;
+  --btn-px: 16px;
+  --btn-px-lg: 20px;
+  --btn-px-xl: 24px;
+  --btn-px-tiny: 10px;
+  --btn-radius: var(--radius-sm);   /* 8px */
+  --btn-fs: 14px;
+  --btn-fs-lg: 14px;
+  --btn-fs-xl: 16px;
+  --btn-fs-tiny: 12px;
+  --btn-t: 150ms;
+  --btn-ease: ease-out;
+  --btn-brand: var(--accent);
+  --btn-brand-hover: var(--accent-hover);
+}
+
+.btn {
+  /* 可覆盖变量 —— 变体只碰这一段 */
+  --btn-bg: var(--bg);
+  --btn-bg-hover: var(--bg-sunken);
+  --btn-bg-press: var(--bg-active);
+  --btn-fg: var(--fg);
+  --btn-bd: var(--border-input);
+  --btn-bd-hover: #94a3b8;
+  --btn-shadow: var(--shadow-sm);
+  --btn-shadow-hover: var(--shadow);
+  --btn-lift: -2px;
+  --btn-loading-fg: var(--btn-fg);
+
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--btn-h);
+  padding: 0 var(--btn-px);
+  font-family: var(--font-sans);
+  font-size: var(--btn-fs);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--btn-fg);
+  background-color: var(--btn-bg);
+  border: 1px solid var(--btn-bd);
+  border-radius: var(--btn-radius);
+  box-shadow: var(--btn-shadow);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--btn-t) var(--btn-ease),
+    border-color var(--btn-t) var(--btn-ease),
+    color var(--btn-t) var(--btn-ease),
+    box-shadow var(--btn-t) var(--btn-ease),
+    transform var(--btn-t) var(--btn-ease);
+}
+.btn > svg { flex-shrink: 0; }
+
+/* hover：上浮 + 阴影升级。位移不超过 2px。 */
+.btn:hover:not(:disabled):not([aria-busy='true']) {
+  background-color: var(--btn-bg-hover);
+  border-color: var(--btn-bd-hover);
+  box-shadow: var(--btn-shadow-hover);
+  transform: translateY(var(--btn-lift));
+}
+
+/* active：取消上浮、缩到 0.98 —— 没有这一步按钮就是装饰 */
+.btn:active:not(:disabled):not([aria-busy='true']) {
+  background-color: var(--btn-bg-press);
+  transform: translateY(0) scale(0.98);
+  box-shadow: var(--btn-shadow);
+}
+
+/* focus-visible：2px offset 的环。先铺一层画布色，再叠 4px 蓝色 —— 
+   这样环与按钮之间始终留出 2px，且不改变盒子尺寸。 */
+.btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--ring-offset),
+    0 0 0 4px var(--focus-ring);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  background-color: var(--bg-sunken);
+}
+
+/* loading：aria-busy 驱动。文字与图标转透明但**仍占位** → 宽度零跳变 */
+.btn[aria-busy='true'] {
+  pointer-events: none;
+  cursor: progress;
+  color: transparent;
+  transform: none;
+  box-shadow: var(--btn-shadow);
+  transition-property: none;
+}
+.btn[aria-busy='true'] > svg { opacity: 0; }
+.btn[aria-busy='true']::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px solid var(--btn-loading-fg);
+  border-right-color: transparent;
+  animation: btn-spin 700ms linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* ── 主按钮 ───────────────────────────────────────────────── */
+.btn.primary {
+  --btn-bg: var(--btn-brand);
+  --btn-bg-hover: var(--btn-brand-hover);
+  --btn-bg-press: var(--btn-brand-hover);
+  --btn-fg: #ffffff;
+  --btn-bd: var(--btn-brand);
+  --btn-bd-hover: var(--btn-brand-hover);
+  --btn-shadow: 0 1px 2px rgba(30, 64, 175, 0.18);
+  --btn-shadow-hover: 0 4px 12px rgba(30, 64, 175, 0.22);
+  --btn-loading-fg: #ffffff;
+  font-weight: 500;
+  color: #ffffff;
+}
+.btn.primary:hover:not(:disabled):not([aria-busy='true']) { color: #ffffff; }
+.btn.primary:active:not(:disabled):not([aria-busy='true']) { color: #ffffff; }
+
+/* ── 墨底：纸面语境 ─────────────────────────────────────────
+   阅读区的纸是衬线墨字，一块饱和蓝会跳出来抢正文。 */
+.btn.ink {
+  --btn-bg: var(--fg);
+  --btn-bg-hover: #1e293b;
+  --btn-bg-press: #0b1220;
+  --btn-fg: #ffffff;
+  --btn-bd: var(--fg);
+  --btn-bd-hover: #1e293b;
+  --btn-shadow: 0 1px 2px rgba(15, 23, 42, 0.10);
+  --btn-shadow-hover: 0 4px 12px rgba(15, 23, 42, 0.12);
+  --btn-loading-fg: #ffffff;
+  color: #ffffff;
+}
+.btn.ink:hover:not(:disabled):not([aria-busy='true']) { color: #ffffff; }
+
+/* ── 幽灵：无底无框 ──────────────────────────────────────── */
+.btn.ghost {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--bg-hover);
+  --btn-bg-press: var(--bg-active);
+  --btn-fg: var(--fg-faint);
+  --btn-bd: transparent;
+  --btn-bd-hover: transparent;
+  --btn-shadow: none;
+  --btn-shadow-hover: none;
+  --btn-lift: 0px;
+}
+.btn.ghost:hover:not(:disabled):not([aria-busy='true']) { color: var(--fg); }
+.btn.ghost:active:not(:disabled):not([aria-busy='true']) { transform: scale(0.98); }
+
+/* ── 切换态：按下去了 ───────────────────────────────────── */
+.btn.active,
+.btn[aria-pressed='true'] {
+  background-color: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+.btn.ghost.active,
+.btn.ghost[aria-pressed='true'] {
+  background-color: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+/* ── 形状与尺寸 ──────────────────────────────────────────── */
+.btn.pill { border-radius: var(--radius-pill); padding: 0 calc(var(--btn-px) + 4px); }
+.btn.block { width: 100%; }
+.btn.lg { height: var(--btn-h-lg); padding: 0 var(--btn-px-lg); font-size: var(--btn-fs-lg); }
+.btn.xl { height: var(--btn-h-xl); padding: 0 var(--btn-px-xl); font-size: var(--btn-fs-xl); border-radius: var(--radius); }
+.btn.tiny {
+  height: var(--btn-h-tiny);
+  padding: 0 var(--btn-px-tiny);
+  gap: 4px;
+  font-size: var(--btn-fs-tiny);
+  border-radius: var(--radius-xs);
+}
+
+/* ── 危险动作 ─────────────────────────────────────────────
+   行内只染红字 + 极浅底；弹窗里确认删除才是实心红。 */
+.btn.danger {
+  --btn-bg: #fef2f2;
+  --btn-bg-hover: #fee2e2;
+  --btn-bg-press: #fecaca;
+  --btn-fg: var(--err);
+  --btn-bd: #fecaca;
+  --btn-bd-hover: #fca5a5;
+  --btn-shadow: none;
+  --btn-shadow-hover: var(--shadow-sm);
+  color: var(--err);
+}
+.btn.danger:hover:not(:disabled):not([aria-busy='true']) { color: var(--err); }
+.btn.danger.solid {
+  --btn-bg: var(--err);
+  --btn-bg-hover: #b91c1c;
+  --btn-bg-press: #991b1b;
+  --btn-fg: #ffffff;
+  --btn-bd: var(--err);
+  --btn-bd-hover: #b91c1c;
+  --btn-shadow: 0 1px 2px rgba(220, 38, 38, 0.20);
+  --btn-shadow-hover: 0 4px 12px rgba(220, 38, 38, 0.24);
+  --btn-loading-fg: #ffffff;
+  color: #ffffff;
+}
+.btn.danger.solid:hover:not(:disabled):not([aria-busy='true']) { color: #ffffff; }
+
+/* ── 图标按钮 ─────────────────────────────────────────────
+ * 视觉 36×36、圆角 8（与按钮同档），命中区用伪元素撑到 44×44。 */
+.icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--btn-t) var(--btn-ease),
+    color var(--btn-t) var(--btn-ease),
+    border-color var(--btn-t) var(--btn-ease),
+    transform var(--btn-t) var(--btn-ease);
+}
+.icon-btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.icon-btn:active:not(:disabled) { transform: scale(0.94); }
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus-ring);
+}
+.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.icon-btn.on { color: var(--accent); }
+.icon-btn.tiny { width: 24px; height: 24px; border-radius: var(--radius-xs); }
+
+/* ── 分段控件 ─────────────────────────────────────────────
+ * 外壳 #f1f5f9、内层选中项白底小卡片 + 1px 阴影。
+ * 列表头的「全部 / 未读」与阅读工具条的「摘要 / 总结」共用这一套。 */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-elev2);
+  border: none;
+  border-radius: var(--radius-sm);
+}
+.seg-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--fg-faint);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    background-color var(--btn-t) var(--btn-ease),
+    color var(--btn-t) var(--btn-ease),
+    box-shadow var(--btn-t) var(--btn-ease);
+}
+.seg-btn:hover:not(.on) { color: var(--fg); }
+.seg-btn.on {
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+.seg-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 3px var(--focus-ring);
+}
+
+/* loading 的文字隐形要压过变体（同特异度下后写的赢） */
+.btn[aria-busy='true'],
+.btn.primary[aria-busy='true'],
+.btn.ink[aria-busy='true'],
+.btn.ghost[aria-busy='true'],
+.btn.danger[aria-busy='true'],
+.btn.danger.solid[aria-busy='true'] { color: transparent; }
+
+/* ── 减少动效：只留颜色变化 ─────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .icon-btn,
+  .seg-btn { transition-duration: 1ms; }
+  .btn:hover:not(:disabled),
+  .btn:active:not(:disabled),
+  .icon-btn:hover:not(:disabled),
+  .icon-btn:active:not(:disabled) { transform: none; }
+  .btn[aria-busy='true']::before { animation-duration: 1ms; }
+}
+
+</style>
+</head>
+<body>
+<nav class="topnav">
+  <span class="wordmark">澄 · 私人知识库</span>
+  <a href="#">收件箱</a>
+  <a href="#">订阅</a>
+  <a href="#">设置</a>
+  <span class="spacer"></span>
+  <button class="btn primary">添加订阅</button>
+</nav>
+<div class="page">
+  <h1 class="hero">企业简洁风 · 组件预览</h1>
+  <p class="lede">克制的商务蓝，一切为可读性与信任感让路。层次靠 1px 边框与两级阴影建立，交互只做两件事：hover 上浮 2px、active 缩小 2%。</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="icon-box">◈</div>
+      <h2>多源聚合</h2>
+      <p>把 RSS、Atom 与抓取源汇到一处，按时间而不是按站点组织。</p>
+    </div>
+    <div class="card">
+      <div class="icon-box">✦</div>
+      <h2>AI 分级</h2>
+      <p>每篇按重要度分成必读 / 值得 / 噪音，强调色只用来标记判断本身。</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Button</h3>
+    <div class="panel">
+      <div class="row"><span class="tag">Primary</span>
+        <button class="btn primary">添加订阅</button>
+        <button class="btn primary" disabled>不可用</button>
+        <button class="btn primary" aria-busy="true">保存中</button>
+        <button class="btn primary" onclick="var b=this;b.setAttribute(&quot;aria-busy&quot;,&quot;true&quot;);setTimeout(function(){b.removeAttribute(&quot;aria-busy&quot;)},1600)">点我试 loading（宽度不变）</button>
+      </div>
+      <div class="row"><span class="tag">Secondary</span>
+        <button class="btn">重试失效源</button>
+        <button class="btn">取消</button>
+        <button class="btn" disabled>导出 OPML</button>
+        <button class="btn ghost">导入 OPML</button>
+      </div>
+      <div class="row"><span class="tag">切换态</span>
+        <button class="btn active" aria-pressed="true">退出管理</button>
+        <button class="btn">管理</button>
+      </div>
+      <div class="row"><span class="tag">危险</span>
+        <button class="btn danger">取消订阅</button>
+        <button class="btn danger solid">确认删除</button>
+        <button class="btn tiny">紧凑档 30px</button>
+      </div>
+      <div class="row"><span class="tag">尺寸</span>
+        <button class="btn primary">36 · 默认</button>
+        <button class="btn primary lg">40 · .lg</button>
+        <button class="btn primary xl">48 · .xl</button>
+        <button class="btn primary pill">胶囊</button>
+      </div>
+      <div class="row"><span class="tag">焦点</span>
+        <button class="btn">按 Tab 看我</button>
+        <button class="btn primary">2px offset 的环</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Form Input</h3>
+    <div class="panel" style="max-width:640px">
+      <label class="label" for="f">订阅源地址</label>
+      <input class="demo" id="f" placeholder="https://example.com/feed.xml" />
+      <div class="help">支持 RSS / Atom；留空则自动探测首页里的 feed 链接。</div>
+      <div style="height:16px"></div>
+      <label class="label" for="g">搜索</label>
+      <input class="demo" id="g" placeholder="搜索标题、摘要或正文">
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Status Badge</h3>
+    <div class="panel">
+      <div class="row">
+        <span class="badge">必读</span>
+        <span class="badge ok">已同步</span>
+        <span class="badge warn">抓取失败</span>
+        <span class="badge hint">值得</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Colors</h3>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#1e40af"></div><div class="nm"><b>Corporate Blue</b>#1e40af · 主行动</div></div>
+      <div class="sw"><div class="chip" style="background:#3b82f6"></div><div class="nm"><b>Action Blue</b>#3b82f6 · 焦点环</div></div>
+      <div class="sw"><div class="chip" style="background:#f8fafc"></div><div class="nm"><b>Slate Mist</b>#f8fafc · 画布</div></div>
+      <div class="sw"><div class="chip" style="background:#ffffff"></div><div class="nm"><b>White Card</b>#ffffff · 卡片</div></div>
+      <div class="sw"><div class="chip" style="background:#64748b"></div><div class="nm"><b>Slate</b>#64748b · 次要文字</div></div>
+      <div class="sw"><div class="chip" style="background:#10b981"></div><div class="nm"><b>Confirm Green</b>#10b981 · 成功</div></div>
+      <div class="sw"><div class="chip" style="background:#c559f0"></div><div class="nm"><b>Hint Violet</b>#c559f0 · 极少用</div></div>
+      <div class="sw"><div class="chip" style="background:#0f172a"></div><div class="nm"><b>Text</b>#0f172a · 正文</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Type Scale</h3>
+    <div class="panel">
+      <table class="type">
+        <tr><td style="font-size:36px;font-weight:700;letter-spacing:-0.01em;line-height:1.2">标题 36 / 700</td><td class="meta">--text-h1</td></tr>
+        <tr><td style="font-size:30px;font-weight:600;line-height:1.25">标题 30 / 600</td><td class="meta">--text-heading</td></tr>
+        <tr><td style="font-size:20px;font-weight:600;line-height:1.4">小标题 20 / 600</td><td class="meta">--text-subheading</td></tr>
+        <tr><td style="font-size:16px;line-height:1.65">正文 16 / 400 / 1.65 —— 这是长段落的样子，行长控制在 70 字符内，读起来不急。</td><td class="meta">--text-body</td></tr>
+        <tr><td style="font-size:14px;line-height:1.6;color:var(--fg-faint)">次要正文 14 / 400 / 1.6</td><td class="meta">--text-body-sm</td></tr>
+        <tr><td style="font-size:12px;font-weight:500;letter-spacing:0.04em;text-transform:uppercase">LABEL 12 / 500 / 0.04em</td><td class="meta">--text-label</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Elevation</h3>
+    <div class="grid">
+      <div class="card" style="transform:none"><h2 style="font-size:16px">Rest</h2><p>0 1px 2px rgba(15,23,42,.06)</p></div>
+      <div class="card" style="box-shadow:var(--shadow);transform:none"><h2 style="font-size:16px">Hover</h2><p>0 4px 12px rgba(15,23,42,.08)</p></div>
+    </div>
+  </div>
+</div>
+<div style="position:fixed;right:24px;bottom:24px;display:flex;gap:8px">
+  <button class="btn" onclick="var d=document.documentElement;d.dataset.theme=d.dataset.theme===&quot;dark&quot;?&quot;&quot;:&quot;dark&quot;">切换暗色</button>
+</div>
+</body>
+</html>

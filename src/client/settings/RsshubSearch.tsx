@@ -179,7 +179,7 @@ export function RsshubSearch({ onSubscribe, disabled }: Props) {
           </span>
         )}
         <button
-          className="icon-btn tiny"
+          className="icon-btn sm"
           onClick={() => void doRefresh()}
           disabled={busy}
           title="刷新路由库（缓存 7 天）"

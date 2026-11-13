@@ -30,6 +30,10 @@ export interface DayMark {
   week: string;
   /** 这是当月的第一行 —— 上方要多留出月界的位置 */
   monthStart: boolean;
+  /** 月份标签，如 "11月"。**只在 monthStart 那一行渲染** ——
+   * 每行都带月份是噪声（同一个月的二十行重复二十次），
+   * 但只在跨月时标一次，滚动时就永远知道现在是几月。 */
+  month: string;
 }
 
 const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -60,6 +64,7 @@ export function markDays(times: number[]): (DayMark | undefined)[] {
       day: String(d.getDate()).padStart(2, '0'),
       week: WEEK[d.getDay()] ?? '',
       monthStart,
+      month: `${d.getMonth() + 1}月`,
     });
   }
   return out;

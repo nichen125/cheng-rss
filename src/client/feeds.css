@@ -22,7 +22,7 @@
   margin-bottom: 12px;
   flex-wrap: wrap;
 }
-.folder-panel-head strong { font-size: 13.5px; font-weight: 600; }
+.folder-panel-head strong { font-size: 14px; font-weight: 600; }
 .folder-panel-head .muted { font-size: 12px; }
 
 .folder-manage-list {
@@ -50,7 +50,7 @@
   white-space: nowrap;
   max-width: 40ch;
 }
-.folder-manage-list .muted { font-size: 11.5px; }
+.folder-manage-list .muted { font-size: 12px; }
 
 /* ── 手动排序（§15.28）──────────────────────────────────────
  *
@@ -104,7 +104,7 @@
   min-width: 24px;
   padding: 0;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
 }
 
@@ -132,7 +132,7 @@
   gap: 6px;
   padding: 3px 9px 3px 6px;
   border-radius: var(--radius-sm);
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--fg-dim);
 }
 .folder-feed-list li:hover { background: var(--bg-hover); }
@@ -152,7 +152,7 @@
   border-radius: var(--radius-xs);
   background: var(--bg-elev2);
   color: var(--fg-dim);
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: var(--sans);
   cursor: pointer;
 }
@@ -219,8 +219,10 @@
 }
 
 .chip {
-  font-size: 12.5px;
-  padding: 4px 11px;
+  /* 紧凑档 28：padding 算出来的 30 会与同排的分组下拉（28）差 2px */
+  height: var(--btn-h-tiny);
+  font-size: 13px;
+  padding: 0 11px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: none;
@@ -241,7 +243,7 @@
 }
 .chip.active .chip-count { opacity: 0.85; }
 .chip-count {
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   opacity: 0.7;
 }
@@ -255,12 +257,12 @@
   align-items: center;
   gap: 7px;
   padding: 0 2px 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--fg-dim);
 }
 .feed-group-head svg { color: var(--fg-faint); }
-.feed-group-head .muted { font-size: 11.5px; font-weight: 400; }
+.feed-group-head .muted { font-size: 12px; font-weight: 400; }
 
 /* 分组内的行去掉圆角，视觉上连成一块 */
 .feed-group .feed-row { border-radius: 0; margin-bottom: 0; }
@@ -298,9 +300,10 @@
   max-width: 420px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 22px 22px 18px;
-  box-shadow: var(--shadow);
+  /* 企业简洁：卡片类圆角不超过 12，弹窗也是 12 —— 16px 会显得"软" */
+  border-radius: var(--radius);
+  padding: var(--card-padding);
+  box-shadow: var(--shadow-lg);
   max-height: calc(100dvh - 40px);
   overflow-y: auto;
 }
@@ -310,7 +313,7 @@
   margin: 0 0 4px;
 }
 .modal-sub {
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: var(--mono);
   margin: 0 0 18px;
   overflow: hidden;
@@ -320,7 +323,7 @@
 .modal .field { margin-bottom: 14px; }
 .modal .field label {
   display: block;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--fg-dim);
   margin-bottom: 5px;
 }
@@ -387,7 +390,7 @@
 }
 
 .bulk-count {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -401,7 +404,9 @@
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 4px 8px;
+  /* 与同一排的 .btn.tiny（28）齐平 */
+  height: var(--btn-h-tiny);
+  padding: 0 8px;
   outline: none;
   max-width: 150px;
 }
@@ -499,7 +504,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 2px 4px 12px;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
@@ -509,6 +514,9 @@
   align-items: center;
   gap: 9px;
   width: 100%;
+  /* 固定 40：带「M6」标签的那行算出 38，其余 37 —— 差 1px 的参差
+     在竖排导航里最显眼。高度写死，内容只影响水平布局。 */
+  min-height: 40px;
   padding: 8px 9px;
   border: none;
   background: none;
@@ -545,7 +553,7 @@
   gap: 9px;
   flex-wrap: wrap;
 }
-.settings-sec-head .muted { margin: 0; font-size: 12.5px; line-height: 1.55; }
+.settings-sec-head .muted { margin: 0; font-size: 13px; line-height: 1.55; }
 
 .settings-actions { display: flex; gap: 8px; margin: 18px 0 14px; flex-wrap: wrap; }
 
@@ -600,13 +608,13 @@
 .account-main { min-width: 0; }
 .account-name { font-size: 14px; font-weight: 550; }
 .account-mail {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--fg-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.account-role { font-size: 11.5px; color: var(--fg-faint); margin-top: 3px; }
+.account-role { font-size: 12px; color: var(--fg-faint); margin-top: 3px; }
 
 /* ── 订阅页在弹窗里：不再有独立的整页内边距 ─────────────── */
 .settings-body .feeds-page {
@@ -630,6 +638,18 @@
 }
 .settings-body .modal-inset { position: fixed; }
 
+/* 订阅页顶部动作条（v3.0）：一排最多 5 个动作，只有「+ 添加订阅」
+   是前进动作，其余（管理 / 导出 / 导入 / 重试失效源）用幽灵或描边。
+   主次由底色分，不靠"谁有边框"—— 五个描边按钮并排就是五块砖。 */
+.feeds-head .feeds-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+/* 前进动作与集合操作之间留 4px：视觉分组，不加分隔竖线 */
+.feeds-actions .btn.primary { margin-left: 4px; }
+
 /* ── 分组下拉栏（§15.15：≥3 个分组时替换 chip 行）─────────── */
 .folder-filter.select-mode {
   display: flex;
@@ -638,12 +658,12 @@
   padding: 0 0 16px;
   flex-wrap: wrap;
 }
-.folder-label { font-size: 12.5px; color: var(--fg-faint); }
+.folder-label { font-size: 13px; color: var(--fg-faint); }
 .folder-select {
-  /* 与 .chip 同高（30px = 4px 内衬 ×2 + 20px 行高 + 1px 边框 ×2），
+  /* 与 .chip 同高，取紧凑档 28（v6.2 的三档：36 / 28 / 16）。
      换过形态但这一行的高度不变，列表不会因为切形态而上下跳。 */
-  height: 30px;
-  font-size: 12.5px;
+  height: var(--btn-h-tiny);
+  font-size: 13px;
   padding: 0 9px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
@@ -654,9 +674,11 @@
 }
 .folder-filter.select-mode .muted { font-size: 12px; }
 
-/* 添加订阅时顺手选分组的下拉：与输入框同高，不抢主按钮的视觉重量 */
+/* 添加订阅时顺手选分组的下拉：与输入框同高，不抢主按钮的视觉重量。
+   v6.2：38 → 36 —— 同一行里的输入框（.add-row 内）与按钮都是 36，
+   只有这个下拉是 38，整行就会差 2px。 */
 .add-folder {
-  height: 38px;
+  height: 36px;
   font-size: 13px;
   padding: 0 9px;
   border-radius: var(--radius-sm);
@@ -694,7 +716,7 @@
   .settings-nav-head {
     padding: 0 10px 0 2px;
     flex-shrink: 0;
-    font-size: 12.5px;
+    font-size: 13px;
   }
   /* 顶部横条里标题文字没必要占位置，留个 × 就够 */
   .settings-nav-head > span { display: none; }
@@ -703,7 +725,7 @@
     width: auto;
     flex-shrink: 0;
     padding: 7px 10px;
-    font-size: 12.5px;
+    font-size: 13px;
     min-height: 36px;
   }
   .settings-nav-label { flex: none; }
@@ -741,12 +763,30 @@
  * 与设计稿的三层底色约定一致（--bg-sunken 退后、--bg 内容、--bg-elev 浮起），
  * 不靠加粗边框区分层次。
  */
+/* v6.0 卡片（企业简洁风）：白底 + 1px #e5e7eb + 12px + 24px 内边距，
+   阴影只有 0 1px 2px 一级。hover 时升到 0 4px 12px 并上浮 2px。
+   原来这里是 bg-sunken 底 + border-soft 边，和画布同色 ——
+   卡片根本没有"浮起来"，整页看起来是一张灰纸。 */
 .settings-card {
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  padding: 16px 18px;
-  margin-bottom: 16px;
-  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--card-padding);
+  margin-bottom: var(--sp-16);
+  background: var(--bg);
+  box-shadow: var(--shadow-sm);
+  transition:
+    box-shadow 150ms ease-out,
+    transform 150ms ease-out,
+    border-color 150ms ease-out;
+}
+.settings-card:hover {
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+  border-color: #dbe1e9;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-card { transition-duration: 1ms; }
+  .settings-card:hover { transform: none; }
 }
 
 .settings-card-head {
@@ -759,7 +799,7 @@
 
 .settings-card-head h3 {
   margin: 0;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -789,7 +829,7 @@
   padding: 13px 18px;
   cursor: pointer;
   list-style: none;
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 
 .settings-fold > summary::-webkit-details-marker { display: none; }
@@ -797,7 +837,7 @@
 
 .settings-fold > summary h3 {
   margin: 0;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -821,7 +861,7 @@
 }
 
 .settings-fold > summary:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.06)); }
-.settings-fold[open] > summary { border-bottom: 1px solid var(--border); border-radius: 10px 10px 0 0; }
+.settings-fold[open] > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
 
 /* 展开后的内容自己带内边距 —— summary 是 0 内边距的卡，正文不能贴边。 */
 .settings-fold > *:not(summary) { margin-left: 18px; margin-right: 18px; }
@@ -845,11 +885,11 @@
   align-items: center;
   gap: 8px;
   padding: 9px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--bg-active);
   border-left: 3px solid var(--fg-faint);
   margin-bottom: 12px;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .ai-level-dot {
@@ -885,7 +925,7 @@
 .ai-test {
   margin-top: 10px;
   padding: 10px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--bg-active);
   border-left: 3px solid var(--fg-faint);
 }
@@ -896,7 +936,7 @@
   display: flex;
   align-items: baseline;
   gap: 7px;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .ai-test-dot {
   width: 7px;
@@ -912,7 +952,7 @@
 /* kind 是给"搜索这段报错"用的，不是给人读的：等宽 + 弱化，别抢结论 */
 .ai-test-kind {
   color: var(--fg-faint);
-  font-size: 11px;
+  font-size: 12px;
   font-family: var(--mono, ui-monospace, monospace);
   flex-shrink: 0;
 }
@@ -925,7 +965,7 @@
   padding: 0;
 }
 .ai-test-kv > div { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
-.ai-test-kv dt { color: var(--fg-faint); font-size: 11px; }
+.ai-test-kv dt { color: var(--fg-faint); font-size: 12px; }
 .ai-test-kv dd {
   margin: 0;
   font-size: 12px;
@@ -949,21 +989,21 @@
 .ai-kv > div { min-width: 0; }
 .ai-kv dt {
   color: var(--fg-faint);
-  font-size: 11.5px;
+  font-size: 12px;
   margin-bottom: 3px;
   letter-spacing: 0.01em;
 }
 .ai-kv dd { margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
 /* 括号里的补充（"（失败 332）""（532 篇失败）"）比主数字再退一档：
    同一行里两个 13px 数字会让人以为是并列的两个指标。 */
-.ai-kv dd .muted { font-size: 11.5px; }
+.ai-kv dd .muted { font-size: 12px; }
 
 /* 金额两格放大一档（v2.8）。四格同字号时，"今日花费 $0.916 / $1"
  * 与"今日调用 472 次"权重一样，用户得逐格读才知道哪格在回答
  * "我还能花多少"。金额用 20px 半粗，额度退成 12px 灰 —— 一眼是数字。 */
 .ai-kv-primary dd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; }
 .ai-kv-num {
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: -0.01em;
@@ -1013,7 +1053,7 @@
   box-sizing: border-box;
   padding: 7px 10px;
   font-size: 13px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
@@ -1091,7 +1131,7 @@
   min-width: 0;
   height: 26px;
   padding: 0 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   border-radius: var(--radius-xs);
   background: var(--bg);
 }
@@ -1198,7 +1238,7 @@
 
 .hl-note {
   margin: 5px 0 0 14px;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--fg-dim);
   white-space: pre-wrap;
@@ -1210,7 +1250,7 @@
   background: transparent;
   color: var(--fg-faint);
   font: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 0;
   cursor: pointer;
 }
@@ -1226,7 +1266,7 @@
   background: var(--bg);
   color: var(--fg);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.55;
   padding: 6px 8px;
 }
@@ -1241,13 +1281,13 @@
 .hl-edit-actions .spacer { flex: 1; }
 
 .hl-orphan-head {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--fg-faint);
   margin: 4px 0 2px;
 }
 
 .hl-empty {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--fg-faint);
   line-height: 1.6;
 }
@@ -1276,8 +1316,8 @@
   padding: 6px 9px 7px;
   border-left: 2px solid var(--accent);
   background: var(--bg-hover);
-  border-radius: 0 6px 6px 0;
-  font-size: 12.5px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--fg-dim);
 }
@@ -1286,10 +1326,10 @@
   display: inline-block;
   margin-right: 6px;
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--accent);
   color: var(--bg);
-  font-size: 9.5px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
   vertical-align: 1px;
@@ -1331,10 +1371,10 @@
 .digest-gen-msg {
   margin: 8px 12px 0;
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-hover);
   color: var(--fg-dim);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -1350,7 +1390,7 @@
   margin: 8px 12px 0;
   padding: 9px 10px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
 }
 
@@ -1365,7 +1405,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--fg-dim);
 }
 
@@ -1411,7 +1451,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
 }
@@ -1467,14 +1507,14 @@
 
 .digest-date {
   grid-area: date;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
 }
 
 .digest-date-meta {
   grid-area: meta;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-faint);
   white-space: nowrap;
 }
@@ -1510,7 +1550,7 @@
 
 .digest-title {
   margin: 0 0 8px;
-  font-size: 25px;
+  font-size: 24px;
   line-height: 1.32;
   letter-spacing: -0.01em;
 }
@@ -1530,7 +1570,7 @@
   border-left: 2px solid var(--accent);
 }
 .digest-points li {
-  font-size: 14.5px;
+  font-size: 14px;
   line-height: 1.7;
   font-weight: 600;
   color: var(--fg);
@@ -1538,7 +1578,7 @@
 .digest-points li + li { margin-top: 4px; }
 
 .digest-body {
-  font-size: 15.5px;
+  font-size: 16px;
   line-height: 1.78;
 }
 .digest-body h2 {
@@ -1547,7 +1587,7 @@
 }
 .digest-body h3 {
   margin: 20px 0 8px;
-  font-size: 15.5px;
+  font-size: 16px;
 }
 .digest-body p { margin: 0 0 13px; }
 .digest-body ul { margin: 0 0 13px; padding-left: 20px; }
@@ -1570,7 +1610,7 @@
   background: rgba(96, 165, 250, 0.16);
   color: var(--accent);
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 1.5;
   vertical-align: 1px;
@@ -1600,7 +1640,7 @@
   align-items: center;
   gap: 8px;
   margin: 0 0 14px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--fg-dim);
 }
@@ -1609,7 +1649,7 @@
   border-radius: var(--radius-pill);
   background: var(--bg-hover);
   color: var(--fg-faint);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   line-height: 1.6;
@@ -1632,7 +1672,7 @@
 
 .digest-cluster-index {
   padding-top: 1px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -1642,21 +1682,21 @@
 
 .digest-cluster-title {
   margin: 0;
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.5;
 }
 
 .digest-cluster-meta {
   margin-top: 2px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
 }
 
 .digest-cluster-summary {
   margin: 6px 0 0;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--fg-dim);
 }
@@ -1679,10 +1719,10 @@
   display: inline-block;
   margin-right: 6px;
   padding: 0 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--bg-hover);
   color: var(--fg-faint);
-  font-size: 10.5px;
+  font-size: 12px;
   letter-spacing: 0.03em;
 }
 
@@ -1714,14 +1754,14 @@
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   background: var(--bg-sunken);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.65;
 }
 .digest-wr li + li { margin-top: 6px; }
 .digest-wr-title { flex: 1; min-width: 0; }
 .digest-wr-meta {
   color: var(--fg-faint);
-  font-size: 11.5px;
+  font-size: 12px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -1745,7 +1785,7 @@
   margin-top: 20px;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--bg-elev);
   box-shadow: var(--shadow);
   font-size: 13px;
@@ -1769,13 +1809,13 @@
 .digest-cite-card p { margin: 0 0 6px; color: var(--fg-dim); }
 
 .digest-cite-card-meta {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--fg-faint);
 }
 
 .digest-cite-card-conflict {
   margin-top: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--fg-faint);
 }
 
@@ -1788,7 +1828,7 @@
 .prompt-area {
   width: 100%;
   font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.55;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
@@ -1854,7 +1894,7 @@
 .sum-fail {
   margin: 10px 0 22px;
   padding: 10px 12px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: color-mix(in oklab, var(--must) 10%, transparent);
   border: 1px solid color-mix(in oklab, var(--must) 30%, transparent);
   font-size: 13px;
@@ -1925,7 +1965,7 @@
   gap: 12px;
   margin-top: 4px;
   color: var(--fg-faint);
-  font-size: 11.5px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1935,7 +1975,7 @@
 .selftest-hint > summary {
   cursor: pointer;
   color: var(--worth);
-  font-size: 11.5px;
+  font-size: 12px;
   width: fit-content;
 }
 .selftest-hint > div {
@@ -1943,7 +1983,7 @@
   padding: 6px 9px;
   border-left: 2px solid var(--worth);
   background: color-mix(in srgb, var(--warn) 6%, transparent);
-  border-radius: 0 5px 5px 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   font-size: 12px;
   color: var(--fg-soft, var(--fg));
 }
@@ -1952,7 +1992,7 @@
   display: inline-block;
   padding: 1px 7px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 18px;
   white-space: nowrap;
 }
@@ -1973,7 +2013,7 @@
   white-space: normal;
   max-width: 240px;
   margin: 3px 0 0;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -1987,7 +2027,7 @@
 }
 .selftest-retry-note {
   color: var(--fg-faint);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
   max-width: 56ch;
 }
@@ -2004,5 +2044,5 @@
   white-space: pre-wrap;
   word-break: break-all;
   background: var(--bg-sunken);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }

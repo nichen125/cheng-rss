@@ -153,7 +153,7 @@ function Dialog(props: { req: ConfirmRequest; settle: (v: boolean) => void }) {
           <button
             type="button"
             ref={confirmRef}
-            className={req.danger ? 'btn danger' : 'btn primary'}
+            className={req.danger ? 'btn danger solid' : 'btn primary'}
             onClick={() => settle(true)}
           >
             {req.confirmText ?? '确定'}

@@ -5,117 +5,224 @@
  * 构建链路，而本项目最终只用到 8 个组件。手写 500 行 CSS 换来零构建
  * 依赖 + 首屏 14KB 样式，这个交换在小项目里更划算。
  *
- * 设计约束见 docs/specs/design-ui.md。四条最容易在重构时被破坏的：
- *   ① 亮色是主色，暗色跟随系统；三层底色靠明度差分隔，不靠粗线。
- *   ② 强调色只用三处：主按钮、当前导航项、正文链接。其余全是灰。
+ * 设计约束见 docs/specs/design-ui.md。五条最容易在重构时被破坏的：
+ *   ① 只用一种蓝（#1e40af）。#3b82f6 只做焦点环与选中高亮，不做大填充。
+ *   ② 底色两级：画布 #f8fafc、卡片 #ffffff；层次靠 1px 边框 + 两级阴影。
  *   ③ 时间是结构：列表左侧保留日号栏，相对时间降为行内注脚。
- *   ④ 两种字体两种任务：扫描用无衬线，阅读用衬线。
+ *   ④ 正文 16px / 1.65；UI 文字 14px / 500；层级靠字重与字号。
+ *   ⑤ 交互动效只有两件事：hover 上浮 ≤2px、active 缩到 .98，全部 150ms ease-out。
  *
- * 三条硬预算没变：正文默认 80ch（可调 64/96）、列表一屏 8~10 条、动效不超过 200ms。
+ * 三条硬预算：正文默认 80ch（可调 64/96）、列表一屏 8~10 条（实测两行标题 88px、
+ * 单行标题 68px，1440×960 下 8 条）、所有动效不超过 200ms（本套统一 150ms）。
  */
 
 :root {
-  /* ── 配色（设计方案 §3）────────────────────────────────────
+  /* ── 色彩（企业简洁风 / Enterprise Clean）─────────────────────
    *
-   * 亮色是主色。理由不是审美偏好，而是使用场景：这个工具的正文
-   * 超过七成是在白天、办公室、外接屏上读的，暗底白字在那种环境下
-   * 只是看起来"酷"，长时间读并不舒服。
+   * 只用一种蓝：#1e40af。主按钮、链接、当前导航项、关键图标都是它。
+   * #3b82f6 是**焦点环与选中高亮**专用，不做大面积填充 ——
+   * 同一页面出现两种"主色蓝"是这套体系最容易犯的错。
    *
-   * 三层底色，靠明度差而不是粗线条分隔：
-   *   --bg-sunken  侧栏 / 阅读区桌面（最暗的一层，退后）
-   *   --bg         列表 / 内容（白）
-   *   --bg-elev    卡片、弹窗、纸（与 bg 同色，靠阴影浮起）
-   *
-   * 强调色只用在三处：主按钮、当前导航项、正文链接。其余全部是灰。
-   * 一个界面里强调色出现得越少，它指的地方才越明确。
+   * 底色只有两级：Slate Mist #f8fafc 是画布，White #ffffff 是卡片。
+   * 层次靠 1px 边框 + 两级阴影建立，不靠重阴影，也不靠明度渐变。
    */
-  --bg: #ffffff;
-  --bg-sunken: #f7f8fa;
-  --bg-elev: #ffffff;
-  --bg-elev2: #f3f5f8;
-  --bg-hover: #f1f3f7;
-  --bg-active: #e8ecf2;
-  --fg: #14171c;
-  --fg-dim: #58616e;
-  --fg-faint: #8c95a3;
-  --border: #e4e8ee;
-  --border-soft: #eef1f5;
-  --accent: #0f766e;
-  --accent-hover: #0d6a63;
-  --accent-soft: #e7f3f1;
+  --bg: #ffffff;            /* 卡片 / 列表 / 内容面 */
+  --bg-sunken: #f8fafc;     /* 页面画布、侧栏、阅读区桌面 */
+  --bg-elev: #ffffff;       /* 弹窗 / 抬升面板 */
+  --bg-elev2: #f1f5f9;      /* 输入框、分段控件底 */
+  --bg-hover: #f1f5f9;
+  --bg-active: #e2e8f0;
+  --bg-selected: #eff6ff;   /* 列表选中行：浅蓝一档 */
+
+  --fg: #0f172a;            /* 正文 */
+  --fg-dim: #334155;        /* 标题、次级正文 */
+  --fg-faint: #64748b;      /* 说明、元信息、图标描边（4.76:1，过 AA） */
+  --fg-soft: #475569;
+
+  --border: #e5e7eb;        /* 卡片描边 */
+  --border-soft: #f1f5f9;   /* 行分隔 */
+  --border-input: #d1d5db;  /* 输入框描边（比卡片深一档） */
+  --line: var(--border);
+  --line-soft: var(--border-soft);
+  --bg-3: #e2e8f0;          /* 骨架条中间色 */
+
+  /* 主色与语义色 */
+  --accent: #1e40af;        /* Corporate Blue：主行动、链接、关键图标 */
+  --accent-hover: #1e3a8a;
+  --accent-soft: #eff6ff;   /* 浅蓝底：选中导航、状态徽标 */
   --accent-fg: #ffffff;
-  /* 含义色：只在"必读 / 值得"上出现 */
-  --must: #c2410c;
-  --worth: #a16207;
-  --normal: #9aa3b0;
-  --noise: #d8dde5;
-  --ok: #15803d;
-  --warn: #a16207;
-  --err: #b42318;
-  /* 圆角随尺寸单调：小控件 4、控件 8、容器 12、纸/弹窗 16 */
-  --radius-xs: 4px;
+  --accent-dim: #eff6ff;
+  --focus-ring: #3b82f6;    /* Action Blue：只用于焦点环与高亮 */
+  --ring-offset: #f8fafc;   /* 焦点环与元素之间的 2px 留白 */
+
+  --ok: #10b981;            /* Confirm Green */
+  --warn: #d97706;
+  --err: #dc2626;
+  --must: #1e40af;          /* 分级「必读」= 主色 */
+  --worth: #64748b;         /* 分级「值得」= Slack（一次只用一种蓝） */
+  --normal: #94a3b8;
+  --noise: #d1d5db;
+  --violet: #c559f0;        /* Hint Violet：极少使用 */
+
+  /* ── 圆角 ──
+     卡片 12、按钮 8、输入 8、徽标 999。不用直角，也不超过 16。 */
+  --radius-xs: 4px;   /* 小于 24px 的控件专用（规范：这类控件圆角 4） */
   --radius-sm: 8px;
   --radius: 12px;
   --radius-lg: 16px;
-  /* 胶囊写成 999px 而不是固定值：高度变化时不会露出直角（§15.12） */
   --radius-pill: 999px;
-  /* 「纸」：亮色下纸是纯白，桌面必须暗一阶，纸才浮得起来 */
-  --paper-bg: #ffffff;
-  --paper-line: #e9edf3;
-  --paper-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 32px rgba(16, 24, 40, 0.06);
-  --desk-bg: #f7f8fa;
-  /* 三栏宽度（§15.16，实测收敛）：218/400 是按最坏情况定的，
-     收到 196/368 之后最长标签与 2 行标题仍然排得下，多出来的宽度
-     全部让给正文区。下限见 mobile.css 的窄屏规则。 */
-  --sidebar-w: 196px;
-  --list-w: 368px;
-  /* 两种字体，两种任务（设计方案 §2.3）：
-       · 无衬线 —— 列表、导航、控件、元信息，任务是扫过去
-       · 衬线   —— 正文，任务是停下来读
-     只用系统字族，不引外部字体：多一次字体请求就是首屏多一次 FOUT。 */
-  --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong,
-           simsun, Georgia, "Times New Roman", serif;
-  --sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
-          -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font: var(--sans);
+
+  /* ── 阴影：只有两级 + 一级抬升 ──
+     rest 0 1px 2px、hover 0 4px 12px、弹窗 0 12px 32px。
+     没有 shadow-2xl 那一类重阴影。 */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
+  --paper-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+
+  /* ── 排版：Inter，缺失时回落系统 UI 字体 ──
+     层级靠 400/500/600/700 四档字重与字号建立，不靠颜色堆叠。 */
+  /* ── 字族：三条可选栈 + 正文三档（v6.4）─────────────────
+   * 不打包字体（§4.1），所以每个选择都是**字族栈**而不是单个字体名：
+   * 装不到的那一档自动落到下一档，不会出现"选完变成系统宋体"。
+   *
+   * 界面默认 system：macOS 落到苹方、Windows 落到 Segoe UI + 雅黑 ——
+   * 这是"和系统一致"的那一档，也是零风险默认值。
+   */
+  --font-ui-system: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+                    "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+                    "Microsoft YaHei", system-ui, sans-serif;
+  --font-ui-noto: "Source Han Sans SC", "Noto Sans SC", "Noto Sans CJK SC",
+                  "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+                  system-ui, sans-serif;
+  --font-ui-yahei: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Segoe UI",
+                   system-ui, sans-serif;
+
+  --font-body-serif: "Source Han Serif SC", "Noto Serif SC", "Noto Serif CJK SC",
+                     "Songti SC", STSong, "华文宋体", Georgia, serif;
+  --font-body-sans: var(--font-ui-system);
+  --font-body-kai: "LXGW WenKai", "霞鹜文楷", "Kaiti SC", KaiTi, STKaiti,
+                   "楷体", "华文楷体", "Songti SC", serif;
+
+  /* 生效值：由 <html data-ui-font> 与 <html data-body-font> 切换。
+     默认走思源（与 DEFAULT_PREFS.uiFont = noto 对齐）；
+     属性缺失时（首帧、JS 未执行）也必须是同一档，避免闪一下再变。 */
+  --font-sans: var(--font-ui-noto);
+  --serif: var(--font-body-serif);
+  --font: var(--font-sans);
+  --sans: var(--font-sans);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --shadow: 0 2px 6px rgba(16, 24, 40, 0.06), 0 12px 28px rgba(16, 24, 40, 0.08);
+
+  --text-display: 60px;      --leading-display: 1.1;    --tracking-display: -0.02em;
+  --text-h1: 36px;           --leading-h1: 1.2;         --tracking-h1: -0.01em;
+  --text-heading: 30px;      --leading-heading: 1.25;
+  --text-subheading: 20px;   --leading-subheading: 1.4;
+  --text-body-lg: 18px;      --leading-body-lg: 1.65;
+  --text-body: 16px;         --leading-body: 1.65;
+  --text-body-sm: 14px;      --leading-body-sm: 1.6;
+  --text-label: 12px;        --leading-label: 1.4;      --tracking-label: 0.04em;
+
+  /* ── 间距：8px 基数 ── */
+  --sp-8: 8px;  --sp-12: 12px; --sp-16: 16px; --sp-24: 24px;
+  --sp-32: 32px; --sp-48: 48px; --sp-64: 64px; --sp-96: 96px; --sp-128: 128px;
+
+  /* ── 布局 ── */
+  --page-max-width: 1120px;
+  --card-padding: 24px;
+  --element-gap: 16px;
+
+  /* 「纸」：阅读区仍然是一张浮起的白纸 */
+  --paper-bg: #ffffff;
+  --paper-line: #e5e7eb;
+  --desk-bg: #f8fafc;
+
+  /* 三栏宽度（§15.16，实测收敛）。
+   *
+   * v6.7：--list-w = clamp(300px, 用户选的值, 视口 − 侧栏 − 656px)。
+   *
+   * 三段各管一件事：
+   *   300px  —— 下限。再窄的话 46px 的日号栏之后只剩 250px，
+   *              标题每行放不下 15 个字，列表就不成其为列表了。
+   *   用户值 —— 368 / 456 / 544，由 applyPrefs 写到 <html>。
+   *   656px  —— 正文的预留（正文列 574 + 左右内边距 82）。
+   *              意思是"列表先让，正文后让"。
+   *
+   * 断点不再覆盖 --list-w：v6.6 那样写（≤1220 硬给 344）等于把用户的
+   * 选择整个丢掉 —— 用户在 1200 的笔记本上切三档毫无反应。
+   * 那正是「不论什么档位宽度不变」的成因。现在断点只调 --sidebar-w。
+   *
+   * 由此带来的**已知行为**：视口 ≤1240 时三档会收敛到同一个值，
+   * 因为再宽就挤掉正文了。这是物理约束，不是 bug —— 见 §5.3。 */
+  --sidebar-w: 196px;
+  --list-w-user: 368px;
+  --list-w: clamp(300px, var(--list-w-user), calc(100vw - var(--sidebar-w) - 656px));
+
   color-scheme: light;
 }
+
+/* ── 字族切换（v6.4）───────────────────────────────────────
+ * 挂在 <html> 上而不是 .reader 上：界面字体要影响侧栏、列表、弹窗，
+ * 只挂在阅读区会让弹窗保持旧字体，看起来像两套主题拼在一起。
+ * 属性由 reader-prefs.ts 的 applyPrefs 写入。 */
+html[data-ui-font='system'] { --font-sans: var(--font-ui-system); }
+html[data-ui-font='noto'] { --font-sans: var(--font-ui-noto); }
+html[data-ui-font='yahei'] { --font-sans: var(--font-ui-yahei); }
+html[data-body-font='sans'] { --serif: var(--font-body-sans); }
+html[data-body-font='kai'] { --serif: var(--font-body-kai); }
 
 /* 暗色跟随系统。不是主色，但必须完整 —— 夜里看长文的人会切换系统主题，
    那时界面跟不上就会刺眼。 */
 @media (prefers-color-scheme: dark) {
+  /* 暗色不是主色，但必须完整 —— 只换变量，不动任何结构。
+     色阶沿用同一套 slate 家族：画布 #0f172a、卡片 #1e293b。 */
   :root {
-    --bg: #15171c;
-    --bg-sunken: #0f1115;
-    --bg-elev: #1a1d23;
-    --bg-elev2: #1f232a;
-    --bg-hover: #22262e;
-    --bg-active: #2a2f38;
-    --fg: #e9ecf1;
-    --fg-dim: #a4adba;
-    --fg-faint: #727c8a;
-    --border: #2a2f38;
-    --border-soft: #20242b;
-    --accent: #4fd1c5;
-    --accent-hover: #6bded3;
-    --accent-soft: rgba(79, 209, 197, 0.12);
-    --accent-fg: #0f1115;
-    --must: #f97362;
-    --worth: #d9a441;
-    --normal: #6b7482;
-    --noise: #333a45;
-    --ok: #4ade80;
-    --warn: #d9a441;
-    --err: #f97362;
-    --paper-bg: #1a1d23;
-    --paper-line: #242830;
-    --paper-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px rgba(0, 0, 0, 0.35);
-    --desk-bg: #0f1115;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 12px 28px rgba(0, 0, 0, 0.35);
+    --bg: #1e293b;
+    --bg-sunken: #0f172a;
+    --bg-elev: #1e293b;
+    --bg-elev2: #243245;
+    --bg-hover: #243245;
+    --bg-active: #2f3f57;
+    --bg-selected: #1e3a5f;
+
+    --fg: #f1f5f9;
+    --fg-dim: #cbd5e1;
+    --fg-faint: #94a3b8;
+    --fg-soft: #e2e8f0;
+
+    --border: #334155;
+    --border-soft: #243245;
+    --border-input: #475569;
+    --line: var(--border);
+    --line-soft: var(--border-soft);
+    --bg-3: #334155;
+
+    /* 暗底上 #1e40af 只有 2.1:1，主色必须提亮；
+       #60a5fa 在 #1e293b 上是 6.9:1，长文夜间也稳。 */
+    --accent: #60a5fa;
+    --accent-hover: #93c5fd;
+    --accent-soft: rgba(96, 165, 250, 0.14);
+    --accent-fg: #0b1220;
+    --accent-dim: rgba(96, 165, 250, 0.12);
+    --focus-ring: #3b82f6;
+    --ring-offset: #0f172a;
+
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --must: #93c5fd;
+    --worth: #94a3b8;
+    --normal: #64748b;
+    --noise: #475569;
+
+    --paper-bg: #1e293b;
+    --paper-line: #334155;
+    --paper-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --desk-bg: #0f172a;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
+
     color-scheme: dark;
   }
 }
@@ -125,12 +232,18 @@
 html, body, #root { height: 100%; margin: 0; }
 
 body {
-  background: var(--bg);
+  /* 画布是 Slate Mist，卡片才是白 —— 白卡片才能"浮"起来 */
+  background: var(--bg-sunken);
   color: var(--fg);
   font-family: var(--font);
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 16px;          /* 正文 16px 起，行高 1.65 */
+  line-height: 1.65;
   -webkit-font-smoothing: antialiased;
+  /* v2.9：关掉字重合成。系统里的中文衬线（华文宋体 / 宋体）只有 Regular
+     一个字重，写成 font-weight 500/600 时浏览器会造**伪粗体**：笔画被
+     横向加厚、字面糊成一块 —— 这是「看着廉价」最直接的一条来源。
+     关掉之后衬线标题靠字号与字距建立层级，而不是靠假粗。 */
+  font-synthesis-weight: none;
   overflow: hidden;
 }
 
@@ -141,7 +254,7 @@ a:hover { text-decoration: none; }
 
 kbd {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 12px;
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: var(--bg-elev2);
@@ -171,126 +284,384 @@ button {
 }
 button:disabled { opacity: 0.45; cursor: default; }
 
+/* ── 按钮体系（v6.0：企业简洁风）─────────────────────────────
+ *
+ * 一条规则决定所有按钮的长相：**只用一种蓝**。
+ *   .btn.primary  实心 #1e40af，白字，无描边 —— 主行动，一屏一个
+ *   .btn          白底 + 1px #d1d5db + 深灰字 —— 次要动作
+ *   .btn.ghost    无底无框 —— 低频集合级操作
+ *   .btn.ink      墨底 —— 纸面语境（阅读区正文尾部）
+ *   .btn.danger   红字（行内）/ .danger.solid 实心红（确认弹窗）
+ *
+ * 交互只做两件事，与规格一致：
+ *   hover  —— 上浮 2px + 阴影升到 0 4px 12px
+ *   active —— 缩放 0.98 并取消上浮
+ * 动效 150ms ease-out，超过 200ms 开始显得轻浮。
+ *
+ * 焦点环必须带 2px offset（0 0 0 2px 画布色, 0 0 0 4px #3b82f6）：
+ * 没有 offset 的焦点环会贴在描边上，等于没有。这是无障碍底线。
+ */
+
+:root {
+  --btn-h: 36px;
+  --btn-h-lg: 40px;
+  --btn-h-xl: 48px;
+  --btn-h-tiny: 28px;   /* 紧凑档：批量栏、行内动作 */
+  --btn-px: 16px;
+  --btn-px-lg: 20px;
+  --btn-px-xl: 24px;
+  --btn-px-tiny: 10px;
+  --btn-radius: var(--radius-sm);   /* 8px */
+  --btn-fs: 14px;
+  --btn-fs-lg: 14px;
+  --btn-fs-xl: 16px;
+  --btn-fs-tiny: 12px;
+  --btn-t: 150ms;
+  --btn-ease: ease-out;
+  --btn-brand: var(--accent);
+  --btn-brand-hover: var(--accent-hover);
+}
+
 .btn {
+  /* 可覆盖变量 —— 变体只碰这一段 */
+  --btn-bg: var(--bg);
+  --btn-bg-hover: var(--bg-sunken);
+  --btn-bg-press: var(--bg-active);
+  --btn-fg: var(--fg);
+  --btn-bd: var(--border-input);
+  --btn-bd-hover: #94a3b8;
+  --btn-shadow: var(--shadow-sm);
+  --btn-shadow-hover: var(--shadow);
+  --btn-lift: -2px;
+  --btn-loading-fg: var(--btn-fg);
+
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 32px;
-  font-size: 13px;
-  color: var(--fg-dim);
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0 12px;
+  height: var(--btn-h);
+  padding: 0 var(--btn-px);
+  font-family: var(--font-sans);
+  font-size: var(--btn-fs);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--btn-fg);
+  background-color: var(--btn-bg);
+  border: 1px solid var(--btn-bd);
+  border-radius: var(--btn-radius);
+  box-shadow: var(--btn-shadow);
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
-  transition: background 120ms, border-color 120ms, color 120ms;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--btn-t) var(--btn-ease),
+    border-color var(--btn-t) var(--btn-ease),
+    color var(--btn-t) var(--btn-ease),
+    box-shadow var(--btn-t) var(--btn-ease),
+    transform var(--btn-t) var(--btn-ease);
 }
-.btn:hover {
-  background: var(--bg-hover);
-  border-color: var(--noise);
-  color: var(--fg);
-  text-decoration: none;
-}
-.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn > svg { flex-shrink: 0; }
 
-/* 五态收口（v1.9，§15.12）：:hover / :focus-visible 已在上面，这里补
-   :active / :disabled / [aria-busy="true"]。
-   按下态用 --bg-active 而不是再压一档的 --bg-hover —— 悬停和按下的差别
-   必须看得出来，否则点了没反应。
-   变体（.primary / .danger）的按下态各自在下面重写，因为它们有自己的
-   底色，基类的灰底会把强调色顶掉。 */
-.btn:active:not(:disabled) {
-  background: var(--bg-active);
-  border-color: var(--noise);
-  color: var(--fg);
+/* hover：上浮 + 阴影升级。位移不超过 2px。 */
+.btn:hover:not(:disabled):not([aria-busy='true']) {
+  background-color: var(--btn-bg-hover);
+  border-color: var(--btn-bd-hover);
+  box-shadow: var(--btn-shadow-hover);
+  transform: translateY(var(--btn-lift));
 }
-/* 禁用：压到 0.45 并把指针从 pointer 换回 default，否则按钮看起来还是能点。
-   组件里一直用 `disabled` 属性，所以这里不必再给 .btn.disabled 造一套。 */
+
+/* active：取消上浮、缩到 0.98 —— 没有这一步按钮就是装饰 */
+.btn:active:not(:disabled):not([aria-busy='true']) {
+  background-color: var(--btn-bg-press);
+  transform: translateY(0) scale(0.98);
+  box-shadow: var(--btn-shadow);
+}
+
+/* focus-visible：2px offset 的环。先铺一层画布色，再叠 4px 蓝色 —— 
+   这样环与按钮之间始终留出 2px，且不改变盒子尺寸。 */
+.btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--ring-offset),
+    0 0 0 4px var(--focus-ring);
+}
+
 .btn:disabled {
-  opacity: 0.45;
-  cursor: default;
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  background-color: var(--bg-sunken);
 }
-/* 加载态（[aria-busy="true"]）：按钮还在工作，只是暂时不接受点击，
-   所以压得比禁用轻（0.6），光标换成 progress 表示"等一下"。 */
+
+/* loading：aria-busy 驱动。文字与图标转透明但**仍占位** → 宽度零跳变 */
 .btn[aria-busy='true'] {
-  opacity: 0.6;
+  pointer-events: none;
   cursor: progress;
+  color: transparent;
+  transform: none;
+  box-shadow: var(--btn-shadow);
+  transition-property: none;
 }
+.btn[aria-busy='true'] > svg { opacity: 0; }
+.btn[aria-busy='true']::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px solid var(--btn-loading-fg);
+  border-right-color: transparent;
+  animation: btn-spin 700ms linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
 
+/* ── 主按钮 ───────────────────────────────────────────────── */
 .btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
+  --btn-bg: var(--btn-brand);
+  --btn-bg-hover: var(--btn-brand-hover);
+  --btn-bg-press: var(--btn-brand-hover);
+  --btn-fg: #ffffff;
+  --btn-bd: var(--btn-brand);
+  --btn-bd-hover: var(--btn-brand-hover);
+  --btn-shadow: 0 1px 2px rgba(30, 64, 175, 0.18);
+  --btn-shadow-hover: 0 4px 12px rgba(30, 64, 175, 0.22);
+  --btn-loading-fg: #ffffff;
   font-weight: 500;
+  color: #ffffff;
 }
-.btn.primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-  color: var(--accent-fg);
+.btn.primary:hover:not(:disabled):not([aria-busy='true']) { color: #ffffff; }
+.btn.primary:active:not(:disabled):not([aria-busy='true']) { color: #ffffff; }
+
+/* ── 墨底：纸面语境 ─────────────────────────────────────────
+   阅读区的纸是衬线墨字，一块饱和蓝会跳出来抢正文。 */
+.btn.ink {
+  --btn-bg: var(--fg);
+  --btn-bg-hover: #1e293b;
+  --btn-bg-press: #0b1220;
+  --btn-fg: #ffffff;
+  --btn-bd: var(--fg);
+  --btn-bd-hover: #1e293b;
+  --btn-shadow: 0 1px 2px rgba(15, 23, 42, 0.10);
+  --btn-shadow-hover: 0 4px 12px rgba(15, 23, 42, 0.12);
+  --btn-loading-fg: #ffffff;
+  color: #ffffff;
 }
-/* 实心按钮的按下反馈不能靠换底色 —— 调色板里 --accent-hover 就是悬停色，
-   再没有更暗的一档。用 brightness 压一档，不新增色值，
-   也不会把强调色换成灰。 */
-.btn.primary:active:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-  color: var(--accent-fg);
-  filter: brightness(0.93);
+.btn.ink:hover:not(:disabled):not([aria-busy='true']) { color: #ffffff; }
+
+/* ── 幽灵：无底无框 ──────────────────────────────────────── */
+.btn.ghost {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--bg-hover);
+  --btn-bg-press: var(--bg-active);
+  --btn-fg: var(--fg-faint);
+  --btn-bd: transparent;
+  --btn-bd-hover: transparent;
+  --btn-shadow: none;
+  --btn-shadow-hover: none;
+  --btn-lift: 0px;
 }
+.btn.ghost:hover:not(:disabled):not([aria-busy='true']) { color: var(--fg); }
+.btn.ghost:active:not(:disabled):not([aria-busy='true']) { transform: scale(0.98); }
+
+/* ── 切换态：按下去了 ───────────────────────────────────── */
+.btn.active,
+.btn[aria-pressed='true'] {
+  background-color: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+.btn.ghost.active,
+.btn.ghost[aria-pressed='true'] {
+  background-color: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+/* ── 形状与尺寸 ────────────────────────────────────────────
+ * 全站只有三档高度，每一档对应一种使用场景，不按文件分：
+ *   36 标准 —— 页面级动作、工具栏图标、输入框、下拉
+ *   28 紧凑 —— 列表行内的图标按钮、批量栏、筛选 chip、行内下拉
+ *   16 迷你 —— 条目元信息行里的收藏 / 外链（不参与布局高度）
+ * 三档之外不允许再出现第四个数字：哪个控件多出 2px，
+ * 一排里就会显出一个"不一样的"，这正是 v6.1 之前订阅页的问题。
+ */
+.btn.pill { border-radius: var(--radius-pill); padding: 0 calc(var(--btn-px) + 4px); }
 .btn.block { width: 100%; }
-
-/* ── 小号按钮（v1.9：从 feeds.css 收口到这里）───────────── */
-
-/* v1.8（§15.12）：.btn 基样式有显式 height: 32px，
-   所以这里必须显式覆盖 height，否则 .btn.tiny 会被撑回 32px，
-   和它的 11.5px 字号完全不匹配。
-   圆角保持 --radius-sm（26px 高于 24px 的 xs 档），
-   只是把三档高度收敛成 26/32 两档。 */
+.btn.lg { height: var(--btn-h-lg); padding: 0 var(--btn-px-lg); font-size: var(--btn-fs-lg); }
+.btn.xl { height: var(--btn-h-xl); padding: 0 var(--btn-px-xl); font-size: var(--btn-fs-xl); border-radius: var(--radius); }
 .btn.tiny {
-  height: 26px;
-  padding: 0 9px;
-  font-size: 11.5px;
-  border-radius: var(--radius-sm);
+  height: var(--btn-h-tiny);
+  padding: 0 var(--btn-px-tiny);
+  gap: 4px;
+  font-size: var(--btn-fs-tiny);
+  border-radius: var(--radius-xs);
 }
 
-/* 危险动作：只把文字染成 --must，不动底色。
-   一屏里出现两三个"危险"按钮时，实心红会把整个界面变成警告色，
-   而这里的危险动作（取消订阅、删除分组）本来就有二次确认。 */
-.btn.danger { color: var(--must); }
-.btn.danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--err) 10%, transparent);
-  border-color: color-mix(in srgb, var(--err) 30%, transparent);
-  color: var(--must);
-}
-/* 按下比悬停再压实一档（10% → 18%），叠在基类的灰底之上。 */
-.btn.danger:active:not(:disabled) {
-  background: color-mix(in srgb, var(--err) 18%, transparent);
-  border-color: color-mix(in srgb, var(--err) 35%, transparent);
-  color: var(--must);
-}
+/* 行内图标按钮用 .icon-btn.sm（28）显式声明档位，不按容器自动收尺寸。
+   按容器收尺寸（.feed-ops .icon-btn）看起来更省事，但它让同一个 class
+   出现两个高度 —— 度量脚本与肉眼都会把它判成"不统一"。
+   手机上由 mobile.css 的 ≤640 规则把 .feed-ops 内按钮抬回 36/40。 */
 
-/* 图标按钮：没有底色、没有边框，只在悬停时给一层淡底。
-   常驻描边会让每个图标看起来都是一个"按钮"，一屏十几个就是一片框。 */
+/* ── 危险动作 ─────────────────────────────────────────────
+   行内只染红字 + 极浅底；弹窗里确认删除才是实心红。 */
+.btn.danger {
+  --btn-bg: #fef2f2;
+  --btn-bg-hover: #fee2e2;
+  --btn-bg-press: #fecaca;
+  --btn-fg: var(--err);
+  --btn-bd: #fecaca;
+  --btn-bd-hover: #fca5a5;
+  --btn-shadow: none;
+  --btn-shadow-hover: var(--shadow-sm);
+  color: var(--err);
+}
+.btn.danger:hover:not(:disabled):not([aria-busy='true']) { color: var(--err); }
+.btn.danger.solid {
+  --btn-bg: var(--err);
+  --btn-bg-hover: #b91c1c;
+  --btn-bg-press: #991b1b;
+  --btn-fg: #ffffff;
+  --btn-bd: var(--err);
+  --btn-bd-hover: #b91c1c;
+  --btn-shadow: 0 1px 2px rgba(220, 38, 38, 0.20);
+  --btn-shadow-hover: 0 4px 12px rgba(220, 38, 38, 0.24);
+  --btn-loading-fg: #ffffff;
+  color: #ffffff;
+}
+.btn.danger.solid:hover:not(:disabled):not([aria-busy='true']) { color: #ffffff; }
+
+/* ── 图标按钮 ─────────────────────────────────────────────
+ * 视觉 36×36、圆角 8（与按钮同档），命中区用伪元素撑到 44×44。 */
 .icon-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   padding: 0;
-  border-radius: var(--radius-sm);
-  background: none;
   border: 1px solid transparent;
-  color: var(--fg-dim);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
   flex-shrink: 0;
-  transition: background 110ms, color 110ms;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--btn-t) var(--btn-ease),
+    color var(--btn-t) var(--btn-ease),
+    border-color var(--btn-t) var(--btn-ease),
+    transform var(--btn-t) var(--btn-ease);
 }
-.icon-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--fg); }
-.icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.icon-btn.on { color: var(--worth); }
+.icon-btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.icon-btn:active:not(:disabled) { transform: scale(0.94); }
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus-ring);
+}
+.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.icon-btn.on { color: var(--accent); }
+
+/* 图标按钮的三档，与 .btn 的三档一一对应：
+     36  .icon-btn       工具栏（阅读工具条、列表头）
+     28  .icon-btn.sm    次一级工具栏（弹窗标题行、卡片头）、列表行内
+     16  .icon-btn.tiny  列表行元信息里的收藏 / 外链，不参与行高
+   16 是唯一的例外：它嵌在 12px 的元信息行里，放大到 24 会把行高
+   顶起来，一屏条数就保不住。 */
+.icon-btn.sm {
+  width: var(--btn-h-tiny);
+  height: var(--btn-h-tiny);
+  border-radius: var(--radius-xs);
+}
+.icon-btn.tiny {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-xs);
+  color: var(--fg-faint);
+}
+
+/* ── 分段控件 ─────────────────────────────────────────────
+ * 外壳 #f1f5f9、内层选中项白底小卡片 + 1px 阴影。
+ * 列表头的「全部 / 未读」与阅读工具条的「摘要 / 总结」共用这一套。 */
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  /* 外框与图标按钮同高，一排控件才有一条共同的上下边 */
+  height: var(--btn-h-tiny);
+  background: var(--bg-elev2);
+  border: none;
+  border-radius: var(--radius-sm);
+}
+.seg-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--fg-faint);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    background-color var(--btn-t) var(--btn-ease),
+    color var(--btn-t) var(--btn-ease),
+    box-shadow var(--btn-t) var(--btn-ease);
+}
+.seg-btn:hover:not(.on) { color: var(--fg); }
+.seg-btn.on {
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+.seg-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 3px var(--focus-ring);
+}
+
+/* loading 的文字隐形要压过变体（同特异度下后写的赢） */
+.btn[aria-busy='true'],
+.btn.primary[aria-busy='true'],
+.btn.ink[aria-busy='true'],
+.btn.ghost[aria-busy='true'],
+.btn.danger[aria-busy='true'],
+.btn.danger.solid[aria-busy='true'] { color: transparent; }
+
+/* ── 减少动效：只留颜色变化 ─────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .icon-btn,
+  .seg-btn { transition-duration: 1ms; }
+  .btn:hover:not(:disabled),
+  .btn:active:not(:disabled),
+  .icon-btn:hover:not(:disabled),
+  .icon-btn:active:not(:disabled) { transform: none; }
+  .btn[aria-busy='true']::before { animation-duration: 1ms; }
+}
 
 .linkish {
   background: none;
@@ -303,20 +674,29 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .linkish:hover { text-decoration: underline; background: none; }
 
+/* v6.0 输入框：白底 + 1px #d1d5db + 8px 圆角 + padding 8/12。
+   聚焦时描边转企业蓝并加 2px offset 的焦点环 —— 不改变盒子尺寸。 */
 input {
   font: inherit;
-  color: inherit;
+  font-size: 14px;
+  color: var(--fg);
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-input);
   border-radius: var(--radius-sm);
-  padding: 8px 11px;
+  padding: 8px 12px;
   outline: none;
   width: 100%;
-  transition: border-color 120ms, box-shadow 120ms;
+  transition:
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out;
 }
+input::placeholder { color: var(--fg-faint); }
+input:hover:not(:focus) { border-color: #9ca3af; }
 input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow:
+    0 0 0 2px var(--ring-offset),
+    0 0 0 4px var(--focus-ring);
 }
 input::placeholder { color: var(--fg-faint); }
 
@@ -370,7 +750,8 @@ input::placeholder { color: var(--fg-faint); }
   align-items: center;
   justify-content: center;
   width: 26px; height: 26px;
-  border-radius: 7px;
+  /* v2.9：7 → 8。圆角只允许 {0,4,8,12,16,999} 六档，7px 是手调残留。 */
+  border-radius: var(--radius-sm);
   background: var(--accent);
   color: var(--accent-fg);
   font-family: var(--serif);
@@ -384,10 +765,18 @@ input::placeholder { color: var(--fg-faint); }
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+/* v2.9：字标做成两层（「澄」+「私人知识库」），副行不再 margin-left: auto
+   甩到侧栏最右 —— 那会把它读成"另一栏的信息"，而不是这个字标的注释。 */
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
 .brand-sub {
-  margin-left: auto;
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
   color: var(--fg-faint);
 }
 
@@ -404,7 +793,7 @@ input::placeholder { color: var(--fg-faint); }
   background: none;
   border-radius: var(--radius-sm);
   color: var(--fg-dim);
-  font-size: 13.5px;
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
   transition: background 110ms, color 110ms;
@@ -425,7 +814,7 @@ input::placeholder { color: var(--fg-faint); }
 
 .nav-item.soon { color: var(--fg-faint); cursor: default; }
 .soon-tag {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.03em;
   color: var(--fg-faint);
   border: 1px solid var(--border);
@@ -437,7 +826,7 @@ input::placeholder { color: var(--fg-faint); }
 /* 分区标题：小号 + 字距。22px 是"内容分块"的最小可辨认间隔，
    比它小就成了行距，比它大侧栏会散。 */
 .nav-section {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--fg-faint);
@@ -448,7 +837,7 @@ input::placeholder { color: var(--fg-faint); }
    上，而那个数字是压力源，不是导航。 */
 .badge {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--fg-faint);
   background: none;
@@ -476,14 +865,14 @@ input::placeholder { color: var(--fg-faint); }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   flex-shrink: 0;
 }
 .who { flex: 1; min-width: 0; }
-.who-name { font-size: 12.5px; line-height: 1.3; font-weight: 500; }
+.who-name { font-size: 13px; line-height: 1.3; font-weight: 500; }
 .who-mail {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-faint);
   line-height: 1.3;
   overflow: hidden;
@@ -550,7 +939,7 @@ input::placeholder { color: var(--fg-faint); }
 }
 .pane-count {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
@@ -571,18 +960,28 @@ input::placeholder { color: var(--fg-faint); }
   flex-shrink: 0;
 }
 
-/* 所有标题行按钮统一 22×22。尺寸一致是"对齐"的前提：原来 .scope-clear
-   是 20px、刷新是 22px、分段控件是 23px，三个高度摆在一排必然高低不齐。 */
-.pane-actions .icon-btn.tiny { width: 22px; height: 22px; }
+/* 标题行的所有控件都走紧凑档 28：刷新键、分段控件、清除键。
+   原来刷新 24 / 分段 20 / 清除 20 —— 一排三个数字，怎么排都不齐。 */
+.pane-actions .icon-btn.tiny { width: var(--btn-h-tiny); height: var(--btn-h-tiny); }
+/* 标题行里的图标按钮只向上/向下扩命中区（44 高），不向左右扩：
+   横向外扩 8px 会让最右那颗的伪元素顶出标题行 8px，
+   在 scrollWidth 上就是一个假的横向溢出（度量脚本会如实判红）。
+   这一行是桌面优先的工具条，纵向 44 已经足够手指点中。 */
+.pane-actions .icon-btn::after {
+  width: 100%;
+  height: max(100%, 44px);
+}
 
 /* 「全部 / 未读」分段控件（§15.14）。
    不再需要 align-self: center / margin-left: auto —— 父级 .pane-actions
    已经是 flex + center，间距由 gap 承担。 */
 .pane-seg { flex-shrink: 0; }
 .seg-btn.sm {
-  padding: 0 7px;
-  font-size: 11.5px;
-  line-height: 16px;
+  /* 24 = 外层 28 − 容器内边距 2×2，分子分母都写清楚 */
+  height: calc(var(--btn-h-tiny) - 4px);
+  padding: 0 9px;
+  font-size: 12px;
+  line-height: 1;
 }
 .refresh-btn.spinning svg { animation: spin 700ms linear infinite; }
 .refresh-btn:disabled { opacity: 0.6; }
@@ -609,7 +1008,10 @@ input::placeholder { color: var(--fg-faint); }
 /* 清除未读（§15.21）：与 × 同一个视觉重量，但常显的语义更强，
    所以未读 > 0 时颜色正常，hover 用 accent 而不是中性色。 */
 .mark-read-btn { color: var(--fg-dim); }
-.mark-read-btn:hover { color: var(--accent); }
+.mark-read-btn:hover { color: var(--fg); }
+/* v2.9：hover 收回到墨色。规格 §2.1/§3.3 只允许强调色出现在
+   主按钮、当前导航项、正文外链三处；"清除未读"是一个动作，
+   不是 AI 的判断，染绿会让强调色的语义稀释。 */
 
 /* ── 侧栏分组树（§15.13 v1.13）─────────────────────────────
  *
@@ -664,7 +1066,7 @@ input::placeholder { color: var(--fg-faint); }
 .tree-row[aria-expanded='true'] .tree-caret { transform: rotate(90deg); }
 /* 组行在"路径上"（该组被选中但选的是组内的某个源）时，
    箭头跟着亮起来 —— 高亮只在子行，父行留一个"你在这里"的线索。 */
-.tree-row.in-path .tree-caret { color: var(--accent); }
+.tree-row.in-path .tree-caret { color: var(--fg-dim); }
 .tree-row.in-path { color: var(--fg-dim); }
 
 .tree-kids {
@@ -693,7 +1095,7 @@ input::placeholder { color: var(--fg-faint); }
   background: none;
   border-radius: var(--radius-sm);
   color: var(--fg-faint);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
   text-align: left;
   cursor: pointer;
@@ -701,7 +1103,7 @@ input::placeholder { color: var(--fg-faint); }
 }
 .tree-leaf:hover { background: var(--bg-hover); color: var(--fg-dim); }
 .tree-leaf.active { background: var(--bg-active); color: var(--fg); font-weight: 500; }
-.tree-leaf.active .tree-leaf-count { color: var(--accent); }
+.tree-leaf.active .tree-leaf-count { color: var(--fg); }
 
 .tree-leaf-name {
   flex: 1;
@@ -714,7 +1116,7 @@ input::placeholder { color: var(--fg-faint); }
    父行的角标抢同一种视觉重量，展开后整块像一排按钮。
    0 也要显示 —— "这个源没新内容"本身是信息。 */
 .tree-leaf-count {
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--fg-faint);
   opacity: 0.65;
@@ -819,7 +1221,7 @@ input::placeholder { color: var(--fg-faint); }
   height: 20px;
   padding: 0 7px;
   margin: -4px -2px -4px 0;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* 拖柄：三道横线（同品牌标记的语言，逐级变短 —— 这里等长表示"可移动"）。
@@ -978,26 +1380,111 @@ input::placeholder { color: var(--fg-faint); }
 }
 
 
-.search-box { position: relative; }
-.search-box input {
-  padding: 7px 30px 7px 32px;
-  font-size: 13px;
-  background: var(--bg-elev2);
-  border-color: transparent;
-  border-radius: var(--radius-sm);
+/* ── 搜索框（v6.1 统一为企业风的「字段」形态）──────────────
+ * 复古感来自三件事，逐一改掉：
+ *   ① 快捷键提示塞在 placeholder 里（"搜索标题、摘要…  /"）——
+ *      那是命令行时代的写法；现在做成右侧一枚真实的键帽（kbd）。
+ *   ② 只有一个方框 + 左侧放大镜，边框和按钮不同源；
+ *      现在描边、圆角、聚焦环与 .btn 完全一致。
+ *   ③ 输入内容无法一键清除，只能反复退格；
+ *      现在有 × 清除，两者互斥占同一个位置。
+ */
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
 }
-.search-box input:hover { border-color: var(--border); }
+.search-box input {
+  height: 38px;
+  /* 左留 34 给放大镜，右留 40 给键帽 / 清除键 */
+  padding: 0 40px 0 34px;
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-sm);
+  transition:
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    background-color 150ms ease-out;
+}
+.search-box input::placeholder { color: var(--fg-faint); }
+.search-box input:hover:not(:focus) { border-color: #9ca3af; }
 .search-box input:focus {
   background: var(--bg);
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow:
+    0 0 0 2px var(--ring-offset),
+    0 0 0 4px var(--focus-ring);
 }
 .search-icon {
   position: absolute;
-  left: 11px; top: 50%;
+  left: 12px; top: 50%;
   transform: translateY(-50%);
   color: var(--fg-faint);
   pointer-events: none;
+  transition: color 150ms ease-out;
+}
+/* 聚焦时图标跟着描边一起转主色 —— 一个字段只有一套高亮语言 */
+.search-box:focus-within .search-icon { color: var(--accent); }
+
+/* 快捷键键帽：右侧的真实元素，不是 placeholder 里的字符 */
+.search-kbd {
+  position: absolute;
+  right: 9px; top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--fg-faint);
+  background: var(--bg-elev2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 清除：与键帽占同一个位置，有内容时替换它 */
+.search-clear {
+  position: absolute;
+  right: 6px; top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px; height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+.search-clear:hover { background: var(--bg-active); color: var(--fg); }
+.search-clear:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 3px var(--focus-ring);
+}
+/* 与按钮并排的字段（添加订阅 / 新建分组）高度对齐 36，
+   否则同一行里 38 的输入框和 36 的按钮会差 2px 显得没对齐。
+   只在桌面生效：手机上的表单控件要 ≥40（触摸下限），
+   把它压到 36 会把 m1-05 的触摸判据撞红。 */
+@media (min-width: 641px) {
+  .add-row .search-box input { height: 36px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-box input, .search-icon, .search-clear { transition-duration: 1ms; }
 }
 
 .list-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; }
@@ -1026,7 +1513,7 @@ input::placeholder { color: var(--fg-faint); }
   gap: 10px;
   /* 上下对称，见上 */
   padding: 14px 16px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.03em;
   color: var(--fg-faint);
@@ -1058,7 +1545,7 @@ input::placeholder { color: var(--fg-faint); }
   gap: 8px;
   margin: 0;
   padding: 8px 16px 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--fg-faint);
@@ -1067,22 +1554,29 @@ input::placeholder { color: var(--fg-faint); }
 }
 
 /* 计数跟标题同一行、更淡：它是注释，不是第二个标题 */
-.hist-count { font-size: 11px; font-weight: 400; color: var(--fg-faint); opacity: 0.7; }
+.hist-count { font-size: 12px; font-weight: 400; color: var(--fg-faint); opacity: 0.7; }
 
 /* 回看角标与已读进度。都要比元信息更安静 ——
    它们是"附加事实"，抢了标题的注意力就本末倒置了。 */
-.read-count { color: var(--accent); opacity: 0.85; }
+.read-count { color: var(--fg-dim); opacity: 0.85; }
 .read-progress { opacity: 0.7; }
 
 /* 日号栏（设计方案 §2.2、§5.3）：52px，右侧一道发丝竖线贯穿当天所有行。
    它是时间的刻度，不是内容 —— 所以整块只用灰阶，且比摘要再淡一档。 */
 .entry-item {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  column-gap: 14px;
-  /* 9/14/10：日号栏吃掉了左侧 52px，行内不能再留 11px 的上下内边距 ——
-     一屏 9 条是硬预算（设计方案 §9），宽度让给了日号，高度就得从内边距里省。 */
-  padding: 7px 14px 8px 0;
+  /* v6.3：52/14 → 46/12。日号是"刻度"，不需要 52px 那么宽；
+     让出的 8px 给标题 —— 标题少换一行，整栏就清爽一档。
+     贯穿竖线随之落在 45px 处（见 .entry-item::before）。 */
+  grid-template-columns: 46px minmax(0, 1fr);
+  column-gap: 12px;
+  /* v6.6：上下内边距交给 --entry-pad-y（三档密度各自设值），
+     日号栏也用同一个变量定位 —— 两处共用一份"行内起始位置"，
+     改密度时不会出现"文字下移了、日号没动"。
+     padding-right 44 = 右侧两颗图标按钮（16+1+16）＋ 右边距 6 ＋ 余量 5；
+     它必须常驻，否则 hover 出图标时标题会重排、整栏上下跳一下。 */
+  --entry-pad-y: 9px;
+  padding: var(--entry-pad-y) 44px var(--entry-pad-y) 0;
   border: none;
   border-bottom: 1px solid var(--border-soft);
   border-radius: 0;
@@ -1094,21 +1588,44 @@ input::placeholder { color: var(--fg-faint); }
   transition: background 110ms;
 }
 .entry-item > * { grid-column: 2; min-width: 0; }
+/* 网格项默认 stretch：第一列有日号（33px 高）时，第 1 行的
+   元信息会被拉到 33px，行高凭空多 15px。全部 align-self: start，
+   每块只占自己需要的高度，日号再高也只在左侧溢出。 */
+.entry-item > .entry-meta,
+.entry-item > .entry-title,
+.entry-item > .entry-summary { align-self: start; }
 
+/* 日号栏（v6.6）。
+ *
+ * 从网格里拿出来、改为绝对定位，是因为它**不该参与行高计算**：
+ * 日号 33px 高，而元信息行只有 16px —— 只要它在网格里占一格，
+ * 那一格就被撑到 33px，当天首行凭空比别的行高 15px。
+ * span 3 的老写法更糟：只有一格内容时会造出两条隐式行。
+ *
+ * 绝对定位之后它只是"画在左边的一列刻度"，行高完全由右侧文字决定。
+ * top 与文字起点共用 --entry-pad-y，所以三档密度下都对齐。 */
 .day-mark {
+  position: absolute;
+  /* 必须显式写回第 1 列。绝对定位的子项**不脱离网格区域**：
+     它的 containing block 就是它所在的那一格，而上面那条
+     `.entry-item > * { grid-column: 2 }` 会把它推到第 2 列 ——
+     于是 left: 0 从第 2 列算起，日号正好压在标题上。
+     这是"日期和列表混在一起"的真正原因，不是 z-index 也不是间距。 */
   grid-column: 1;
-  grid-row: 1 / span 3;
-  align-self: start;
+  grid-row: 1;
+  left: 0;
+  top: var(--entry-pad-y);
+  width: 46px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding-top: 1px;
-  min-height: 40px;
+  pointer-events: none;
 }
 .day-mark b {
   font-family: var(--serif);
-  font-size: 17px;
+  /* v2.9：17→16px。日号是结构标记不是内容，16px 仍比标题大一圈。 */
+  font-size: 16px;
   font-weight: 500;
   line-height: 1.15;
   color: var(--fg-dim);
@@ -1116,18 +1633,29 @@ input::placeholder { color: var(--fg-faint); }
 }
 .day-mark i {
   font-style: normal;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1;
   letter-spacing: 0.04em;
   color: var(--fg-faint);
 }
-/* 换月：日号上方补一道短横，暗示"上一段到这里结束" */
+/* 换月：日号上方标出月份（v6.7）。
+ *
+ * 只在**跨月的那一行**出现，同一个月的其它行不重复 —— 每行都带月份
+ * 是二十次噪声，而一次都不带的话滚动时永远不知道现在是几月。
+ * 原来的实现只有一道 12×1px 的短横，读者读不出"换月了"，
+ * 只当成一条分隔线。现在换成月份文字 + 短横，信息量和可读性都对。 */
 .day-mark[data-month-start]::before {
-  content: '';
-  width: 12px;
-  height: 1px;
-  background: var(--border);
-  margin-bottom: 5px;
+  content: attr(data-month);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  color: var(--fg-faint);
+  /* 文字和日号之间留 4px，否则月份会贴住两位日号 */
+  margin-bottom: 4px;
+  /* 月份比日号宽（两个汉字 + 一个数字），不许换行 */
+  white-space: nowrap;
 }
 
 /* 贯穿当天所有行的竖线：画在每一行上，位置固定。
@@ -1136,36 +1664,68 @@ input::placeholder { color: var(--fg-faint); }
 .entry-item::before {
   content: '';
   position: absolute;
-  left: 51px; top: 0; bottom: 0;
+  left: 45px; top: 0; bottom: 0;
   width: 1px;
   background: var(--border-soft);
 }
 
 .entry-item:hover { background: var(--bg-hover); }
-.entry-item.active { background: var(--bg-elev2); }
+.entry-item.active { background: var(--bg-selected); }
+/* v2.9：明度分带成立之后，列表栏右侧那条 border-soft 就多余了 ——
+   三栏的分界由底色差承担，少一条 1px 线就少一个「线在动」的错觉源
+   （滚动的长列表贴着边界时最明显）。 */
+.list-pane { border-right: none; }
 /* 选中态：把日号栏右侧那道发丝线换成 2px 墨线。
    位置本来就对，只换粗细与颜色，不另加一层绝对定位的元素。 */
 .entry-item.active .day-mark { color: var(--fg); }
 .entry-item.active::before { width: 2px; background: var(--fg); }
 .entry-item.active .day-mark b { color: var(--fg); }
 
-/* 已读不再整行降透明度：那会把摘要糊成一片，而摘要正是"要不要重读"的判据。
-   改为标题降灰、摘要再降一档，信息层次还在，但不再"整体发虚"。 */
+/* 已读不再整行降透明度（那会让人怀疑自己点错了）：只把标题降一档灰。
+   v6.5 之后行里只有标题，所以这一条就是"已读"的全部视觉表达。 */
 .entry-item.read .entry-title { font-weight: 400; color: var(--fg-dim); }
-.entry-item.read .entry-summary { color: var(--fg-faint); opacity: 0.8; }
 
-/* 一屏 8~10 条（§15.2）：把每条压到 ~100px 靠三件事 ——
-   标题 2 行封顶、摘要 1 行、元信息与徽标合并到同一行。
-   这三条都不是"省略信息"，而是把信息压到该在的位置。 */
+/* ── 列表三档密度（v6.6）────────────────────────────────────
+ *
+ * 组件始终渲染 元信息 / 标题 / 摘要 三部分，显示多少只由
+ * <html data-list-style> 决定。三档不是三个开关，而是三套排版组合：
+ *
+ *   compact   只有标题      —— 一屏 13 条，扫得最快
+ *   standard  标题 + 1 行摘要 + 元信息 —— 默认，字号档数压到两种
+ *   rich      标题 + 2 行摘要 + 元信息，行距/内边距更大 —— 不用点开也能挑
+ *
+ * 一行的字号档数是有预算的：两档（元信息 12 / 标题 14+）读起来清楚，
+ * 三档（12 / 13 / 14）就会"每扫一行切三次字号"—— 那正是 v6.5 之前
+ * 列表显得乱的原因。所以 standard 里摘要沿用 12px（与元信息同档），
+ * 靠颜色（--fg-faint）而不是字号来退后。 */
 .entry-summary {
+  margin: 0;
   color: var(--fg-faint);
   font-size: 12px;
-  line-height: 1.45;
-  margin: 0;
+  line-height: 1.55;
   display: -webkit-box;
-  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  /* v6.7：与标题之间**必须**留出空白（需求方：不论什么档位都要有）。
+     摘要不是标题的第三行 —— 贴住的话，两行标题 + 一行摘要会读成
+     一个三行的段落。6px ≈ 半个行高，不足以断开，所以按档位加到 8~12。 */
+  margin-top: 8px;
+}
+
+html[data-list-style='compact'] .entry-summary { display: none; }
+html[data-list-style='standard'] .entry-summary {
+  -webkit-line-clamp: 1;
+  margin-top: 8px;
+}
+/* v6.7：舒展档的摘要从 2 行加到 3 行，标题从 3 行收到 2 行。
+   需求方说「舒展档，表示列表的详细描述的行数变多」—— 摘要才是
+   "详细描述"，标题本来就只有一两行，给它 3 行只是多留白。 */
+html[data-list-style='rich'] .entry-summary {
+  -webkit-line-clamp: 3;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--fg-soft);
+  margin-top: 12px;
 }
 
 /* 分级不再画左侧色条：那条 3×14px 的细条挨着日号栏，会被误读成
@@ -1173,21 +1733,21 @@ input::placeholder { color: var(--fg-faint); }
 
 /* 元信息行：站点 · 时间 · 分级，一行排不下时**只让站名收缩**。
  *
- * 这里踩过一个坑：flex item 默认 min-width: auto，含义是"不能小于内容
- * 的最小宽度"，而中文可断行处会在空格和字之间断，于是「13 小时前」被压到
- * 29px 宽、折成两行，整行高度从 22px 涨到 62px，列表密度直接垮掉。
- *
- * 修法两件事：
- *   ① 时间与分级 white-space: nowrap + flex-shrink: 0 —— 它们是定长信息，
- *      没有收缩的理由；
- *   ② 站名允许收缩并省略（min-width: 0 + ellipsis），它是三者里唯一
- *      可以安全截断的。 */
-.entry-top {
+ * 踩过的坑：flex item 默认 min-width: auto（"不能小于内容的最小宽度"），
+ * 中文可在字间断行，于是「13 小时前」被压成两行，行高 22→62px。
+ * 规则：时间与分级 nowrap + shrink 0（定长信息），只有站名可截断。 */
+/* 元信息行：站名 · 时间 · 分级。v6.6 起类名从 .entry-top 改为
+   .entry-meta（它现在既是可见行、又是 compact 档的裁剪容器，
+   "top"这个名字已经说不清它在哪）。
+   保留 gap/nowrap 让子元素的取值与旧版一致，改判据时不必重测。 */
+.entry-meta {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
-  line-height: 1.4;
+  /* 这一行是「站名 · 时间 · 分级」，全部落在 --fg-faint 上。
+     12px 是这一层能看清的下限，行高 1.35 比正文略紧一档。 */
+  font-size: 12px;
+  line-height: 1.35;
   color: var(--fg-faint);
   margin-bottom: 2px;
   min-width: 0;
@@ -1199,38 +1759,22 @@ input::placeholder { color: var(--fg-faint); }
   object-fit: cover;
   flex-shrink: 0;
 }
-.favicon.fallback {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-active);
-  color: var(--fg-dim);
-  font-size: 8.5px;
-  font-weight: 600;
-  line-height: 1;
-}
-/* 元信息行的三段：站点 · 时间 · 分级。
- *
- * 这里踩过一个坑：flex item 默认 min-width: auto（"不能小于内容的最小宽度"），
- * 而中文可以在空格处断行，于是「13 小时前」被压到 29px 宽、折成两行，
- * 整行高度 22px → 62px，一屏条数从 9 掉到 6。
- *
- * 规则只有一条：**只有站名可以收缩和截断，时间和分级是定长信息**。
- * 站名再长也只是省略号；时间与分级不许换行、不许压缩。
- */
+
 .entry-site {
   /* flex-grow 必须是 0：给它 1 会把整行剩余空间全吃掉，
      站名和后面的「·」之间就出现一大段空白。
-     它只需要"可以被压缩"，不需要"撑满"。 */
+     它只需要"可以被压缩"，不需要"撑满"。
+     v6.0：max-width 140 在字号抬到 12 之后会让这一行溢出 11px
+     （站名 + 时间 + 分级 > 288px 的可用宽），改为 0 起的纯弹性收缩。 */
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 140px;
+  max-width: 132px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .entry-time,
-.entry-top .tier {
+.entry-meta .tier {
   flex: 0 0 auto;
   white-space: nowrap;
 }
@@ -1240,8 +1784,11 @@ input::placeholder { color: var(--fg-faint); }
 .entry-title {
   font-size: 14px;
   font-weight: 500;
-  line-height: 1.45;
-  margin: 0 0 2px;
+  /* v6.3：1.28 → 1.4。1.28 是为了一屏 9 条硬压出来的，
+     代价是两行中文几乎贴在一起 —— 眼睛要在两行之间"找"下一行开头，
+     这正是列表显得杂乱的主因。1.4 让行与行之间有明确的行间距。 */
+  line-height: 1.4;
+  margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1254,16 +1801,43 @@ input::placeholder { color: var(--fg-faint); }
 /* 列表里的标题**不加下划线**（设计方案 §2.1）：
    一屏十条，每条都挂一条下划线就变成十条横线，比没有层级更难扫。
    可点击由整行的悬停底色表达，标题只用颜色变化回应。 */
-.entry-title:hover { color: var(--accent); text-decoration: none; }
+.entry-title:hover { color: var(--fg); text-decoration: none; }
+/* v2.9：标题 hover 不再是强调色。列表里十条标题在鼠标扫过时逐个变绿，
+   会把"这条 AI 判断值得读"的那颗橙点彻底盖掉；hover 交给整行
+   底色（.entry-item:hover）表达即可。 */
 /* 焦点环挂在标题上，而不是整行：行不再是可聚焦按钮之后，标题链接就是
    键盘在这行里唯一的停靠点，焦点提示必须跟着它走 —— 否则 Tab 到一行
    时，眼睛只能看到悬停底色，分不清焦点在第几行。
    描边参数与 .btn / .icon-btn / .nav-item 保持一致，不另造一套。 */
 .entry-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* 元信息行在 compact 档要"不可见但仍在"（v6.6）。
+   用 1px + clip-path 而不是 display:none / visibility:hidden ——
+   后两者会把内容从无障碍树里删掉，"只剩标题"就真的连读屏也没了。
+   同理不用 font-size:0：那会让子元素的取值量出 0px，脚本全部失真。
+   非 compact 档由下面的 :not() 选择器还原成正常块。 */
+html[data-list-style='compact'] .entry-meta {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* hover 才出现的行内操作（收藏 / 新标签打开原文）。
-   常驻会让每行多两个图标的视觉噪声，而列表页的任务是"扫过去"（§15.2）。 */
+   常驻会让每行多两个图标的视觉噪声，而列表页的任务是"扫过去"（§15.2）。
+
+   v6.5：从元信息行里挪出来，改为绝对定位到行的垂直中线右侧。
+   留在正常流里会占用网格的一格，而这一行现在只剩标题这一格。 */
 .entry-ops {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   gap: 1px;
   opacity: 0;
@@ -1271,13 +1845,9 @@ input::placeholder { color: var(--fg-faint); }
 }
 .entry-item:hover .entry-ops,
 .entry-item:focus-within .entry-ops { opacity: 1; }
-.icon-btn.tiny {
-  width: 22px;
-  height: 22px;
-  /* 22px 的控件用 7px 圆角会看着像胶囊，按尺寸走 --radius-xs（§15.12） */
-  border-radius: var(--radius-xs);
-  color: var(--fg-faint);
-}
+/* 行内迷你图标按钮的尺寸在按钮体系里定义（.icon-btn.tiny = 16）。
+   这里不留第二份 —— 同一档写两处，改一处忘一处就会出现"某个地方的
+   图标按钮比别处大一号"这种查不出原因的不统一。 */
 .icon-btn.tiny:hover { color: var(--fg); }
 
 .meta { color: var(--fg-faint); }
@@ -1285,21 +1855,27 @@ input::placeholder { color: var(--fg-faint); }
 /* 分级：圆点 + 两字，没有色块背景（设计方案 §3.3）。
    色块会把一行里最重的视觉重量给一个辅助信息；一颗 4px 的点加两个字
    同样能让人扫到，但不抢标题。 */
+/* v6.0 分级徽标（企业风 Status Badge）：胶囊 + 12px/500 + 圆点。
+   「必读」用浅蓝填充 + 企业蓝字；「值得」用描边不填充（hint 形态）；
+   噪音不出徽标。永远带圆点，不只靠颜色传达状态。
+   高度用 padding 控制而不是固定值：它嵌在 11.5px 的元信息行里，
+   固定高度会把行高顶起来，一屏条数就保不住。 */
 .tier {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 10.5px;
-  line-height: 1;
-  font-weight: 400;
-  letter-spacing: 0.06em;
+  font-size: 12px;
+  line-height: 1.25;
+  font-weight: 500;
+  letter-spacing: 0;
+  padding: 1px 8px 1px 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
   background: none;
-  padding: 0;
-  border-radius: 0;
   flex-shrink: 0;
-  /* 「必读」两个字不能从中间断开 —— 断了会变成两行，
-     同时把所在行的行高一起顶起来（§15.2 的一屏条数就保不住）。 */
   white-space: nowrap;
+  transform: scale(0.92);         /* 视觉上贴近 11px，但不改行高 */
+  transform-origin: left center;
 }
 .tier::before {
   content: '';
@@ -1308,11 +1884,93 @@ input::placeholder { color: var(--fg-faint); }
   background: currentColor;
   flex-shrink: 0;
 }
-.tier-must_read { color: var(--must); }
-.tier-worth { color: var(--worth); }
+.tier-must_read { color: var(--accent); }
+.tier-worth { color: var(--fg-faint); }
 .tier-noise { color: var(--fg-faint); }
 
-.load-more { padding: 16px; text-align: center; }
+/* 列表行里的分级只保留「圆点 + 两字」，去掉胶囊的底与边。
+   一行 12px 的文字里塞一个 17px 高的实底胶囊，它的重量会盖过标题 ——
+   而它只是一个可选的判断标记。胶囊形态留给详情页与设置页（§6.4）。 */
+.entry-meta .tier {
+  padding: 0;
+  border: none;
+  background: none;
+  transform: none;
+}
+
+/* ── 三档密度的行级排版（v6.6）──────────────────────────────
+ *
+ * 只改三件事：行内边距（决定行与行之间有多少空白）、标题行数、
+ * 以及相邻行之间要不要更明显的分隔线。字号由 .entry-summary /
+ * .entry-title 各自负责 —— 一处只改一件事。
+ *
+ * 分隔线为什么只在 rich 档加深：standard 与 compact 靠 1px --border-soft
+ * 已经够了；rich 档行高接近 100px，没有线的话相邻两行会糊成一块。 */
+html[data-list-style='compact'] .entry-item { --entry-pad-y: 11px; }
+html[data-list-style='standard'] .entry-item { --entry-pad-y: 9px; }
+html[data-list-style='rich'] .entry-item { --entry-pad-y: 14px; }
+
+/* rich 档：标题允许三行 —— 这一档的定位就是"不用点开也能挑"，
+   截成两行会让它失去意义。字号也抬半档，与更大的行距相称。 */
+html[data-list-style='rich'] .entry-title {
+  -webkit-line-clamp: 2;
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+html[data-list-style='rich'] .entry-item { border-bottom-color: var(--border); }
+html[data-list-style='rich'] .day-mark { top: calc(var(--entry-pad-y) + 2px); }
+
+/* ── 滚动到底自动加载（v6.8）──────────────────────────────
+ *
+ * 需求方原话：「列表下拉栏应该自动加载，而不是点击加载」。
+ *
+ * 加载状态不再是一个按钮，而是列表底部的一行提示。为什么保留这一行
+ * 而不是完全静默：自动加载最常见的疑问是"到底了没有"和"卡住了没有"，
+ * 一行 24px 的提示同时回答了这两个问题 —— 而按钮只回答"要不要继续"。
+ *
+ * 高度固定，不随文字长短变化：翻页时它反复出现/消失，
+ * 高度一变整栏内容就会跳一下。 */
+.load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  font-size: 12px;
+  color: var(--fg-faint);
+  user-select: none;
+}
+/* 已到底：保留一行位置但只显示一句极淡的说明，不再有可点的东西。
+   完全删掉会让滚动条到底时"少了一截"，用户会以为还有内容没加载。 */
+.load-more.end {
+  color: var(--fg-faint);
+  opacity: 0.7;
+}
+
+/* 自动加载的哨兵（v6.8）。
+   必须在正常流里参与布局：absolute / display:none / 0 高度容器里的
+   元素都不会产生交叉，IntersectionObserver 一次都不会触发。
+   1px 高、完全透明，视觉上不可见但确实占位。 */
+.list-sentinel {
+  height: 1px;
+  width: 100%;
+  pointer-events: none;
+}
+/* 失败：这一档必须可点 —— 自动加载失败时不给人重试入口就说不过去了 */
+.load-more.failed {
+  color: var(--err);
+}
+.load-more.failed button {
+  height: var(--btn-h-tiny);
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--err);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.load-more.failed button:hover { background: var(--bg-hover); }
 
 /* ── 阅读区 ─────────────────────────────────────────────── */
 
@@ -1347,7 +2005,7 @@ input::placeholder { color: var(--fg-faint); }
   text-align: center;
 }
 .reader-placeholder h2 { font-size: 15px; font-weight: 500; color: var(--fg-dim); margin: 10px 0 0; }
-.reader-placeholder p { font-size: 12.5px; margin: 0; }
+.reader-placeholder p { font-size: 13px; margin: 0; }
 
 .ph-art {
   width: 56px; height: 56px;
@@ -1383,38 +2041,55 @@ input::placeholder { color: var(--fg-faint); }
 
 /* AI 动作组：两个按钮拼成一段。用 margin 而不是 gap 隔开与右侧图标的关系 ——
    这段是"一组"，右侧是一排"单个"。 */
+/* v5.0：AI 动作组就是一个分段控件，和 .seg 用同一套材质 ——
+   否则工具条上会出现两种"小胶囊"，看起来像两套组件。 */
+/* AI 动作组与 .seg 同一套材质：浅灰底 + 白底选中块。
+   v6.3：外框与工具条上的图标按钮同高（36），内层 = 36 − 2×2 = 32。
+   原来外框 32、图标 36，同一排两个高度。 */
 .ai-group {
   display: flex;
   align-items: center;
   gap: 2px;
   margin-right: 6px;
   padding: 2px;
+  height: var(--btn-h);
   background: var(--bg-elev2);
+  border: none;
   border-radius: var(--radius-sm);
 }
 .ai-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 9px;
+  height: calc(var(--btn-h) - 4px);
+  padding: 0 11px;
   border: none;
-  border-radius: 6px;
+  /* 内圆角 = 外 9px − 容器 padding 2px */
+  border-radius: var(--radius-xs);
   background: none;
-  color: var(--fg-dim);
-  font-size: 12px;
+  color: var(--fg-faint);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 110ms, color 110ms;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out,
+    box-shadow 150ms ease-out;
 }
-.ai-btn:hover:not(:disabled) { background: var(--bg); color: var(--fg); }
+.ai-btn:hover:not(:disabled) { color: var(--fg); }
 .ai-btn.on {
   background: var(--bg);
-  color: var(--accent);
-  font-weight: 500;
+  color: var(--fg);
+  font-weight: 600;
   box-shadow: var(--shadow-sm);
 }
-.ai-btn:disabled { opacity: 0.55; }
+.ai-btn:disabled { opacity: 0.5; }
+.ai-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 3px var(--focus-ring);
+}
 
 .reader-scroll { flex: 1; overflow-y: auto; }
 
@@ -1475,11 +2150,16 @@ input::placeholder { color: var(--fg-faint); }
   min-width: 0;
   font-size: var(--reader-font, 16.5px);
   width: calc(var(--reader-width, 80) * 1ch);
-  max-width: calc(100% - 58px);
+  /* 82 = 左右内边距 80 + 边框 2。content-box 下 max-width 约束的是
+     文字宽度，内边距加在外面 —— 少减这 82px，窄视口里纸就会顶出阅读区。
+     v6.3 之前是 58（内边距 56 + 2），padding 从 28 提到 40 之后必须同步。 */
+  max-width: calc(100% - 82px);
   /* 34/28/120 → 24/28/88（§15.3，v1.14）：标题上方那 34px 是全页最大
      的一块死空间，而 .reader-bar 与正文本身已经有分隔感，不需要再垫。
      底部 120px 是"滚到底还能再往上带一点"的余量，88 足够。 */
-  padding: 24px 28px 88px;
+  /* v6.3：28 → 40。纸内左右留白是"阅读留白"的第一层，
+     28px 时标题与纸边只隔一行的一半，纸看起来被文字填满了。 */
+  padding: 32px 40px 96px;
   /* 划词工具条是 .reader 内的绝对定位元素（§11.3）。没有 position:relative
      的话它会相对最近的定位祖先——通常是最外层 shell——定位，坐标全错。 */
   position: relative;
@@ -1509,10 +2189,12 @@ input::placeholder { color: var(--fg-faint); }
 }
 .toc-inner { border-left: 1px solid var(--border); padding-left: 14px; }
 .toc-head {
-  font-size: 11px;
+  /* v2.9：11→11.5px、改用 --fg-dim。它是目录的标题，
+     不该比目录条目本身还弱。 */
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--fg-faint);
+  color: var(--fg-dim);
   margin-bottom: 8px;
 }
 .toc-list { list-style: none; margin: 0; padding: 0; }
@@ -1527,7 +2209,7 @@ input::placeholder { color: var(--fg-faint); }
   background: none;
   border-radius: var(--radius-xs);
   color: var(--fg-faint);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.45;
   text-align: left;
   cursor: pointer;
@@ -1538,7 +2220,9 @@ input::placeholder { color: var(--fg-faint); }
   transition: color 100ms;
 }
 .toc-link:hover { color: var(--fg-dim); }
-.toc-link.on { color: var(--accent); font-weight: 500; }
+.toc-link.on { color: var(--fg); font-weight: 500; }
+/* v2.9：目录当前位置用墨色 + 500 字重，不用强调色 ——
+   它表示"读到哪了"，不是 AI 的判断。 */
 
 /* 阅读区主题（§15.11）：只作用于阅读区，不动全局主题 ——
    白天用亮色、晚上躺着看用米色，这个选择与"整个应用什么颜色"是两件事。
@@ -1550,7 +2234,8 @@ input::placeholder { color: var(--fg-faint); }
   --bg-hover: #ebe7de;
   --fg: #1a1917;
   --fg-dim: #5f5a52;
-  --fg-faint: #8d877d;
+  /* v2.9：3.41 → 4.54:1（桌面）/ 4.74:1（纸面） */
+  --fg-faint: #79726a;
   --border: #e2ddd3;
   --border-soft: #eeeae1;
   --accent: #1a1917;
@@ -1568,7 +2253,8 @@ input::placeholder { color: var(--fg-faint); }
   --bg-hover: #e4d8c0;
   --fg: #332c22;
   --fg-dim: #6a5f4e;
-  --fg-faint: #968a77;
+  /* v2.9：2.88 → 4.66:1（桌面）/ 5.04:1（纸面）—— 米色主题原来是最弱的一个 */
+  --fg-faint: #736853;
   --border: #d9cbb1;
   --border-soft: #e4d8c0;
   --accent: #332c22;
@@ -1586,7 +2272,8 @@ input::placeholder { color: var(--fg-faint); }
   --bg-hover: #23211d;
   --fg: #ecebe7;
   --fg-dim: #a8a49c;
-  --fg-faint: #75716a;
+  /* v2.9：3.76 → 5.88:1（桌面）/ 5.68:1（纸面） */
+  --fg-faint: #948f86;
   --border: #272521;
   --border-soft: #1d1c19;
   --accent: #ecebe7;
@@ -1628,19 +2315,26 @@ input::placeholder { color: var(--fg-faint); }
 .reader-title {
   font-family: var(--serif);
   font-size: clamp(22px, 2.4vw, 30px);
-  line-height: 1.36;
-  margin: 0 0 12px;
+  /* v3.0：行高 1.36→1.42，字距 -0.005em→0.01em。
+     系统中文衬线（华文宋体）没有真粗体，我们关掉了合成粗体，
+     于是标题只剩"大字细笔画"这一种重量 —— 这时再去压字距、
+     收紧行高，两行标题会挤成一块灰。放开 0.01em 之后字与字的
+     间隙回来了，30px 才立得住。 */
+  line-height: 1.42;
+  margin: 0 0 14px;
   font-weight: 600;
-  letter-spacing: -0.005em;
+  letter-spacing: 0.01em;
 }
 
 .reader-meta {
   color: var(--fg-faint);
-  font-size: 11.5px;
+  /* v2.9：11.5→12.5px。标题下面是「谁写的、什么时候、多长」，
+     它比列表元信息更值得读，不该跟它同尺寸。 */
+  font-size: 13px;
   /* 26 → 18（§15.3，v1.14）：这 26px 加上 AI 卡的 30px，会让标题到正文
      之间出现 60px 的空隙，像是"另一段内容开始了"。18 足以区分元信息与正文。 */
   margin-bottom: 0;
-  padding-bottom: 16px;
+  padding-bottom: 20px;
   border-bottom: 1px solid var(--paper-line);
   display: flex;
   gap: 8px;
@@ -1651,17 +2345,18 @@ input::placeholder { color: var(--fg-faint); }
 .reader-meta > span:not(:last-child)::after,
 .reader-meta > a:not(:last-child)::after {
   content: '·';
-  margin-left: 8px;
-  opacity: 0.45;
+  margin-left: 7px;
+  /* 分隔点只做"停顿"，不做内容 —— .45 在正文里仍会读出第三个字符 */
+  opacity: 0.3;
 }
 /* 时间用等宽、日期用 tabular：一行里两个时间并排时不许左右跳 */
-.reader-meta .time { font-family: var(--mono); font-size: 10.5px; }
+.reader-meta .time { font-family: var(--mono); font-size: 12px; }
 
 /* 标题与站点名都是链接（§15.11）：
    标题改成 <a> 之后继承到的是全局蓝字 + 下划线，会很刺眼 ——
    阅读区里标题应该是正文的强调，不是超链接。 */
 .reader-title a { color: inherit; text-decoration: none; }
-.reader-title a:hover { color: var(--accent); text-decoration: none; }
+.reader-title a:hover { color: var(--fg-dim); text-decoration: none; }
 .reader-site-link {
   display: inline-flex;
   align-items: center;
@@ -1679,7 +2374,9 @@ input::placeholder { color: var(--fg-faint); }
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  /* 7 行之后 8px 缝太松：面板是浮在正文上方的一条，
+     松一档就会盖住小半屏文章。6px 仍能读出四行一组。 */
+  gap: 6px;
 }
 .prefs-row {
   display: flex;
@@ -1687,57 +2384,49 @@ input::placeholder { color: var(--fg-faint); }
   gap: 10px;
   font-size: 12px;
   color: var(--fg-dim);
+  /* 5 行之后每行的间距要收：面板是浮在正文上方的一条，
+     松一点就会盖住整段文章 */
+  min-height: 28px;
 }
+/* 标签宽 34：两字标签（字号 / 宽度 / 底色 / 正文 / 界面）都要放下，
+   且后面的分段控件左边缘必须对齐 —— 不齐就会读出"两列表单"的感觉。 */
 .prefs-label { width: 34px; flex-shrink: 0; color: var(--fg-faint); }
-.seg {
-  display: flex;
-  gap: 2px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 2px;
-}
-.seg-btn {
-  padding: 3px 9px;
-  border: none;
-  /* 内圆角 = 外圆角 − 容器 padding 2px。写成 calc 而不是写死，
-     是为了让"这个差值是哪来的"留在代码里（§15.12）。 */
-  border-radius: calc(var(--radius-sm) - 2px);
-  background: none;
-  color: var(--fg-dim);
-  font-size: 12px;
-  cursor: pointer;
-  line-height: 1.4;
-}
-.seg-btn:hover { background: var(--bg-hover); color: var(--fg); }
-/* 选中段：白底 + 细影，像一枚按下去的滑块。
-   不用实心强调色 —— 分段控件在列表头部，实心块会把标题压过去。 */
-.seg-btn.on {
-  background: var(--bg);
-  color: var(--fg);
-  font-weight: 500;
-  box-shadow: var(--shadow-sm);
-}
+/* 分段控件的样式统一在 v5.0 按钮体系里定义（Apple Segmented Control）。
+   这里不再重复 —— 两处各写一套会在加载顺序上互相覆盖。 */
 /* 「恢复默认」是 .btn + .block 的组合，v1.8 给 .btn 定死了 height: 32px，
    所以这里只调字号，不再写 padding —— 写 padding 正是原来
    它变成 31px 这个"意外值"的原因（§15.12）。 */
-.prefs-reset { margin-top: 2px; font-size: 12px; height: 28px; }
+/* v3.0：28px 是第三档高度，收进 26（.tiny 档）—— 全站按钮只有 32/26 两档。 */
+/* v4.0：26 是 v3 的残留值，对齐 .tiny 档（30） */
+.prefs-reset { margin-top: 6px; font-size: 13px; height: var(--btn-h-tiny); }
+
+/* 偏好面板里的分组分隔（v6.6）：上面是正文，下面是列表。
+   一条 1px 的 --border-soft + 上下 9px，比留白更清楚地说明"换了一组"。 */
+.prefs-sep {
+  height: 1px;
+  background: var(--border-soft);
+  margin: 7px 0 5px;
+}
 
 /* 文末出口（§15.11）：读完之后的两个动作 */
+/* 文末出口（v3.0）：不再是两个等权的描边按钮。
+   读完之后只有一件事是"继续走"——去原文；「访问源站」是退路。
+   所以前者实心、后者幽灵。阅读区主题会把 --accent 换成墨色，
+   于是这个实心按钮在米色/暗色纸上自动变成墨块白字，不会跳出青绿。 */
 .reader-foot {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
-  /* 34/20 → 26/16（§15.3，v1.14）：正文已经结束，这里是出口区，
-     仍然要能"划清界限"，但不需要一整屏的间隔。 */
-  margin-top: 26px;
-  padding-top: 16px;
+  margin-top: 30px;
+  padding-top: 18px;
   border-top: 1px solid var(--border-soft);
 }
-/* 文末出口的两个 <a class="btn"> 已由基样式统一成 32px / inline-flex。
-   v1.8 之前这里写的是 display:inline-flex + gap，而 <a> 与 <button>
-   的行盒不同，导致同一个 .btn 类出现 40px 和 42px 两个高度（§15.12）。
-   现在基样式自己给了 inline-flex + 显式高度，这里不再需要任何覆盖。 */
+/* 出口按钮：高度仍是 32px 基样式给的（全站只有 32/26 两档，手机 36），
+   这里只把左右内边距放宽一点 —— 纸尾的按钮比工具条里的宽一档才站得住。
+   不另给 height：<a> 与 <button> 的行盒不同，v1.8 之前两枚同 .btn 的按钮
+   曾分别算出 40px / 42px，现在高度统一由基样式负责。 */
+.reader-foot .btn { padding: 0 16px; }
 
 /* 正文链接指针：清洗后全部带 target=_blank，hover 时给个视觉暗示 */
 /* AI 输出块（摘要 / 总结）共用一套语言：一行小标签 + 一段引言。
@@ -1745,8 +2434,8 @@ input::placeholder { color: var(--fg-faint); }
  * 画框会把它读成一个嵌进来的外部组件。 */
 .ai-card,
 .sum-card {
-  margin: 20px 0 24px;
-  padding: 2px 0 2px 16px;
+  margin: 24px 0 30px;
+  padding: 2px 0 2px 18px;
   border-left: 2px solid var(--accent);
   background: none;
   border-radius: 0;
@@ -1757,7 +2446,7 @@ input::placeholder { color: var(--fg-faint); }
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.12em;
   color: var(--accent);
@@ -1769,7 +2458,7 @@ input::placeholder { color: var(--fg-faint); }
 }
 .ai-label-time {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
   letter-spacing: 0;
   color: var(--fg-faint);
@@ -1793,7 +2482,7 @@ input::placeholder { color: var(--fg-faint); }
 }
 .ai-points li {
   position: relative;
-  margin: 3px 0;
+  margin: 5px 0;
   padding-left: 13px;
 }
 .ai-points li::before {
@@ -1815,7 +2504,7 @@ input::placeholder { color: var(--fg-faint); }
   border-top: 1px solid var(--paper-line);
 }
 .topic {
-  font-size: 11px;
+  font-size: 12px;
   padding: 0;
   border-radius: 0;
   background: none;
@@ -1824,33 +2513,59 @@ input::placeholder { color: var(--fg-faint); }
 .topic + .topic::before { content: '·'; margin-right: 6px; opacity: 0.5; }
 
 .sum-fail {
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--err);
 }
-.sum-fail-hint { color: var(--fg-faint); font-size: 11.5px; margin-top: 2px; }
+.sum-fail-hint { color: var(--fg-faint); font-size: 12px; margin-top: 2px; }
 
 /* 正文（设计方案 §2.3）：衬线，行高比原来略松 —— 衬线的 x-height 更小，
    同一行高下视觉更紧，1.86 才回到与 1.78 无衬线相当的呼吸感。 */
 .article-body {
   font-family: var(--serif);
-  font-size: 16.5px;
-  line-height: 1.86;
+  /* 正文 17px / 1.8：企业规范写的是 16/1.65，那一档是给表单与后台表格的。
+     中文衬线长文需要更松的行距与略大的字号，否则整页读起来像合同。
+     这是本项目对规范唯一一处刻意偏离。 */
+  font-size: 17px;
+  line-height: 1.8;
   color: var(--fg);
   overflow-wrap: break-word;
 }
-/* 段距 1.15em → 1.05em（§15.3，v1.14）。1.15em 配 1.78 行高，相当于
-   段间 21px 而段内行距 29px，"空行比行大"的观感偏松。1.05em = 17px，
-   仍明显大于 0，段落边界不会糊成一片。 */
-.article-body p { margin: 0 0 1.05em; }
-.article-body h2, .article-body h3 {
+/* v6.3：段距 1.05em → 1.25em（21px）。
+   1.8 的行高下，1.05em 的段距只比行距多 60% —— 眼睛区分不出
+   "换行"和"换段"，整页就读成一整块字。1.25em 让段与段之间有
+   一个明确的停顿，而不用加缩进（中文网页的惯例是段距不是首行缩进）。 */
+/* 正文自带的第一个 h1 与 .reader-title 是同一句话：
+   阅读器已经渲染了 h1，正文里再来一次就是同一行标题出现两遍。
+   只藏**直接子元素的第一个 h1**，不动 DOM 结构 —— 高亮是按
+   字符偏移定位的，删节点会让已有高亮整体错位。 */
+.article-body > h1:first-child { display: none; }
+.article-body p { margin: 0 0 1.25em; }
+/* v6.3：h2 / h3 原来都是 18px —— 正文 17px，两个标题只比正文大 1px，
+   层级等于没有，读者看到的是"一堆差不多大的字"。现在分三档：
+   h2 21 / h3 18.5 / h4 17，靠字号而不是靠色块建立层级。 */
+.article-body h2,
+.article-body h3,
+.article-body h4 {
   font-family: var(--serif);
-  font-size: 18px;
-  margin: 1.7em 0 0.6em;
-  line-height: 1.4;
+  line-height: 1.45;
   font-weight: 600;
+  color: var(--fg);
 }
-.article-body img { max-width: 100%; height: auto; border-radius: var(--radius-sm); margin: 1em 0; }
+.article-body h2 {
+  font-size: 21px;
+  margin: 1.9em 0 0.7em;
+  letter-spacing: 0.01em;
+}
+.article-body h3 {
+  font-size: 18.5px;
+  margin: 1.7em 0 0.55em;
+}
+.article-body h4 {
+  font-size: 17px;
+  margin: 1.5em 0 0.5em;
+}
+.article-body img { max-width: 100%; height: auto; border-radius: var(--radius-sm); margin: 1.6em 0; }
 /* 正文外链：下划线而非强调色 —— 正文里的蓝字会打断阅读，而下划线不会 */
 .article-body a {
   color: inherit;
@@ -1859,8 +2574,8 @@ input::placeholder { color: var(--fg-faint); }
 }
 .article-body a:hover { border-bottom-color: var(--fg); }
 .article-body blockquote {
-  margin: 1.2em 0;
-  padding: 2px 0 2px 15px;
+  margin: 1.5em 0;
+  padding: 4px 0 4px 18px;
   border-left: 2px solid var(--border);
   color: var(--fg-dim);
 }
@@ -1874,7 +2589,7 @@ input::placeholder { color: var(--fg-faint); }
 }
 .article-body code { font-family: var(--mono); font-size: 0.92em; }
 .article-body ul, .article-body ol { padding-left: 1.4em; margin: 0 0 1.1em; }
-.article-body li { margin: 0.3em 0; }
+.article-body li { margin: 0.45em 0; }
 
 /* ── 登录 / 初始化 ──────────────────────────────────────── */
 
@@ -1918,7 +2633,7 @@ input::placeholder { color: var(--fg-faint); }
 }
 .auth-card label {
   display: block;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--fg-dim);
   margin-bottom: 5px;
 }
@@ -1926,7 +2641,7 @@ input::placeholder { color: var(--fg-faint); }
 .auth-card .btn[type='submit'] { margin-top: 6px; }
 .auth-foot {
   color: var(--fg-faint);
-  font-size: 12.5px;
+  font-size: 13px;
   margin: 16px 0 0;
   text-align: center;
 }
@@ -1941,8 +2656,8 @@ input::placeholder { color: var(--fg-faint); }
   flex-direction: column;
   align-items: center;
 }
-.empty h2 { font-size: 14.5px; color: var(--fg-dim); margin: 12px 0 5px; font-weight: 500; }
-.empty p { margin: 0; font-size: 12.5px; line-height: 1.6; max-width: 30ch; }
+.empty h2 { font-size: 14px; color: var(--fg-dim); margin: 12px 0 5px; font-weight: 500; }
+.empty p { margin: 0; font-size: 13px; line-height: 1.6; max-width: 30ch; }
 
 .alert {
   padding: 10px 13px;
@@ -1992,7 +2707,7 @@ input::placeholder { color: var(--fg-faint); }
  * 都是更高优先级，不受影响。
  */
 .hint {
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.62;
   color: var(--fg-dim);
   margin: 0 0 10px;
@@ -2054,7 +2769,7 @@ input::placeholder { color: var(--fg-faint); }
 .crash p {
   max-width: 42ch;
   margin: 0;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.62;
   color: var(--fg-dim);
 }

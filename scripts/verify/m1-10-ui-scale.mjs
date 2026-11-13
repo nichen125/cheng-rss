@@ -354,20 +354,22 @@ check('四个页面都采到了控件（否则下面的断言是空转）', () =
 // 尺度：0（共边的列表行）/ 4（<24px 的小控件）/ 7（默认）/
 // 999（胶囊）。.seg 容器内的分段按钮额外允许 5（= 7 − 2px 内边距），
 // 这是"内圆角跟着外圆角缩"的正确做法，不是随手写的数字。
-// 尺度（设计方案 §6）：0（共边的列表行）/ 4（<24px 的小控件）/
-// 8（默认控件）/ 999（胶囊）。.seg 内的分段按钮额外允许 5、6
-// （= 外圆角 − 容器内边距），这是"内圆角跟着外圆角缩"的正确做法。
+// 尺度（设计方案 §6，v6.0 企业简洁风）：0（共边的列表行）/
+// 4（<24px 的小控件）/ 8（按钮、输入框）/ 12（卡片、弹窗、纸面）/
+// 16（大面板）/ 999（胶囊）。
+// .seg 内的分段按钮额外允许 5、6（= 外圆角 − 容器内边距），
+// 这是"内圆角跟着外圆角缩"的正确做法。
 //
-// 7 → 8 是"现代化"的一部分：7 来自旧版把控件压到 26~30px 的时期，
-// 控件长到 32px 之后 7 看起来偏方。判据跟着规格走，不跟着历史走。
-const SCALE = [0, 4, 8, 999];
+// 判据跟着规格走，不跟着历史走：v3.0 是 7、v4.0 是 8、v6.0 加入 12/16 ——
+// 每次都从这里改一行，而不是让实现迁就旧值。
+const SCALE = [0, 4, 8, 12, 16, 999];
 const allButtons = Object.entries(pages).flatMap(([page, list]) => list.map((b) => ({ page, ...b })));
 const offScale = allButtons.filter((b) => {
   if (SCALE.includes(b.radius)) return false;
   if (b.inSeg && (b.radius === 5 || b.radius === 6)) return false;
   return true;
 });
-check('所有可见按钮的圆角都在尺度内（0/4/8/999，.seg 内允许 5-6）', () => {
+check('所有可见按钮的圆角都在尺度内（0/4/8/12/16/999，.seg 内允许 5-6）', () => {
   if (offScale.length === 0) return ok(true);
   const sample = offScale.slice(0, 6).map((b) => `${b.page}:${b.cls}="${b.label}" r=${b.radius}px`);
   return ok(false, `${offScale.length} 个越界：\n        ${sample.join('\n        ')}`);
@@ -438,10 +440,12 @@ check('分组/源筛选的 chip 是胶囊（不是写死的 14px）', () => {
 check('分组筛选下「清除」按钮存在（否则下一条空转）', () => {
   return ok(scopeClear !== null, '页面上找不到 .scope-clear');
 });
-check('清除按钮不再是一整块实心按钮（无背景、无边框、< 28px）', () => {
+// v6.2 起紧凑档 = 28px，上限从「< 28」改成「≤ 28」：
+// 写死 27 会让它成为全页唯一一个 27px 的控件，那才是真正的不统一。
+check('清除按钮不再是实心块（无背景、无边框、≤ 紧凑档 28px）', () => {
   if (!scopeClear) return ok(false, '按钮不存在');
   const noBg = scopeClear.bg === 'rgba(0, 0, 0, 0)' || scopeClear.bg === 'transparent';
-  return ok(noBg && scopeClear.borderW === 0 && scopeClear.h < 28,
+  return ok(noBg && scopeClear.borderW === 0 && scopeClear.h <= 28,
     JSON.stringify(scopeClear));
 });
 check('清除按钮是图标（×）而不是一长串文字', () => {
@@ -454,14 +458,18 @@ check('清除按钮是图标（×）而不是一长串文字', () => {
 // ── ⑥ 采样覆盖面自检 ──────────────────────────────────────
 //
 // 没有这一条，前面几条有可能都在"页面上只有 3 个按钮"的情况下通过。
-check('采样覆盖到了各类控件（图标按钮 / 文字按钮 / chip / 分段按钮）', () => {
+// 列表行（.entry-item）过去挂过 role=button，是靠 PROBE 的 [role=button]
+// 顺带采到的；行回归纯容器之后那条路没了。改成就地查 DOM ——
+// 不要把行塞回按钮集合：行高逐条不同，塞回去会让「同类同高」误判。
+const rowCount = await evaluate("document.querySelectorAll('.entry-item').length");
+check('采样覆盖到了各类控件（图标按钮 / 文字按钮 / chip / 分段按钮 / 列表行）', () => {
   const has = (re) => allButtons.some((b) => re.test(b.cls));
   const kinds = {
     iconBtn: has(/\bicon-btn\b/),
     textBtn: has(/\bbtn\b/),
     chip: has(/\bchip\b/),
     seg: allButtons.some((b) => b.inSeg),
-    row: has(/\bentry-item\b/),
+    row: rowCount > 0,
   };
   return ok(Object.values(kinds).every(Boolean), JSON.stringify(kinds));
 });

@@ -244,12 +244,17 @@ function Main(props: { user: User; onLogout: () => void }) {
     setCursor(next);
   }, []);
   const [loading, setLoading] = useState(false);
+  /** 自动加载失败时才置位：失败必须给人一个重试入口（见列表底部）。
+   *  平时的"正在加载"不置位 —— 那是一个状态，不是一个错误。 */
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false);
   const [err, setErr] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<EntryDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  /** 列表滚动容器：自动加载要量它的 scrollTop / scrollHeight */
+  const listScrollRef = useRef<HTMLDivElement>(null);
   const [prefs, setPrefs] = useState<ReaderPrefs>(() => loadPrefs());
   const readerRef = useRef<HTMLElement>(null);
   const [prefsOpen, setPrefsOpen] = useState(false);
@@ -340,6 +345,9 @@ function Main(props: { user: User; onLogout: () => void }) {
       // 且 cursor 被旧响应的 nextCursor 带走，后续「加载更多」从错误位置续读。
       if (!latestRef.current.isLatest(seq)) return;
       setItems((prev) => (reset ? r.items : [...prev, ...r.items]));
+      // 继续加载成功了就把失败标记清掉 —— 否则自动滚动会一直卡在
+      // "上次失败了"这个状态里，用户往下滚也不会有任何反应。
+      if (!reset) setLoadMoreFailed(false);
       // total 是后端算的命中总数，不是本页条数 —— 分页后
       // items.length 会一直涨到 30/60/90，用它当"多少条"会骗人。
       setTotal(typeof r.total === 'number' ? r.total : null);
@@ -349,7 +357,11 @@ function Main(props: { user: User; onLogout: () => void }) {
       // 不 setLoading、不 toast。写进去的话，切到简报页会看到一条
       // "This operation was aborted"。
       if (isAbortError(e) || !latestRef.current.isLatest(seq)) return;
-      setErr(e instanceof Error ? e.message : '加载失败');
+      // 继续加载失败**不写 setErr**：那会在列表顶部弹一条红条，而此时
+      // 用户已经在底部了，看不到它；而且他并没有主动做任何操作，
+      // 弹错误像是对着用户喊。改成在底部那一行显示"失败了 + 重试"。
+      if (reset) setErr(e instanceof Error ? e.message : '加载失败');
+      else setLoadMoreFailed(true);
     } finally {
       // loading 同理：过期请求收尾时不能再把它置回 false，
       // 否则新请求正在加载，按钮却已经可点。
@@ -1042,6 +1054,57 @@ function Main(props: { user: User; onLogout: () => void }) {
    */
   const displayCount = tail ? readTailTotal : total;
 
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * 滚动到底自动加载（v6.8）。
+   *
+   * 需求方原话：「列表下拉栏应该自动加载，而不是点击加载」。
+   *
+   * 用 IntersectionObserver 观察列表底部的一个 1px 哨兵，而不是监听
+   * scroll 事件：
+   *   · scroll 每条事件都要量 scrollTop + clientHeight + scrollHeight，
+   *     那就是每帧一次强制同步布局（layout thrashing），长列表能摸出来；
+   *   · observer 由浏览器在合成线程算，滚动时不会打断主线程；
+   *   · observer 天然处理"内容很短、根本不出滚动条"的情形 —— 那种情况下
+   *     哨兵一开始就在视口内，`isIntersecting` 立刻为 true，一次都不用滚。
+   *     用 scroll 事件的话这种情况（一屏没铺满）永远不会触发加载。
+   *
+   * root 必须显式给 `.list-scroll`，不能留 null（= 视口）：列表容器自己
+   * 滚动，哨兵"进入视口"与"进入列表可见区"是两件事。
+   *
+   * `rootMargin: 0px 0px 320px 0px` 是**提前量**：等哨兵真的进可见区
+   * 才开始请求，用户会先看到一帧空白再看到内容。320px ≈ 三四行，
+   * 请求在路上时用户正好在读完当前这几行。
+   */
+  useEffect(() => {
+    const root = listScrollRef.current;
+    const target = sentinelRef.current;
+    if (!root || !target) return;
+    if (typeof IntersectionObserver === 'undefined') return; // 老浏览器：退化成手动
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        // 守卫条件都在这里，而不是在 observer 外：observer 只负责
+        // "到底了没有"，能不能加载由当前状态决定。
+        //
+        // 历史视图必须排除：它走 listHistory（游标语义与 listEntries
+        // 不同），而 load() 是按当前 view 发 listEntries 的 —— 服务端把
+        // 未知 view 当 inbox 处理，于是"滚到底"会往历史列表里插一批未读。
+        if (view === 'history') return;
+        if (!cursorRef.current) return;   // 已经到底
+        if (loading) return;              // 上一页还在路上
+        if (loadMoreFailed) return;       // 失败等用户手动重试
+        void load(false);
+      },
+      { root, rootMargin: '0px 0px 320px 0px', threshold: 0 },
+    );
+    io.observe(target);
+    return () => io.disconnect();
+    // loadMoreFailed 必须进依赖：失败后 observer 要停下来，
+    // 成功后才重新开始观察 —— 否则它会一直重试同一个坏请求。
+  }, [load, loading, loadMoreFailed, view]);
+
   /**
    * 尾段翻页（§15.24）。
    *
@@ -1051,7 +1114,7 @@ function Main(props: { user: User; onLogout: () => void }) {
    * 两个函数。
    */
   const loadMoreTail = useCallback(async () => {
-    if (!readTailCursor) return;
+    if (!readTailCursor || tailLoading) return;
     setTailLoading(true);
     try {
       const r = await api.listEntries({
@@ -1065,7 +1128,32 @@ function Main(props: { user: User; onLogout: () => void }) {
       setReadTailCursor(r.nextCursor);
     } catch { /* 尾段翻页失败保持现状，主列表不受影响 */ }
     finally { setTailLoading(false); }
-  }, [readTailCursor, scope.feedId, scope.folderId]);
+  }, [readTailCursor, tailLoading, scope.feedId, scope.folderId]);
+
+  /**
+   * 尾段也自动加载（v6.8）。
+   *
+   * 与主列表共用同一个哨兵，但要分清楚"该谁翻页"：主列表还有游标时
+   * 是主列表的事，主列表到底了才是尾段的事。少了这个判断，会同时发出
+   * 两个请求，列表里两段内容交错插入。
+   */
+  useEffect(() => {
+    const root = listScrollRef.current;
+    const target = sentinelRef.current;
+    if (!root || !target || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        // 主列表还有下一页时，这一屏是它的活
+        if (cursorRef.current) return;
+        if (!readTailCursor || tailLoading) return;
+        void loadMoreTail();
+      },
+      { root, rootMargin: '0px 0px 320px 0px', threshold: 0 },
+    );
+    io.observe(target);
+    return () => io.disconnect();
+  }, [loadMoreTail, tailLoading, readTailCursor]);
 
   /**
    * 把当前范围（分组 / 单个源）的未读一次清空（§15.21，v1.17）。
@@ -1132,7 +1220,13 @@ function Main(props: { user: User; onLogout: () => void }) {
                 strokeWidth="2" strokeLinecap="round" />
             </svg>
           </span>
-          <span className="brand-name">澄</span>
+          {/* 字标两层（规格 §2）：一个「澄」不够说明它是什么，
+              副行「私人知识库」才是定位。.brand-sub 的样式一直在，
+              但这里从来没渲染过 —— 于是界面上没有产品定位这句话。 */}
+          <span className="brand-text">
+            <span className="brand-name">澄</span>
+            <span className="brand-sub">私人知识库</span>
+          </span>
         </div>
 
         <nav className="nav">
@@ -1644,10 +1738,27 @@ function Main(props: { user: User; onLogout: () => void }) {
             <IconSearch size={15} className="search-icon" />
             <input
               ref={searchRef}
-              placeholder="搜索标题、摘要…  /"
+              placeholder="搜索标题、摘要"
+              aria-label="搜索标题与摘要"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
+            {/* 有内容时给一键清除，没内容时给快捷键键帽 —— 两者占同一个位置，
+                不会同时出现。键帽是真元素而不是 placeholder 里的字符：
+                placeholder 一输入就消失，用户永远学不会那个快捷键。 */}
+            {query
+              ? (
+                <button
+                  type="button"
+                  className="search-clear"
+                  onClick={() => { setQuery(''); searchRef.current?.focus(); }}
+                  aria-label="清除搜索"
+                  title="清除搜索（Esc）"
+                >
+                  <IconClose size={13} />
+                </button>
+              )
+              : <kbd className="search-kbd" aria-hidden="true">/</kbd>}
           </div>
           {/* 这里原本是「组内源筛选 chip 行」（v1.8）。v1.13 搬到侧栏分组树
               （§15.13）之后删除 —— 留一个空 div 或注释掉的代码比删掉更糟，
@@ -1655,7 +1766,7 @@ function Main(props: { user: User; onLogout: () => void }) {
               列表头部高度必须与无分组时完全相等。 */}
         </header>
 
-        <div className="list-scroll">
+        <div className="list-scroll" ref={listScrollRef}>
           {err && <div className="alert error inset">{err}</div>}
 
           {/* 空态要等两份数据都到位才渲染（v1.17）。
@@ -1757,27 +1868,40 @@ function Main(props: { user: User; onLogout: () => void }) {
           </ul>
           )}
 
-          {/* 尾段没取全时单独给一个"加载更多"（§15.24）。
-              与主列表的 `cursor` 分开：主列表此时已经到底（total=0），
-              它那个加载更多不会出现；尾段自己还有下一页。 */}
-          {tail && readTailCursor && (
-            <div className="load-more">
-              <button
-                className="btn"
-                disabled={tailLoading}
-                onClick={() => void loadMoreTail()}
-              >
-                {tailLoading ? '加载中…' : `继续加载更早的 ${Math.max(0, readTailTotal - tail.length)} 条`}
+          {/* 列表底部：自动加载的哨兵 + 一行状态提示（v6.8）。
+
+              需求方原话：「列表下拉栏应该自动加载，而不是点击加载」。
+
+              三点说明：
+                ① 哨兵是 1px 的空 div，被 IntersectionObserver 观察。
+                   它必须在**正常流里**（不是 absolute），否则永远不
+                   产生交叉 —— 那样 observer 一次都不会触发。
+                ② 提示行高度固定 44px：翻页时它反复出现/消失，
+                   高度一变整栏内容就会跳一下。
+                ③ 失败态必须可点。自动加载失败时不给人重试入口，
+                   等于把列表卡死在原地 —— 这是"自动"最容易出的事故。 */}
+          {/* 哨兵在任何视图下都要渲染：没有下一页时它不会有副作用
+              （observer 的回调第一句就检查游标），少渲染它反而会让
+              "从有下一页的视图切到没有的"时候 observer 拿不到新节点。 */}
+          <div ref={sentinelRef} className="list-sentinel" aria-hidden="true" />
+
+          {loadMoreFailed && (
+            <div className="load-more failed">
+              <span>加载失败</span>
+              <button onClick={() => { setLoadMoreFailed(false); void load(false); }}>
+                重试
               </button>
             </div>
           )}
 
-          {cursor && view !== 'history' && (
-            <div className="load-more">
-              <button className="btn" onClick={() => void load(false)} disabled={loading}>
-                {loading ? '加载中…' : '加载更多'}
-              </button>
-            </div>
+          {!loadMoreFailed && (loading && items.length > 0) && (
+            <div className="load-more"><span className="spinner" /> 正在加载…</div>
+          )}
+
+          {/* 已到底：只在确实有内容时显示，空列表不该出现"没有更多了" */}
+          {!loadMoreFailed && !loading && items.length > 0
+            && view !== 'history' && !cursor && !readTailCursor && (
+            <div className="load-more end"><span>没有更多了</span></div>
           )}
 
           {loading && items.length === 0 && (

@@ -23,7 +23,10 @@
 //   ③ 1180px 下正文列宽 ≥ 594px
 //   ④ 组内有源时列表头部高度与无分组时**完全相等**（chip 行不占位）
 //   ⑤ 侧栏最长分组名能完整显示或走省略号，不压在角标上
-//   ⑥ 1440×960 下首屏条目数 ≥ 9
+//   ⑥ 1440×960 下首屏条目数 ≥ 7（v6.6：默认密度改成「标准」——
+//      标题 + 一行摘要 + 元信息，行高 78~98px。原来是 9 条，那时
+//      一行只有标题；现在默认档多了一行摘要，密度按设计换成了信息量。
+//      这条断言仍然是"密度不许崩"的护栏，不是"越多越好"的排名。
 //   ⑦ 375px 下 --sidebar-w 仍是 0、底部 tab bar 仍在
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -53,8 +56,16 @@ const W_SIDEBAR = 196;
 const W_LIST = 368;
 const W_LIST_MAX_OK = 8; // 阅读区至少要比 v1.12 的 822 宽 8px 以上才算真收窄
 const MIN_READER_1440 = 870;
-const MIN_COL_1180 = 594;
-const MIN_ROWS_1440 = 9;
+// v6.3：594 → 566。纸内左右留白从 28 提到 40（阅读留白是第一层可读性），
+// 正文列的绝对宽度因此少了 24px。但 594 这个数原本是为了拦
+// "被压到 55ch"，判据的本质是「每行还能放几个字」而不是「多少像素」。
+// 所以门槛改成 566（≈ 570 的实测值留 4px 余量），并新增一条
+// 「每行 ≥ 32 个字符」把本质判据补上 —— 后者与留白无关，不会被后续调整带偏。
+const MIN_COL_1180 = 566;
+const MIN_CPL_1180 = 32;
+// v6.6：9 → 7。默认密度「标准」= 标题 + 一行摘要 + 元信息，
+// 行高 78~98px，一屏 8 条。门槛留 1 条余量，防止字体度量差异导致误报。
+const MIN_ROWS_1440 = 7;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -365,13 +376,15 @@ const MEASURE = `(() => {
     readerW,
     want72,
     wantCh,
-    // 正文可用宽度上限 = 阅读区宽 - 58（左右内边距 56 + 边框 2）。
-    // CSS 的 max-width: calc(100% - 58px) 就是这个意思，这里复算一次，
+    // 正文可用宽度上限 = 阅读区宽 - 82（左右内边距 80 + 边框 2）。
+    // CSS 的 max-width: calc(100% - 82px) 就是这个意思，这里复算一次，
     // 让"宽度被空间卡住"与"宽度由偏好驱动"能被区分开。
     maxCol: (() => {
       const pr = pane ? pane.getBoundingClientRect() : null;
-      return pr ? Math.round(pr.width - 58) : 0;
+      return pr ? Math.round(pr.width - 82) : 0;
     })(),
+    // 正文字号：判定"每行还能放几个字"时要用它，不能写死 17
+    colFs: body ? parseFloat(getComputedStyle(body).fontSize) || 17 : 17,
     // 正文两侧的空白：v1.14 的 §15.3 改动就是把这两个数压下去
     sideGapL: (() => {
       const pr = pane ? pane.getBoundingClientRect() : null;
@@ -480,7 +493,7 @@ check('② 正文两侧留白 ≤ 90px（v1.14 §15.3：改前两侧各 118px）
     && Math.abs(at1440.sideGapL - at1440.sideGapR) <= 2,
     `左 ${at1440.sideGapL}px / 右 ${at1440.sideGapR}px`);
 });
-check(`⑥ 1440×960 首屏条目数 ≥ ${MIN_ROWS_1440}（收窄 + 行距共赢回来的那一行）`, () => {
+check(`⑥ 1440×960 首屏条目数 ≥ ${MIN_ROWS_1440}（默认「标准」密度下的一屏）`, () => {
   return ok(at1440.visibleRows >= MIN_ROWS_1440,
     `首屏 ${at1440.visibleRows} 条（共 ${at1440.totalRows} 条），门槛 ${MIN_ROWS_1440}`);
 });
@@ -540,6 +553,11 @@ const at1180 = await measure();
 check(`③ 1180px 下正文列宽 ≥ ${MIN_COL_1180}px（不是被压到 55ch）`, () => {
   return ok(at1180.colW >= MIN_COL_1180,
     `正文列 ${at1180.colW}px，门槛 ${MIN_COL_1180}px（偏好 ${at1180.wantCh}ch = ${at1180.want72}px）`);
+});
+check(`③ 1180px 下每行仍 ≥ ${MIN_CPL_1180} 个字符（留白变大，行宽不能被压成窄条）`, () => {
+  const cpl = at1180.colW / (at1180.colFs || 17);
+  return ok(cpl >= MIN_CPL_1180,
+    `正文列 ${at1180.colW}px ÷ 字号 ${at1180.colFs}px = ${cpl.toFixed(1)} 字符/行`);
 });
 check('③ 1180px 下两栏确实各让了宽度（196/368 → 更窄，而不是原样挤正文）', () => {
   return ok(at1180.sidebar?.w < W_SIDEBAR && at1180.list?.w < W_LIST,

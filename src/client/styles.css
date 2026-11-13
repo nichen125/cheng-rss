@@ -80,6 +80,12 @@
   --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
   --paper-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 
+  /* ── 遮罩 ──
+     所有"盖住主界面"的层用同一套：冷灰、48% 不透明、2px 虚化。
+     全黑会压脏白底；小于 40% 时背景内容仍然抢眼，弹窗与底层分不开。 */
+  --scrim: rgba(15, 23, 42, 0.48);
+  --scrim-blur: 2px;
+
   /* ── 排版：Inter，缺失时回落系统 UI 字体 ──
      层级靠 400/500/600/700 四档字重与字号建立，不靠颜色堆叠。 */
   /* ── 字族：三条可选栈 + 正文三档（v6.4）─────────────────
@@ -538,6 +544,38 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: #ffffff;
 }
 .btn.danger.solid:hover:not(:disabled):not([aria-busy='true']) { color: #ffffff; }
+
+/* 第三档：红字、无底、无框。
+ * 用在「这一排里已经有主按钮和次按钮，破坏性动作只需要在那儿，不需要也是一块底色」
+ * 的位置（AI 卡的删除 Key）。行内的一键删除仍用 .btn.danger：
+ * 那里没有别的按钮抢注意力，淡红底反而是它该有的分量。 */
+.btn.danger.plain {
+  --btn-bg: transparent;
+  --btn-bg-hover: color-mix(in srgb, var(--err) 8%, transparent);
+  --btn-bg-press: color-mix(in srgb, var(--err) 12%, transparent);
+  --btn-bd: transparent;
+  --btn-bd-hover: transparent;
+  --btn-shadow: none;
+  --btn-shadow-hover: none;
+  --btn-lift: 0px;
+  color: var(--err);
+}
+.btn.danger.plain:hover:not(:disabled):not([aria-busy='true']) { color: var(--err); }
+
+/* 禁用态的字色与描边都要显式给。
+ * 主按钮的字色是白的（--accent-fg）、描边是主色，而 .btn:disabled 只换了底色
+ * （--bg-sunken）—— 白字压白底，按钮上什么都读不出来，蓝描边又让它看着像
+ * "可以按只是有点淡"。"保存 Key" 在没输入 key 时就是这个状态，也就是它
+ * **默认**不可读。这四个选择器比各变体高一档，写在变体之后才能盖住它们。 */
+.btn.primary:disabled,
+.btn.ink:disabled,
+.btn.danger:disabled,
+.btn.danger.solid:disabled {
+  /* --fg-dim 而不是 --fg-faint：还要再叠一层 .5 的不透明度，
+     用最浅那档算下来几乎读不出字（"查找并订阅"没填地址时就是这个样子）。 */
+  color: var(--fg-dim);
+  border-color: var(--border);
+}
 
 /* ── 图标按钮 ─────────────────────────────────────────────
  * 视觉 36×36、圆角 8（与按钮同档），命中区用伪元素撑到 44×44。 */

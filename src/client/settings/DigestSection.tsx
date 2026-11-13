@@ -215,7 +215,7 @@ export function DigestSection() {
       <section className="settings-card">
         <div className="settings-card-head">
           <h3>今日状态</h3>
-          <button className="btn sm" onClick={() => void reload()} disabled={busy}>
+          <button className="btn tiny" onClick={() => void reload()} disabled={busy}>
             <IconRefresh size={14} /> 刷新
           </button>
         </div>

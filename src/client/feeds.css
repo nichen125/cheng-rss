@@ -250,33 +250,41 @@
 
 /* ── 分组区块 ───────────────────────────────────────────── */
 
-.feed-group { margin-bottom: 18px; }
+/* 一个分组 = 一张卡。组容器是唯一的边界，行只负责分隔 ——
+ * 行各自带描边时，四组叠起来读作"四张表"：组头悬在表外、每组四条外框线，
+ * 而它们其实是同一类对象（分组）的四个实例。 */
+.feed-group {
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
 
 .feed-group-head {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 2px 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg-dim);
+  gap: 8px;
+  padding: 12px 16px;
+  /* 不画 border-bottom：列表首行的 border-top 就是这条分界线。
+     两处都画会在组头下方出现 2px 双线，而列表又是"每行都画上边"的写法。 */
+  /* 14/600 而不是 13/500：组头是这一段的标题，它和下面的源名只差 1px 字号时，
+     眼睛会把两者读成同一层，分组就白分了。 */
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
 }
 .feed-group-head svg { color: var(--fg-faint); }
+/* 组头右侧的"N 个源 / N 未读"是佐证，不是结论 —— 480 的灰、12 的字，退一档 */
 .feed-group-head .muted { font-size: 12px; font-weight: 400; }
 
-/* 分组内的行去掉圆角，视觉上连成一块 */
 .feed-group .feed-row { border-radius: 0; margin-bottom: 0; }
-.feed-group .feed-row:first-child {
-  border-top-left-radius: var(--radius-sm);
-  border-top-right-radius: var(--radius-sm);
-}
-.feed-group .feed-row:last-child {
-  border-bottom-left-radius: var(--radius-sm);
-  border-bottom-right-radius: var(--radius-sm);
-  margin-bottom: 8px;
-}
-/* 相邻行共用一条边，避免 2px 双线 */
-.feed-group .feed-row + .feed-row { margin-top: -1px; }
+/* 每条行都画上边，包括第一条 —— 第一条那条线就是组头和列表的分界。
+ * 只给"非首行"画线上，首行会比其余行矮 1px，长列表里就是 67/68 交替；
+ * m1-06 断言的是"所有行高一致"，它会在这种地方变红，而肉眼看不出原因。 */
+.feed-group .feed-row { border-top: 1px solid var(--border-soft); }
+/* 最后一行不再需要额外的下外边距：卡的底部边界已经在这里了 */
+.feed-group .feed-row:last-child { margin-bottom: 0; }
 
 /* ── 编辑弹窗 ───────────────────────────────────────────── */
 
@@ -284,9 +292,10 @@
   position: fixed;
   inset: 0;
   z-index: 60;
-  /* 遮罩：亮色下用低饱和的冷灰而不是纯黑，纯黑压在白底上会显脏 */
-  background: rgba(15, 23, 42, 0.42);
-  backdrop-filter: blur(2px);
+  /* 与 .settings-backdrop 同一套遮罩令牌：同为主界面之上的一层，
+     两处用不同参数时用户看不出差别，并排截图就能看出。 */
+  background: var(--scrim);
+  backdrop-filter: blur(var(--scrim-blur));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -434,11 +443,13 @@
 .bulk-check svg.checked { color: var(--accent); }
 
 /* 选中的行要有明显底色 —— 只靠左侧勾选框，长列表上分不清选没选 */
+/* 选中的行要有明显底色 —— 只靠左侧勾选框，长列表上分不清选没选。
+ * 行没有描边了（边界归 .feed-group 的卡），所以选中态用 inset 内阴影画一圈，
+ * 否则加深的背景色会和"暂停态"的 60% 透明度混在一起。 */
 .feed-row.picked {
   background: var(--accent-dim);
-  border-color: color-mix(in srgb, var(--fg) 26%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent);
 }
-.feed-group .feed-row.picked + .feed-row { margin-top: -1px; }
 
 /* 管理模式下右侧的编辑/刷新等单条按钮会挤，让它们让位 */
 @media (max-width: 640px) {
@@ -467,7 +478,8 @@
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: rgba(4, 6, 10, 0.62);
+  background: var(--scrim);
+  backdrop-filter: blur(var(--scrim-blur));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -482,9 +494,11 @@
   height: min(86vh, 720px);
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  /* 与 .modal 同档 12：规格里"弹窗 12px"只有一档，16 会让配置台看起来比
+     普通弹窗"软"一层，而它其实只是更大。 */
+  border-radius: var(--radius);
   overflow: hidden;
-  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.18);
+  box-shadow: var(--shadow-lg);
 }
 
 /* ── 左侧分类栏 ─────────────────────────────────────────── */
@@ -537,23 +551,36 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  /* 订阅分类自己带 .feeds-page 的内边距约定，这里不能重复加 ——
-     否则订阅列表会比其它分类多缩进一层。左右内边距由 .feeds-page
-     与 .settings-section 各自提供，body 只管滚动。 */
+  /* 正文区下沉一层，卡片与列表行保持纯白 —— 层次由底色分带承担，
+     1px 描边退成补充。分类栏本来就是 --bg，底色一放下去，
+     左侧导航与右侧内容自动分开，border-right 不再是唯一的分界。
+     左右内边距由 .feeds-page 与 .settings-section 各自提供，body 只管滚动。 */
   padding: 0;
+  background: var(--bg-sunken);
 }
 .settings-section { padding: 22px 26px 32px; max-width: 720px; }
 .settings-sec-head { margin-bottom: 18px; }
 .settings-sec-head h2 {
-  font-size: 17px;
-  font-weight: 620;
-  margin: 0 0 5px;
+  /* 20 而不是 17：17 夹在 14 的卡片标题与 13 的说明之间，只有 3px 的差，
+     配上同样的灰，标题看起来像"第一行说明"。页标题要独占一档。 */
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 8px;
   display: flex;
   align-items: center;
   gap: 9px;
   flex-wrap: wrap;
 }
-.settings-sec-head .muted { margin: 0; font-size: 13px; line-height: 1.55; }
+/* 40em（13px 下约 520px、40 个汉字一行）比 34em 更合适：34em 只有 34 个字，
+   AI 那一页的说明会从四行涨到五行，末行只剩「下。」—— 那是行宽太窄换来的
+   另一种难看。40 是"能少一行"与"不超过 45 字"之间的取值。
+   text-wrap: pretty 负责收尾：避免孤字成行，浏览器不支持时按普通换行处理。 */
+.settings-sec-head .muted,
+.settings-body .hint {
+  max-width: 40em;
+  text-wrap: pretty;
+}
+.settings-sec-head .muted { margin: 0; font-size: 13px; line-height: 1.65; }
 
 .settings-actions { display: flex; gap: 8px; margin: 18px 0 14px; flex-wrap: wrap; }
 
@@ -626,14 +653,14 @@
    不是整页。34 个源的列表往下滚之后「添加订阅」必须还能点到 ——
    这是 m1-06 ⑤ 的原始要求，不能因为换了容器就丢掉。
    只去掉 box-shadow：弹窗已经有面板边框，再叠一条阴影会显得脏。
-   背景要显式给 --bg-elev（弹窗底色），不能继承 --bg：
-   否则吸顶块和弹窗底色差一层，滚动时能看见一条色带。 */
+   背景必须跟 .settings-body 的 --bg-sunken 一致：吸顶块要是底色不同，
+   滚动时就会在标题下方露出一条色带（比"没吸顶"更难看）。 */
 .settings-body .feeds-head {
   position: sticky;
   top: 0;
   z-index: 5;
   padding: 22px 0 14px;
-  background: var(--bg-elev);
+  background: var(--bg-sunken);
   box-shadow: none;
 }
 .settings-body .modal-inset { position: fixed; }
@@ -647,8 +674,12 @@
   gap: 6px;
   flex-wrap: wrap;
 }
-/* 前进动作与集合操作之间留 4px：视觉分组，不加分隔竖线 */
-.feeds-actions .btn.primary { margin-left: 4px; }
+/* 前进动作与集合操作之间留 8px：视觉分组，不加分隔竖线。
+   6px 的基础间距不够把"一组动作"和"一个动作"分开，抬到 8 才读得出分组。 */
+.feeds-actions .btn.primary { margin-left: 8px; }
+/* 幽灵按钮的默认字色是 --fg-faint，只适合零散出现在正文里的动作。
+   四个连排成一排时会整片发灰、看着像禁用态，工具条里抬一档到 --fg-dim。 */
+.feeds-actions .btn.ghost { --btn-fg: var(--fg-dim); }
 
 /* ── 分组下拉栏（§15.15：≥3 个分组时替换 chip 行）─────────── */
 .folder-filter.select-mode {
@@ -678,8 +709,8 @@
    v6.2：38 → 36 —— 同一行里的输入框（.add-row 内）与按钮都是 36，
    只有这个下拉是 38，整行就会差 2px。 */
 .add-folder {
-  height: 36px;
-  font-size: 13px;
+  height: var(--btn-h);
+  font-size: 14px;
   padding: 0 9px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
@@ -779,9 +810,11 @@
     transform 150ms ease-out,
     border-color 150ms ease-out;
 }
+/* hover 只提阴影、不提位置：配置页的卡片不是控件，点不出任何东西。
+ * 整页横穿鼠标时六张卡依次抬起 2px，读到的是"这里可以点"，
+ * 而它其实只是容器 —— 上浮留给真正可点击的卡片（`.settings-card.is-clickable`）。 */
 .settings-card:hover {
   box-shadow: var(--shadow);
-  transform: translateY(-2px);
   border-color: #dbe1e9;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -902,16 +935,35 @@
 
 .ai-level-ok { border-left-color: var(--ok, #4ade80); }
 .ai-level-ok .ai-level-dot { background: var(--ok, #4ade80); }
-/* 自检的"有降级"：不是失败，但也不能涂绿 —— 用户来跑自检就是为了看见它 */
-.ai-level-warn { border-left-color: var(--worth); }
-.ai-level-warn .ai-level-dot { background: var(--worth); }
-.ai-level-fast_only { border-left-color: var(--worth); }
-.ai-level-fast_only .ai-level-dot { background: var(--worth); }
-.ai-level-stop { border-left-color: var(--must); }
-.ai-level-stop .ai-level-dot { background: var(--must); }
+/* 自检的"有降级"：不是失败，但也不能涂绿 —— 用户来跑自检就是为了看见它。
+ *
+ * 异常档位除左边那道 3px 之外再给一层同色系极浅底。只有一根 3px 竖线时，
+ * "已暂停"与"正常运行"在余光里长得一样，而这两档要用户做的事完全不同
+ * （一个可以走开，一个得去填 key）。底色高度相同、宽度相同，唯一变化的是
+ * 颜色浓度 —— 这正是"严重程度"该有的表达方式。 */
+.ai-level-warn,
+.ai-level-fast_only {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--bg));
+}
+.ai-level-warn .ai-level-dot,
+.ai-level-fast_only .ai-level-dot { background: var(--warn); }
+
+/* 暂停用 --err，不用 --must：--must 的取值就是 --accent（分级「必读」的同一个蓝），
+ * 于是这条"已暂停"的竖线和主按钮同色 —— 一个需要处理的状态，长得像一个主行动。 */
+.ai-level-stop {
+  border-left-color: var(--err);
+  background: color-mix(in srgb, var(--err) 8%, var(--bg));
+}
+.ai-level-stop .ai-level-dot { background: var(--err); }
+.ai-level-stop .ai-level-text { color: var(--err); }
 
 .ai-level-text { font-weight: 500; }
 .ai-level-reason { color: var(--fg-faint); }
+/* 异常档位的说明跟着提到正文色：底色已经带色，再用 --fg-faint
+ * 就成了"彩色底上的浅灰字"，对比度反而比静止时更低。 */
+.ai-level-fast_only .ai-level-reason,
+.ai-level-stop .ai-level-reason { color: var(--fg-dim); }
 
 /* 「测试连接」的结论卡（v2.8）。
  *
@@ -930,7 +982,13 @@
   border-left: 3px solid var(--fg-faint);
 }
 .ai-test-ok { border-left-color: var(--ok, #4ade80); }
-.ai-test-err { border-left-color: var(--must); }
+/* 失败与「已暂停」同一档色：两者都是"现在别指望有摘要"，用一个 --err
+ * 才让用户形成"红 = 去处理"的一致判断。 */
+.ai-test-err {
+  border-left-color: var(--err);
+  background: color-mix(in srgb, var(--err) 8%, var(--bg));
+}
+.ai-test-err .ai-test-text { color: var(--err); }
 
 .ai-test-head {
   display: flex;
@@ -947,7 +1005,7 @@
   align-self: center;
 }
 .ai-test-ok .ai-test-dot { background: var(--ok, #4ade80); }
-.ai-test-err .ai-test-dot { background: var(--must); }
+.ai-test-err .ai-test-dot { background: var(--err); }
 .ai-test-text { font-weight: 500; }
 /* kind 是给"搜索这段报错"用的，不是给人读的：等宽 + 弱化，别抢结论 */
 .ai-test-kind {
@@ -995,8 +1053,11 @@
 }
 .ai-kv dd { margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
 /* 括号里的补充（"（失败 332）""（532 篇失败）"）比主数字再退一档：
-   同一行里两个 13px 数字会让人以为是并列的两个指标。 */
+   同一行里两个 13px 数字会让人以为是并列的两个指标。
+   但"失败"两个字要能被扫到，所以它退字号不退颜色 —— 用 --err，
+   与"已暂停"的横幅同色，形成"红 = 去处理"的一致判断。 */
 .ai-kv dd .muted { font-size: 12px; }
+.ai-kv dd .ai-kv-fail { font-size: 12px; color: var(--err); }
 
 /* 金额两格放大一档（v2.8）。四格同字号时，"今日花费 $0.916 / $1"
  * 与"今日调用 472 次"权重一样，用户得逐格读才知道哪格在回答
@@ -1013,15 +1074,23 @@
    它不能进 dd —— dd 是 flex 行，塞进去会被金额和"$1"挤成一条横线。 */
 .ai-kv-primary .ai-bar { display: block; margin-top: 6px; }
 
-/* 预算进度条。只在有额度时显示 —— 不限额时画一条空条只会让人以为"用完了" */
+/* 预算进度条。只在有额度时显示 —— 不限额时画一条空条只会让人以为"用完了"。
+ *
+ * 6px 而不是 3px：3px 在白底上是一条"装饰线"，用户读到的是"这里有个东西"，
+ * 而不是"我用掉了多少"。6px 是能读出比例、又不至于比金额本身更重的最小值。
+ * 宽度撑满所在格（上限 260）：180 的短条在四格里像一枚徽标，比例读不准。
+ *
+ * 填充色按档位（.ai-bar-ok / -fast_only / -stop，由 AiSection 写在 class 上）：
+ * 条本身就能回答"为什么没分析"，比在条上做渐变多一件真事 —— 而渐变
+ * 在这里只会把状态编码变成装饰（§6.1 的"不用渐变"同理）。 */
 .ai-bar {
   display: block;
-  height: 3px;
+  height: 6px;
   border-radius: 999px;
   background: var(--bg-active);
-  margin-top: 5px;
+  margin-top: 6px;
   overflow: hidden;
-  max-width: 180px;
+  max-width: 260px;
 }
 
 .ai-bar > span {
@@ -1029,6 +1098,13 @@
   height: 100%;
   background: var(--accent);
   border-radius: 999px;
+  transition: width 150ms ease-out;
+}
+.ai-bar-fast_only > span { background: var(--warn); }
+.ai-bar-stop > span { background: var(--err); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-bar > span { transition-duration: 1ms; }
 }
 
 .field-row {
@@ -1042,26 +1118,42 @@
 }
 
 .settings-card .field { display: block; margin-bottom: 12px; }
+/* 标签 14/500、输入框 36：与规格 §6.3 一致，也与同一张卡里的按钮同档。
+ * 原来标签 12、输入框 32 —— 12 的标签在视觉上属于"元信息"，
+ * 它一退，输入框就跟着变成一小截，整张卡的重心散了。 */
 .settings-card .field-label {
   display: block;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--fg-dim);
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 .settings-card .field input {
   width: 100%;
   box-sizing: border-box;
-  padding: 7px 10px;
-  font-size: 13px;
+  height: var(--btn-h);
+  padding: 0 12px;
+  font-size: 14px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  /* 描边用 --border-input（比卡片描边深一档）：输入框是"可写的东西"，
+     在纯白卡片上如果和卡片同一条灰，就只剩一个光标在闪。 */
+  border: 1px solid var(--border-input);
   background: var(--bg);
   color: var(--fg);
   font-family: inherit;
+  transition:
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out;
 }
+.settings-card .field input:hover:not(:focus) { border-color: #9ca3af; }
+/* 聚焦：描边转主色 + 2px offset 环（与 .btn / .search-box 同一套）。
+   用 box-shadow 而不是加粗 border，盒子尺寸不变、不推挤下面的字段。 */
 .settings-card .field input:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow:
+    0 0 0 2px var(--ring-offset),
+    0 0 0 4px var(--focus-ring);
 }
 
 /* ── 划词高亮（M4 / §11.3）──────────────────────────────────

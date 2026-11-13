@@ -189,7 +189,11 @@
 
 .hint.warn { color: var(--warn); }
 
-/* 订阅源列表 */
+/* 订阅源列表。
+ *
+ * 行本身不带边框：边界由 .feed-group 那张卡承担（feeds.css），行只负责用
+ * 一条 --border-soft 分隔。以前每行四边描边、相邻行靠 margin-top:-1px 拼边，
+ * 结果每组是一张"小表"，组头还悬在表外 —— 四组叠起来像四张表，不像四个对象。 */
 .feed-list { list-style: none; margin: 0; padding: 0; }
 
 .feed-row {
@@ -197,12 +201,9 @@
   align-items: center;
   gap: 12px;
   padding: 11px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  margin-bottom: 8px;
-  background: var(--bg-elev);
+  background: var(--bg);
 }
-.feed-row.broken { border-color: color-mix(in srgb, var(--err) 30%, transparent); }
+.feed-row.broken { background: color-mix(in srgb, var(--err) 3%, var(--bg)); }
 .feed-row.paused { opacity: 0.6; }
 
 .feed-icon {
@@ -286,9 +287,46 @@
   color: var(--fg-faint);
   font-weight: 500;
 }
-.tag.bad { background: color-mix(in srgb, var(--err) 15%, transparent); color: var(--must); }
+.tag.bad { background: color-mix(in srgb, var(--err) 15%, transparent); color: var(--err); }
 
-.feed-ops { display: flex; gap: 2px; align-items: center; flex-shrink: 0; }
+/* 行内操作条。
+ *
+ * 三件事：
+ *  ① 间距 6 而不是 2。28px 的图标在 30px 的中心距上几乎贴着，
+ *     一排五个看起来像一块噪点，中间没有可落脚的空隙。
+ *  ② 命中区不再外扩。.icon-btn::after 默认撑到 44×44，那是给孤立图标准备的；
+ *     一排相邻按钮上，相邻两个 44 的矩形会互相压盖 14px，而 DOM 靠后的那个
+ *     赢了命中 —— 点左边图标的右沿，事件落在右边的邻居上。
+ *     行本身有 64px 高，不缺命中区。
+ *  ③ 静止 55% 透明度，行 hover / 获得焦点时拉满。不用 0：
+ *     0 的元素拿到键盘焦点时仍然看不见，而且操作项"忽然出现"会让标题横跳。 */
+.feed-ops {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.feed-ops .icon-btn::after { width: 100%; height: 100%; }
+/* 这一段重复了 .icon-btn 原有的过渡列表：transition 是单一属性，
+   只写 opacity 会把背景色/位移的过渡一起清掉。 */
+.feed-ops .icon-btn {
+  opacity: 0.55;
+  transition:
+    opacity 150ms ease-out,
+    background-color var(--btn-t) var(--btn-ease),
+    color var(--btn-t) var(--btn-ease),
+    border-color var(--btn-t) var(--btn-ease),
+    transform var(--btn-t) var(--btn-ease);
+}
+.feed-row:hover .feed-ops .icon-btn,
+.feed-row:focus-within .feed-ops .icon-btn { opacity: 1; }
+/* 触摸屏没有 hover：常驻可见，否则永远点不到 */
+@media (hover: none) {
+  .feed-ops .icon-btn { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .feed-ops .icon-btn { transition-duration: 1ms; }
+}
 
 .feed-unread {
   font-size: 12px;
@@ -300,12 +338,13 @@
   border-radius: var(--radius-pill);
   /* v3.0：青绿底 + 青绿字改成中性底 + 次级墨字。
      一排源行会有七八个未读数，全染强调色等于把「AI 判断」的颜色
-     用在导航计数上 —— 而且看上去像一排标签，比数字本身还抢眼。 */
+     用在导航计数上 —— 而且看上去像一排标签，比数字本身还抢眼。
+     字重抬到 600：这是列表里最该被读到的数字，颜色不动、重量动。 */
   background: var(--bg-active);
-  color: var(--fg-dim);
+  color: var(--fg);
+  font-weight: 600;
   text-align: center;
-  margin-right: 4px;
-  font-weight: 500;
+  margin-right: 2px;
 }
 .icon-btn.danger:hover { color: var(--must); background: color-mix(in srgb, var(--err) 10%, transparent); }
 

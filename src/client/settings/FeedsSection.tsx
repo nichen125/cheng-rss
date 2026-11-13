@@ -361,8 +361,12 @@ export function FeedsSection(props: { onClose: () => void }) {
           </p>
         </div>
         <div className="feeds-actions">
+          {/* 动作条的主次靠底色分（§6.1）：只有「+ 添加订阅」是前进动作，
+              管理 / 导出 / 导入是集合级低频操作，用幽灵按钮。
+              四个描边按钮并排时，界面读起来就是"四块砖加一个蓝块"。 */}
           {/* 复活失效源（§15.23，v1.17）。只在确实有失效源时出现 ——
-              没有坏源时它就是一个永远按不出效果的按钮。 */}
+              没有坏源时它就是一个永远按不出效果的按钮。
+              它保留描边而不是幽灵：这是"有问题，去处理"，需要被看见。 */}
           {brokenCount > 0 && (
             <button
               className="btn"
@@ -374,17 +378,17 @@ export function FeedsSection(props: { onClose: () => void }) {
             </button>
           )}
           <button
-            className={`btn ${bulkMode ? 'active' : ''}`}
+            className={`btn ghost ${bulkMode ? 'active' : ''}`}
             onClick={() => (bulkMode ? exitBulk() : enterBulk())}
             disabled={feeds.length === 0}
             aria-pressed={bulkMode}
           >
             {bulkMode ? '退出管理' : '管理'}
           </button>
-          <button className="btn" onClick={() => void exportOpml()} disabled={feeds.length === 0}>
+          <button className="btn ghost" onClick={() => void exportOpml()} disabled={feeds.length === 0}>
             导出 OPML
           </button>
-          <button className="btn" onClick={() => fileRef.current?.click()} disabled={busy}>
+          <button className="btn ghost" onClick={() => fileRef.current?.click()} disabled={busy}>
             导入 OPML
           </button>
           <input

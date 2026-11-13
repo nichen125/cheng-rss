@@ -217,8 +217,8 @@ function HighlightCard(props: {
               />
             ))}
             <span className="spacer" />
-            <button className="btn sm" onClick={props.onDelete}>删除</button>
-            <button className="btn sm" onClick={cancel}>取消</button>
+            <button className="btn tiny" onClick={props.onDelete}>删除</button>
+            <button className="btn tiny" onClick={cancel}>取消</button>
             <button
               className="btn sm primary"
               onClick={() => { props.onSaveNote(note); props.onEdit(); }}

@@ -66,9 +66,12 @@ const LEVEL_LABEL: Record<string, string> = {
   stop: '已暂停',
 };
 
-const KEY_SOURCE_LABEL: Record<AiConfigView['keySource'], string> = {
-  file: '界面上填的（data/secrets.json）',
-  env: '环境变量',
+/** 卡片头的状态标签：只说"有没有、从哪来"，路径交给下面的说明段。
+ *  卡片头是 14px 的标题行，塞不进 "data/secrets.json" 这种技术路径 ——
+ *  它会把标题顶成一个两行的小段落，而那几个字对"要不要填 key"没有帮助。 */
+const KEY_SOURCE_SHORT: Record<AiConfigView['keySource'], string> = {
+  file: '已配置',
+  env: '来自环境变量',
   none: '未配置',
 };
 
@@ -295,7 +298,7 @@ export function AiSection() {
       <section className="settings-card">
         <div className="settings-card-head">
           <h3>运行状态</h3>
-          <button className="btn sm" onClick={() => void reload()} disabled={busy}>
+          <button className="btn tiny" onClick={() => void reload()} disabled={busy}>
             <IconRefresh size={14} /> 刷新
           </button>
         </div>
@@ -331,7 +334,7 @@ export function AiSection() {
                 一个弹性项，会被挤在金额右边拉成一条长条。放在这里它是普通
                 块级元素，自然落在金额下面一行，宽度由 .ai-bar 自己定。 */}
             {stats && stats.dailyLimit > 0 && (
-              <span className="ai-bar" aria-hidden="true">
+              <span className={`ai-bar ai-bar-${stats.level}`} aria-hidden="true">
                 <span style={{ width: `${pct(stats.todayUsd, stats.dailyLimit)}%` }} />
               </span>
             )}
@@ -348,7 +351,7 @@ export function AiSection() {
             <dd>
               {stats?.todayCalls ?? 0} 次
               {stats && stats.todayFailures > 0 && (
-                <span className="muted">（失败 {stats.todayFailures}）</span>
+                <span className="ai-kv-fail">（失败 {stats.todayFailures}）</span>
               )}
             </dd>
           </div>
@@ -356,7 +359,9 @@ export function AiSection() {
             <dt>已分析 / 失败</dt>
             <dd>
               {stats?.analyzed ?? 0} 篇
-              {stats && stats.failed > 0 && <span className="muted">（{stats.failed} 篇失败）</span>}
+              {stats && stats.failed > 0 && (
+                <span className="ai-kv-fail">（{stats.failed} 篇失败）</span>
+              )}
             </dd>
           </div>
         </dl>
@@ -383,18 +388,30 @@ export function AiSection() {
       <section className="settings-card" id="ai-key-card">
         <div className="settings-card-head">
           <h3>API Key</h3>
-          <span className="muted" data-testid="key-source">
-            当前来源：{KEY_SOURCE_LABEL[cfg?.keySource ?? 'none']}
+          {/* 卡片头只说状态。原来这里放的是「当前来源：界面上填的
+              （data/secrets.json） · sk-…2q89」—— 一个技术路径，12px，
+              和 14px 的标题同一基线，读起来像第二个标题；
+              而且 data/secrets.json 下面那段又说了一遍。 */}
+          <span className="tag" data-testid="key-source">
+            {KEY_SOURCE_SHORT[cfg?.keySource ?? 'none']}
             {cfg?.keyMasked ? ` · ${cfg.keyMasked}` : ''}
           </span>
         </div>
 
+        {/* 说明跟着 key 的来源分支：原来无论 key 从哪来，第一句都是
+            "存在 data/secrets.json" —— key 来自环境变量时这句是假的。 */}
         <p className="hint">
-          存在 <code>data/secrets.json</code>（权限收紧到仅当前用户）。
-          <strong>不会写进数据库，所以备份包、导出、迁移里都不含它</strong> ——
-          换机器时要重新填一次。
-          {cfg?.keySource === 'env' && (
-            <> 环境变量 <code>{cfg.apiKeyEnv}</code> 里已有一个；这里填的会<strong>覆盖</strong>它。</>
+          {cfg?.keySource === 'env' ? (
+            <>
+              当前用的是环境变量 <code>{cfg.apiKeyEnv}</code> 里的 key；这里填的会
+              <strong>覆盖</strong>它，删掉后回落到环境变量。
+            </>
+          ) : (
+            <>
+              存在 <code>data/secrets.json</code>（权限收紧到仅当前用户）。
+              <strong>不会写进数据库，所以备份包、导出、迁移里都不含它</strong> ——
+              换机器时要重新填一次。
+            </>
           )}
         </p>
 
@@ -421,8 +438,12 @@ export function AiSection() {
           <button className="btn" onClick={() => void testKey()} disabled={keyBusy || !cfg?.hasKey}>
             <IconRefresh size={14} /> 测试连接
           </button>
+          {/* 危险动作推到最右、且不占底色：这一排已经有主按钮（实心蓝）
+              与次按钮（描边），再来一块淡红底就是三块砖。
+              与「保存」隔开也是防误点 —— 两个相邻按钮一个存一个删。 */}
+          <div className="grow" />
           <button
-            className="btn danger" onClick={() => void saveKey('')}
+            className="btn danger plain" onClick={() => void saveKey('')}
             disabled={keyBusy || cfg?.keySource !== 'file'}
             title={cfg?.keySource === 'file' ? '删除文件里的 key，回落到环境变量' : '当前 key 不在文件里'}
           >

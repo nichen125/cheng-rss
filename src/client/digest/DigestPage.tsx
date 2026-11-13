@@ -199,7 +199,7 @@ export function DigestPage(props: DigestPageProps) {
             </button>
           ) : (
             <button
-              className="btn sm"
+              className="btn tiny"
               onClick={() => void generate()}
               title="立刻生成今天的简报（跳过定时）"
             >
@@ -421,7 +421,7 @@ export function DigestPage(props: DigestPageProps) {
                 <span className="muted"> · 成本 ${Number(detail.costUsd).toFixed(4)}</span>
               )}
               <span className="spacer" />
-              <button className="btn sm" onClick={() => void generate()} disabled={generating}>
+              <button className="btn tiny" onClick={() => void generate()} disabled={generating}>
                 {generating ? '生成中…' : '重新生成今天这份'}
               </button>
             </div>
